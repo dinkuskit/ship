@@ -1,0 +1,12 @@
+{
+  "name": "@dinkuskit/ship",
+  "version": "0.0.0",
+  "description": "Parking-lot repository for DinkusKit shipping. Shape is not decided.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dinkuskit/ship.git"
+  }
+}
