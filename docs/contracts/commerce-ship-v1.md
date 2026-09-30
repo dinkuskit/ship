@@ -1,0 +1,150 @@
+# Minimal Commerce ↔ Ship contract (document, not code)
+
+Recommended v1 document contract. No implementation. Ship must not require
+Inventory. Commerce remains source of paid money. Vendor, account, and funding
+are unselected. Every new numeric, origin, package, and service limit below is
+**proposed, not approved**.
+
+## Ownership
+
+| Concern | Owner |
+| --- | --- |
+| Order identity, line items, paid totals | Commerce |
+| Shopper shipping charge (free or flat-rate) | Commerce |
+| Checkout address collection | Commerce (for example Stripe hosted Checkout) |
+| Postage quote, purchase, label, tracking ingest | Ship, when installed |
+| Manual fulfillment without Ship | Commerce |
+| On-hand stock | Inventory, if present; never required |
+
+## Identity, tenant, and idempotency
+
+- `commerce_order_id` (stable)
+- `order_revision` (monotonic; Ship records the revision it acted on)
+- `shop_id` / merchant tenant
+- `ship_operation_id` (Ship-generated purchase attempt identity)
+- `idempotency_key` (caller-supplied; required on buy)
+- Provider shipment/transaction/label ids once known
+
+A buy is tenant-authorized and merchant-attended. The idempotency key is
+scoped to tenant plus order. Same key plus same request fingerprint retries
+the same operation. Same key plus a different fingerprint is rejected. A new
+buy uses a new `ship_operation_id`. A reprint or status poll reuses the
+durable label identity. Unknown provider responses stay `purchase_unknown`
+until reconciled by that provider’s retry/retrieve rules. Unknown remains
+blocked from a new buy until reconciled. Do not create a second purchase to
+resolve unknown.
+
+## Address and consent
+
+Ship accepts a fulfillment destination only after Commerce records shopper
+address consent (Checkout collection or an explicit merchant edit).
+
+Minimized recipient data:
+
+- name
+- company (optional)
+- address lines, city, region, postal code
+- country (`US` for approved v1)
+- phone only if the selected service requires it
+
+Do not send cart contents, payment instruments, or full customer profile.
+
+## Package, origin, service
+
+Exact units are **contract proposals**, not approved product locks. Do not
+impose integer ounces; lightweight parcels need decimal precision.
+
+Proposed fields:
+
+- weight: decimal value plus `weight_unit` (`oz` or `lb`)
+- dimensions: length, width, height plus `dimension_unit` (`in`)
+- money: decimal amount plus ISO `currency` (postage and fees never rewrite
+  paid Commerce totals)
+- `packaging_type` (proposed first kernel: rectangular parcel)
+- origin: street, city, region, postal, country; merchant ship-from identity
+- `carrier` (`usps` for approved v1)
+- `service` (token plus human label)
+- `quote_id`, `quote_amount`, `quote_currency`, `quote_expires_at`
+
+**Proposed, not approved, per attended purchase:** exactly one U.S. ship-from
+origin and exactly one rectangular parcel. **Proposed service allowlist, not
+approved:** USPS Ground Advantage and Priority Mail only.
+
+## Funding and confirmation
+
+- `funding_identity` (opaque: merchant postage account, platform wallet, or
+  unselected)
+- `merchant_confirmation` required: tenant-authorized Buy label click, actor,
+  timestamp
+- Quote shown to the merchant immediately before confirmation; expired quotes
+  cannot be purchased
+
+Automatic purchase on packed/ready is out of v1.
+
+## Money
+
+Commerce fields, immutable after payment:
+
+- `amount_subtotal`
+- `shopper_shipping_amount`
+- `amount_tax` (if any)
+- `amount_total`
+- `currency`
+
+Ship fields, never written back onto paid totals:
+
+- `quoted_postage_amount`
+- `purchased_postage_amount`
+- `provider_fee_amount` (if itemized)
+- `refund_amount`
+- `adjustment_amount` (APV or carrier)
+
+Shopper shipping charge and postage are distinct. Decimal money units above
+are proposals.
+
+## Outcomes
+
+Durable purchase outcomes: `not_started`, `quoted`, `purchase_pending`,
+`purchase_unknown`, `label_created`, `purchase_failed`, `void_requested`,
+`voided`, `refund_pending`, `refunded`, `refund_denied`.
+
+Separate print attempts: `print_not_started`, `print_offered`,
+`print_requested`, `print_confirmed` (only if a client reports physical
+print), `print_failed`. A purchased label is not proof of print. Opening a
+browser print dialog cannot claim successful physical print.
+
+Carrier fulfillment, separate from print: `label_created`, `dispatched`,
+`delivered`, plus provider tracking detail. Do not collapse these.
+
+## Recommended v1 limits (official USPS)
+
+Approved scope: U.S. domestic USPS only.
+
+Proposed first-kernel limits (not selected; using official USPS numbers as
+inputs):
+
+- destination country `US`
+- one proposed U.S. ship-from origin
+- one rectangular parcel
+- proposed services: Ground Advantage, Priority Mail
+- weight ≤ 70 lb (decimal weight allowed)
+- Ground Advantage: length+girth ≤ 130 in
+- Priority Mail: length+girth ≤ 108 in unless a later lock expands it
+- label format default `PDF` 4×6; PNG optional; ZPL later
+- browser PDF print offered; dialog ≠ physical print
+
+**Also proposed, not selected:** exclude territories, APO/FPO/DPO, customs
+forms, and HAZMAT. Those would narrow approved domestic-first scope and need
+an explicit later lock.
+
+## Credentials (design only)
+
+Public non-secret record: tenant, environment, account identifiers, and
+label/tracking/refund ids. Server secret binding and token lifecycle stay on
+the server. This contract does not claim OAuth or similar works without
+storing or accessing server secrets. No `.env` or credential is created here.
+
+## Out of contract
+
+Inventory events, automatic purchase, unattended print, international, UPS,
+FedEx, provider selection, live Stripe changes, and runtime proof.
