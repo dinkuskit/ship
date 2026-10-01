@@ -135,3 +135,65 @@ It is development-only, local, credential-free, and not a production bypass.
 Parent CUA screenshot capture remains the visual gate. Commerce remains
 **UNVERIFIED** against the exact immutable source binding; no Commerce writes
 were performed.
+
+## Acceptance closeout
+
+Acceptance is bounded to this same native Ship slice at code baseline
+`5c2f0a7`. No new implementation milestone was started, and no source,
+package, provider, account, secret, deployment, publication, or Commerce
+write was performed. The earlier local “screenshot pending” and
+source-mounted-host statements are superseded by the installed-package and
+parent-CUA evidence below.
+
+The parent CUA visibly exercised:
+
+`Orders → Open Order #1042 → Make a postage label → Shipping → Ship settings → Back to Orders/order detail`
+
+These are parent browser evidence, not an independent worker claim:
+
+```text
+runs/native-admin-ui-proof-20261001/screenshots/order-detail.jpg
+  2216fb2536510fa6d8dff1802ce6236e8e3882dfb14333248b4602ac5e83c3a7
+runs/native-admin-ui-proof-20261001/screenshots/ship-settings.jpg
+  99a707d7d0540c92b1d9bfdc3ace14e7d99c0d49095360736f8f6db20fd99d42
+runs/native-admin-ui-proof-20261001/screenshots/shipping-review.jpg
+  2ff06858cfbb3573a4341201257b2588861d26da8d36f4092ff84406c4bd0eb9
+```
+
+Closeout checks:
+
+```text
+npm test
+  9 passed, 0 failed
+SHA-256 dinkuskit-ship-0.0.0.tgz
+  b6877585b7b05e9aca5d16c15cb8aefc6ab8fb49f9913d1c95713d357dc70dee
+installed package
+  @dinkuskit/ship@0.0.0
+  native entry node_modules/@dinkuskit/ship/src/native/index.ts
+explicit TypeScript compilation
+  tsc --noEmit ... src/native/index.ts src/native/admin.ts: PASS
+installed native navigation/settings/no-provider regression
+  supported dev-bypass and authenticated Orders/settings HTTP 200;
+  expected native labels present; no provider action controls: PASS
+```
+
+The host’s `astro check` result remains `0 files, 0 errors, 0 warnings,
+0 hints`; it is host validation, not TypeScript compilation proof. Native
+source hashes at closeout remain:
+
+```text
+7745b5e0db326316adb7e4e3fb3c721e0fcb948717427260af0a671c1633e8b3  src/native/index.ts
+1bad7055ceefe5013b6dfe7d57d510127457f8a2edab4cd3acc5fbf71c7ec8e5  src/native/admin.ts
+```
+
+The parent-reported actual Commerce source SHA is
+`51ab023b14490e3bff821e5310dd1c323092df30`. Its files were inspected
+read-only; the exact trusted order/action seam remains **UNVERIFIED**.
+Merchant-funded postage is settled as a product boundary, not an acceptance
+gate.
+
+Remaining gates are unchanged: Registry publisher identity and security
+contact, public release/submission, Registry runner availability, actual
+Core/Commerce binding, and PB/provider/account/credential/production
+availability. Core and PB remain unknown where not independently proven.
+No repack was needed because code and package contents did not change.
