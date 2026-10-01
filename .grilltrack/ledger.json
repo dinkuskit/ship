@@ -1281,15 +1281,31 @@
           "review_source_identity": null,
           "to": "verified",
           "verification_ref": null
+        },
+        {
+          "at": "2026-10-01T16:36:24+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "verified",
+          "implementation_ref": "files:emdash-plugin.jsonc,src/plugin.js,package.json,README.md,docs/CITATIONS.md",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [
+            "human_gate"
+          ],
+          "review_ref": ".grilltrack/proof/firstslice-independent-review-20261001.md",
+          "review_result": "findings",
+          "review_source_identity": "git:938908e2fecca4b335a0f70460d489d2b9eedde5",
+          "to": "needs_reverification",
+          "verification_ref": ".grilltrack/proof/emdash-plugin-slice-20261001.md;test:npm test;package:npm pack --dry-run;import:node self-reference"
         }
       ],
       "id": "pb-registry-scaffold-001",
       "implementation_ref": "files:emdash-plugin.jsonc,src/plugin.js,package.json,README.md,docs/CITATIONS.md",
       "question": "What bounded implementation is admitted for the next PBsandbox milestone?",
       "rationale": "Preserves settled Commerce ownership, merchant-funded postage, USPS domestic scope, attended review, immutable paid totals, distinct fulfillment states, non-Inventory dependency, and the existing unknown-operation safety boundary.",
-      "repair_required": false,
+      "repair_required": true,
       "review_classifications": [
-        "human_gate"
+        "required_fix"
       ],
       "review_history": [
         {
@@ -1307,14 +1323,23 @@
           "result": "findings",
           "reviewed_at": "2026-10-01T16:33:22+00:00",
           "source_identity": "git:938908e2fecca4b335a0f70460d489d2b9eedde5"
+        },
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": ".grilltrack/proof/firstslice-independent-review-20261001.md",
+          "result": "findings",
+          "reviewed_at": "2026-10-01T16:36:24+00:00",
+          "source_identity": "git:d237936535bbf5d5442c47c9ae6b9fe01aca9b9a"
         }
       ],
       "review_ref": ".grilltrack/proof/firstslice-independent-review-20261001.md",
       "review_result": "findings",
-      "review_source_identity": "git:938908e2fecca4b335a0f70460d489d2b9eedde5",
-      "status": "verified",
+      "review_source_identity": "git:d237936535bbf5d5442c47c9ae6b9fe01aca9b9a",
+      "status": "needs_reverification",
       "superseded_by": null,
-      "updated_at": "2026-10-01T16:33:22+00:00",
+      "updated_at": "2026-10-01T16:36:24+00:00",
       "verification_ref": ".grilltrack/proof/emdash-plugin-slice-20261001.md;test:npm test;package:npm pack --dry-run;import:node self-reference"
     }
   ],
@@ -1345,5 +1370,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-01T16:33:22+00:00"
+  "updated_at": "2026-10-01T16:36:24+00:00"
 }
