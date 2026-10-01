@@ -1,0 +1,112 @@
+{
+  "base_provenance": "no-ledger-base",
+  "composed_review": false,
+  "composed_verification": false,
+  "decision_ids": [
+    "carrier-scope-v1",
+    "commerce-vs-ship-ownership",
+    "docs-only-slice",
+    "merchant-attended-purchase",
+    "money-and-states",
+    "no-inventory-dependency",
+    "pb-sandbox-contract-001",
+    "postage-api-unselected",
+    "vendor-account-funding"
+  ],
+  "decision_provenance": {
+    "carrier-scope-v1": [
+      {
+        "role": "current",
+        "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
+        "track_id": "ship-usps-feasibility-20260930"
+      }
+    ],
+    "commerce-vs-ship-ownership": [
+      {
+        "role": "current",
+        "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
+        "track_id": "ship-usps-feasibility-20260930"
+      }
+    ],
+    "docs-only-slice": [
+      {
+        "role": "current",
+        "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
+        "track_id": "ship-usps-feasibility-20260930"
+      }
+    ],
+    "merchant-attended-purchase": [
+      {
+        "role": "current",
+        "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
+        "track_id": "ship-usps-feasibility-20260930"
+      }
+    ],
+    "money-and-states": [
+      {
+        "role": "current",
+        "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
+        "track_id": "ship-usps-feasibility-20260930"
+      }
+    ],
+    "no-inventory-dependency": [
+      {
+        "role": "current",
+        "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
+        "track_id": "ship-usps-feasibility-20260930"
+      }
+    ],
+    "pb-sandbox-contract-001": [
+      {
+        "role": "incoming",
+        "source_identity": "git:3fa70ca37e51e89b8c1a93ecc1aa6a6f4fa2560a",
+        "track_id": "gt-20261001022111-56c6e0"
+      }
+    ],
+    "postage-api-unselected": [
+      {
+        "role": "current",
+        "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
+        "track_id": "ship-usps-feasibility-20260930"
+      }
+    ],
+    "vendor-account-funding": [
+      {
+        "role": "current",
+        "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
+        "track_id": "ship-usps-feasibility-20260930"
+      }
+    ]
+  },
+  "joined_track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
+  "needs_reverification": [
+    "carrier-scope-v1",
+    "commerce-vs-ship-ownership",
+    "docs-only-slice",
+    "merchant-attended-purchase",
+    "money-and-states",
+    "no-inventory-dependency",
+    "pb-sandbox-contract-001",
+    "postage-api-unselected"
+  ],
+  "plan_id": "ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
+  "refs": {
+    "base": "57ab06270faaadbb6497e4cad766aef9bd5b24bd",
+    "current": "d78c0f557e8124df5515c0ba414273b5231d8909",
+    "incoming": "3fa70ca37e51e89b8c1a93ecc1aa6a6f4fa2560a"
+  },
+  "schema": "grilltrack/reconcile/v1",
+  "snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
+  "snapshots": {
+    "base": {},
+    "current": {
+      "events.jsonl": "6806cc22e133a6407dfa269fce4897f93df52af7bb584fe334a51a43d00a4ebe",
+      "ledger.json": "a9f443859a15144209cf1c0f14aa8b4f492e7a9a7a66eeb4153aaf0b715da7b1"
+    },
+    "incoming": {
+      "events.jsonl": "c55cf16f75ba9c5d3e121695565f3fb93b441ec651c8ef477f7d9eb53382a748",
+      "ledger.json": "468553c6264a72068617765a8f199a6f20bf88b3c07e31934d698ed9fa50a908"
+    }
+  },
+  "title": "Ship PR4 reconciliation"
+}

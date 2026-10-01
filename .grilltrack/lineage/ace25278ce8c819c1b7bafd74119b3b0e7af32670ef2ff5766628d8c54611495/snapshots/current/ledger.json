@@ -1,8 +1,139 @@
 {
   "closeout": null,
-  "created_at": "2026-10-01T02:35:23+00:00",
-  "current_focus": null,
+  "created_at": "2026-09-30T18:29:43+00:00",
+  "current_focus": {
+    "cadence": "sequential",
+    "confirmed": true,
+    "confirmed_at": "2026-09-30T18:46:42+00:00",
+    "domain": "Parent source-review corrections to public Ship docs",
+    "started_at": "2026-09-30T18:46:42+00:00",
+    "status": "inspected",
+    "summary": "Apply the parent source-review corrections to public docs only. Confirmed product locks persist. Vendor/account/funding remains proposed and unselected. No kernel, accounts, credentials, postage, device work, commit, push, PR, merge, or closure. Do not claim clean formal review."
+  },
   "decisions": [
+    {
+      "baseline_ref": "docs/CHARTER.md",
+      "candidate_refs": [],
+      "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
+      "context_ref": "file:docs/CHARTER.md",
+      "created_at": "2026-09-30T18:29:58+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [],
+      "domain": "Confirmed Ship product locks, USPS research, and Commerce contract docs",
+      "history": [
+        {
+          "at": "2026-09-30T18:30:08+00:00",
+          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:33:56+00:00",
+          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:34:02+00:00",
+          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
+          "from": "implemented",
+          "implementation_ref": "file:docs/CHARTER.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:47:26+00:00",
+          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
+          "from": "verified",
+          "implementation_ref": "file:docs/CHARTER.md",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "needs_reverification",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        },
+        {
+          "at": "2026-09-30T18:49:43+00:00",
+          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
+          "from": "needs_reverification",
+          "implementation_ref": "file:docs/CHARTER.md",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": ".grilltrack/proof/parent-review-20260930.md",
+          "review_result": "findings",
+          "review_source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2",
+          "to": "implemented",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        },
+        {
+          "at": "2026-09-30T18:49:43+00:00",
+          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
+          "from": "implemented",
+          "implementation_ref": "file:docs/CHARTER.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        }
+      ],
+      "id": "commerce-vs-ship-ownership",
+      "implementation_ref": "file:docs/CHARTER.md",
+      "question": "What does Commerce own versus optional DinkusKit Ship, and what is required for coordinated Commerce v1?",
+      "rationale": "Trusted confirmed human choice. Optional installation does not make the capability optional for release readiness.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": ".grilltrack/proof/parent-review-20260930.md",
+          "result": "findings",
+          "reviewed_at": "2026-09-30T18:47:26+00:00",
+          "source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2"
+        }
+      ],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-09-30T18:49:43+00:00",
+      "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+    },
     {
       "baseline_ref": "docs/CHARTER.md",
       "candidate_refs": [],
@@ -101,26 +232,12 @@
           "review_source_identity": null,
           "to": "verified",
           "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-10-01T02:35:23+00:00",
-          "from": "verified",
-          "note": "fork composition invalidates prior current proof",
-          "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
-          "to": "needs_reverification"
         }
       ],
       "id": "carrier-scope-v1",
       "implementation_ref": "file:docs/research/usps-feasibility-20260930.md",
       "question": "What carrier and geography scope is approved for this slice?",
       "rationale": "Trusted confirmed human choice. Do not quietly shrink or expand this scope.",
-      "reconciliation_sources": [
-        {
-          "role": "current",
-          "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
-          "track_id": "ship-usps-feasibility-20260930"
-        }
-      ],
       "repair_required": false,
       "review_classifications": [],
       "review_history": [
@@ -137,286 +254,10 @@
       "review_ref": null,
       "review_result": null,
       "review_source_identity": null,
-      "status": "needs_reverification",
+      "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
-      "verification_ref": null
-    },
-    {
-      "baseline_ref": "docs/CHARTER.md",
-      "candidate_refs": [],
-      "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
-      "context_ref": "file:docs/CHARTER.md",
-      "created_at": "2026-09-30T18:29:58+00:00",
-      "deferred_reason": null,
-      "delivery_ref": null,
-      "dependencies": [],
-      "domain": "Confirmed Ship product locks, USPS research, and Commerce contract docs",
-      "history": [
-        {
-          "at": "2026-09-30T18:30:08+00:00",
-          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
-          "from": "proposed",
-          "implementation_ref": null,
-          "note": "user accepted the scoped decision",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "locked",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:33:56+00:00",
-          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
-          "from": "locked",
-          "implementation_ref": null,
-          "note": "bounded implementation recorded",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "implemented",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:34:02+00:00",
-          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
-          "from": "implemented",
-          "implementation_ref": "file:docs/CHARTER.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:47:26+00:00",
-          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
-          "from": "verified",
-          "implementation_ref": "file:docs/CHARTER.md",
-          "note": "adjudicated review requires a fix",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "needs_reverification",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-09-30T18:49:43+00:00",
-          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
-          "from": "needs_reverification",
-          "implementation_ref": "file:docs/CHARTER.md",
-          "note": "bounded implementation recorded",
-          "repair_required": true,
-          "review_classifications": [
-            "required_fix"
-          ],
-          "review_ref": ".grilltrack/proof/parent-review-20260930.md",
-          "review_result": "findings",
-          "review_source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2",
-          "to": "implemented",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-09-30T18:49:43+00:00",
-          "choice": "Commerce includes merchant-configured free or flat-rate checkout shipping charges and manual fulfillment/tracking. Optional Registry-enabled DinkusKit Ship owns automation. Usable USPS label purchase and printing inside DinkusKit is required for coordinated Commerce v1 launch even though Ship installation is optional.",
-          "from": "implemented",
-          "implementation_ref": "file:docs/CHARTER.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-10-01T02:35:23+00:00",
-          "from": "verified",
-          "note": "fork composition invalidates prior current proof",
-          "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
-          "to": "needs_reverification"
-        }
-      ],
-      "id": "commerce-vs-ship-ownership",
-      "implementation_ref": "file:docs/CHARTER.md",
-      "question": "What does Commerce own versus optional DinkusKit Ship, and what is required for coordinated Commerce v1?",
-      "rationale": "Trusted confirmed human choice. Optional installation does not make the capability optional for release readiness.",
-      "reconciliation_sources": [
-        {
-          "role": "current",
-          "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
-          "track_id": "ship-usps-feasibility-20260930"
-        }
-      ],
-      "repair_required": false,
-      "review_classifications": [],
-      "review_history": [
-        {
-          "classifications": [
-            "required_fix"
-          ],
-          "ref": ".grilltrack/proof/parent-review-20260930.md",
-          "result": "findings",
-          "reviewed_at": "2026-09-30T18:47:26+00:00",
-          "source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2"
-        }
-      ],
-      "review_ref": null,
-      "review_result": null,
-      "review_source_identity": null,
-      "status": "needs_reverification",
-      "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
-      "verification_ref": null
-    },
-    {
-      "baseline_ref": "package.json",
-      "candidate_refs": [],
-      "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
-      "context_ref": null,
-      "created_at": "2026-09-30T18:30:04+00:00",
-      "deferred_reason": null,
-      "delivery_ref": null,
-      "dependencies": [
-        "commerce-vs-ship-ownership"
-      ],
-      "domain": "Confirmed Ship product locks, USPS research, and Commerce contract docs",
-      "history": [
-        {
-          "at": "2026-09-30T18:30:08+00:00",
-          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
-          "from": "proposed",
-          "implementation_ref": null,
-          "note": "user accepted the scoped decision",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "locked",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:33:56+00:00",
-          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
-          "from": "locked",
-          "implementation_ref": null,
-          "note": "bounded implementation recorded",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "implemented",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:34:03+00:00",
-          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
-          "from": "implemented",
-          "implementation_ref": "file:README.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:47:26+00:00",
-          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
-          "from": "verified",
-          "implementation_ref": "file:README.md",
-          "note": "adjudicated review requires a fix",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "needs_reverification",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-09-30T18:49:43+00:00",
-          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
-          "from": "needs_reverification",
-          "implementation_ref": "file:README.md",
-          "note": "bounded implementation recorded",
-          "repair_required": true,
-          "review_classifications": [
-            "required_fix"
-          ],
-          "review_ref": ".grilltrack/proof/parent-review-20260930.md",
-          "review_result": "findings",
-          "review_source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2",
-          "to": "implemented",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-09-30T18:49:43+00:00",
-          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
-          "from": "implemented",
-          "implementation_ref": "file:README.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-10-01T02:35:23+00:00",
-          "from": "verified",
-          "note": "fork composition invalidates prior current proof",
-          "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
-          "to": "needs_reverification"
-        }
-      ],
-      "id": "docs-only-slice",
-      "implementation_ref": "file:README.md",
-      "question": "What may this slice change in the repository?",
-      "rationale": "Trusted confirmed human choice. Neutral description update is allowed if needed.",
-      "reconciliation_sources": [
-        {
-          "role": "current",
-          "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
-          "track_id": "ship-usps-feasibility-20260930"
-        }
-      ],
-      "repair_required": false,
-      "review_classifications": [],
-      "review_history": [
-        {
-          "classifications": [
-            "required_fix"
-          ],
-          "ref": ".grilltrack/proof/parent-review-20260930.md",
-          "result": "findings",
-          "reviewed_at": "2026-09-30T18:47:26+00:00",
-          "source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2"
-        }
-      ],
-      "review_ref": null,
-      "review_result": null,
-      "review_source_identity": null,
-      "status": "needs_reverification",
-      "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
-      "verification_ref": null
+      "updated_at": "2026-09-30T18:49:43+00:00",
+      "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
     },
     {
       "baseline_ref": "docs/CHARTER.md",
@@ -516,26 +357,12 @@
           "review_source_identity": null,
           "to": "verified",
           "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-10-01T02:35:23+00:00",
-          "from": "verified",
-          "note": "fork composition invalidates prior current proof",
-          "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
-          "to": "needs_reverification"
         }
       ],
       "id": "merchant-attended-purchase",
       "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
       "question": "How is a label purchased and printed in v1?",
       "rationale": "Trusted confirmed human choice. Purchase attempts stay separate from print attempts.",
-      "reconciliation_sources": [
-        {
-          "role": "current",
-          "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
-          "track_id": "ship-usps-feasibility-20260930"
-        }
-      ],
       "repair_required": false,
       "review_classifications": [],
       "review_history": [
@@ -552,495 +379,10 @@
       "review_ref": null,
       "review_result": null,
       "review_source_identity": null,
-      "status": "needs_reverification",
+      "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
-      "verification_ref": null
-    },
-    {
-      "baseline_ref": "docs/CHARTER.md",
-      "candidate_refs": [],
-      "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
-      "context_ref": null,
-      "created_at": "2026-09-30T18:30:04+00:00",
-      "deferred_reason": null,
-      "delivery_ref": null,
-      "dependencies": [
-        "commerce-vs-ship-ownership"
-      ],
-      "domain": "Confirmed Ship product locks, USPS research, and Commerce contract docs",
-      "history": [
-        {
-          "at": "2026-09-30T18:30:08+00:00",
-          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
-          "from": "proposed",
-          "implementation_ref": null,
-          "note": "user accepted the scoped decision",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "locked",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:33:56+00:00",
-          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
-          "from": "locked",
-          "implementation_ref": null,
-          "note": "bounded implementation recorded",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "implemented",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:34:03+00:00",
-          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
-          "from": "implemented",
-          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:47:26+00:00",
-          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
-          "from": "verified",
-          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-          "note": "adjudicated review requires a fix",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "needs_reverification",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-09-30T18:49:43+00:00",
-          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
-          "from": "needs_reverification",
-          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-          "note": "bounded implementation recorded",
-          "repair_required": true,
-          "review_classifications": [
-            "required_fix"
-          ],
-          "review_ref": ".grilltrack/proof/parent-review-20260930.md",
-          "review_result": "findings",
-          "review_source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2",
-          "to": "implemented",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-09-30T18:49:43+00:00",
-          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
-          "from": "implemented",
-          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-10-01T02:35:23+00:00",
-          "from": "verified",
-          "note": "fork composition invalidates prior current proof",
-          "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
-          "to": "needs_reverification"
-        }
-      ],
-      "id": "money-and-states",
-      "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-      "question": "Who owns monetary totals, and which fulfillment states are distinct?",
-      "rationale": "Trusted confirmed human choice. Postage cost differences must not rewrite accepted checkout totals.",
-      "reconciliation_sources": [
-        {
-          "role": "current",
-          "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
-          "track_id": "ship-usps-feasibility-20260930"
-        }
-      ],
-      "repair_required": false,
-      "review_classifications": [],
-      "review_history": [
-        {
-          "classifications": [
-            "required_fix"
-          ],
-          "ref": ".grilltrack/proof/parent-review-20260930.md",
-          "result": "findings",
-          "reviewed_at": "2026-09-30T18:47:26+00:00",
-          "source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2"
-        }
-      ],
-      "review_ref": null,
-      "review_result": null,
-      "review_source_identity": null,
-      "status": "needs_reverification",
-      "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
-      "verification_ref": null
-    },
-    {
-      "baseline_ref": "docs/CHARTER.md",
-      "candidate_refs": [],
-      "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
-      "context_ref": null,
-      "created_at": "2026-09-30T18:30:04+00:00",
-      "deferred_reason": null,
-      "delivery_ref": null,
-      "dependencies": [
-        "commerce-vs-ship-ownership"
-      ],
-      "domain": "Confirmed Ship product locks, USPS research, and Commerce contract docs",
-      "history": [
-        {
-          "at": "2026-09-30T18:30:08+00:00",
-          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
-          "from": "proposed",
-          "implementation_ref": null,
-          "note": "user accepted the scoped decision",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "locked",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:33:56+00:00",
-          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
-          "from": "locked",
-          "implementation_ref": null,
-          "note": "bounded implementation recorded",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "implemented",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:34:02+00:00",
-          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
-          "from": "implemented",
-          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-09-30T18:47:26+00:00",
-          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
-          "from": "verified",
-          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-          "note": "adjudicated review requires a fix",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "needs_reverification",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-09-30T18:49:43+00:00",
-          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
-          "from": "needs_reverification",
-          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-          "note": "bounded implementation recorded",
-          "repair_required": true,
-          "review_classifications": [
-            "required_fix"
-          ],
-          "review_ref": ".grilltrack/proof/parent-review-20260930.md",
-          "review_result": "findings",
-          "review_source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2",
-          "to": "implemented",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-09-30T18:49:43+00:00",
-          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
-          "from": "implemented",
-          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-10-01T02:35:23+00:00",
-          "from": "verified",
-          "note": "fork composition invalidates prior current proof",
-          "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
-          "to": "needs_reverification"
-        }
-      ],
-      "id": "no-inventory-dependency",
-      "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
-      "question": "May Ship depend on Inventory?",
-      "rationale": "Trusted confirmed human choice. Inventory remains nonblocking for Commerce v1.",
-      "reconciliation_sources": [
-        {
-          "role": "current",
-          "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
-          "track_id": "ship-usps-feasibility-20260930"
-        }
-      ],
-      "repair_required": false,
-      "review_classifications": [],
-      "review_history": [
-        {
-          "classifications": [
-            "required_fix"
-          ],
-          "ref": ".grilltrack/proof/parent-review-20260930.md",
-          "result": "findings",
-          "reviewed_at": "2026-09-30T18:47:26+00:00",
-          "source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2"
-        }
-      ],
-      "review_ref": null,
-      "review_result": null,
-      "review_source_identity": null,
-      "status": "needs_reverification",
-      "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
-      "verification_ref": null
-    },
-    {
-      "baseline_ref": "docs/CHARTER.md",
-      "candidate_refs": [],
-      "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-      "context_ref": "docs/decisions/pb-sandbox-interface-scope.md",
-      "created_at": "2026-10-01T02:21:11+00:00",
-      "deferred_reason": null,
-      "delivery_ref": null,
-      "dependencies": [],
-      "domain": "bounded local PB sandbox interface contract and proof boundary",
-      "history": [
-        {
-          "at": "2026-10-01T02:21:11+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "proposed",
-          "implementation_ref": null,
-          "note": "user accepted the scoped decision",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "locked",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-10-01T02:21:14+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "locked",
-          "implementation_ref": null,
-          "note": "bounded implementation recorded",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "implemented",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-10-01T02:21:14+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "implemented",
-          "implementation_ref": "src/pb-sandbox.js,src/state.js,src/server.js,src/public/index.html,src/commerce-status.js,docs/credentials-setup.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": null
-        },
-        {
-          "at": "2026-10-01T02:26:10+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "verified",
-          "implementation_ref": "src/pb-sandbox.js,src/state.js,src/server.js,src/public/index.html,src/commerce-status.js,docs/credentials-setup.md",
-          "note": "adjudicated review requires a fix",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": ".grilltrack/proof/pb-sandbox-review.md",
-          "review_result": "clean",
-          "review_source_identity": "sha256:a51d81ee08310b15fa69dc39e7fcb71c5d03aa33cd3bcba5ae90b286f0d5f250",
-          "to": "needs_reverification",
-          "verification_ref": "npm test; node --check src/*.js; local /api/status configured:false"
-        },
-        {
-          "at": "2026-10-01T02:26:13+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "needs_reverification",
-          "implementation_ref": "src/pb-sandbox.js,src/state.js,src/server.js,src/public/index.html,src/commerce-status.js,docs/credentials-setup.md",
-          "note": "bounded implementation recorded",
-          "repair_required": true,
-          "review_classifications": [
-            "required_fix"
-          ],
-          "review_ref": ".grilltrack/proof/pb-sandbox-review.md",
-          "review_result": "findings",
-          "review_source_identity": "sha256:a51d81ee08310b15fa69dc39e7fcb71c5d03aa33cd3bcba5ae90b286f0d5f250",
-          "to": "implemented",
-          "verification_ref": "npm test; node --check src/*.js; local /api/status configured:false"
-        },
-        {
-          "at": "2026-10-01T02:26:13+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "implemented",
-          "implementation_ref": "src/pb-sandbox.js,src/state.js,src/server.js,src/public/index.html,src/commerce-status.js,test/pb-sandbox.test.js,test-support/fixture-server.js,docs/decisions/pb-sandbox-interface-scope.md,README.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": "npm test; node --check src/*.js; local /api/status configured:false"
-        },
-        {
-          "at": "2026-10-01T02:30:44+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "verified",
-          "implementation_ref": "src/pb-sandbox.js,src/state.js,src/server.js,src/public/index.html,src/commerce-status.js,test/pb-sandbox.test.js,test-support/fixture-server.js,docs/decisions/pb-sandbox-interface-scope.md,README.md",
-          "note": "Reopen for final fixture PDF, success-link, CI, and proof-record repair after required review finding.",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "reopened",
-          "verification_ref": "npm test (7 passed); node --check src/*.js test-support/fixture-server.js; HTTP factory tests; fixture CUA pending parent"
-        },
-        {
-          "at": "2026-10-01T02:30:54+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "reopened",
-          "implementation_ref": "src/pb-sandbox.js,src/state.js,src/server.js,src/public/index.html,src/commerce-status.js,test/pb-sandbox.test.js,test-support/fixture-server.js,docs/decisions/pb-sandbox-interface-scope.md,README.md",
-          "note": "user accepted the scoped decision",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "locked",
-          "verification_ref": "npm test (7 passed); node --check src/*.js test-support/fixture-server.js; HTTP factory tests; fixture CUA pending parent"
-        },
-        {
-          "at": "2026-10-01T02:30:54+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "locked",
-          "implementation_ref": "src/pb-sandbox.js,src/state.js,src/server.js,src/public/index.html,src/commerce-status.js,test/pb-sandbox.test.js,test-support/fixture-server.js,docs/decisions/pb-sandbox-interface-scope.md,README.md",
-          "note": "bounded implementation recorded",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "implemented",
-          "verification_ref": "npm test (7 passed); node --check src/*.js test-support/fixture-server.js; HTTP factory tests; fixture CUA pending parent"
-        },
-        {
-          "at": "2026-10-01T02:30:54+00:00",
-          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
-          "from": "implemented",
-          "implementation_ref": "src/public/index.html,test-support/fixture-pdf.js,test-support/fixture-server.js,test/pb-sandbox.test.js,.github/workflows/ci.yml,README.md,proof/2026-09-30-pitney-bowes-sandbox/PROOF.md",
-          "note": "verification recorded in cumulative context",
-          "repair_required": false,
-          "review_classifications": [],
-          "review_ref": null,
-          "review_result": null,
-          "review_source_identity": null,
-          "to": "verified",
-          "verification_ref": "npm test (7 passed); node --check src/*.js test-support/fixture-server.js; HTTP factory tests; fixture CUA pending parent"
-        },
-        {
-          "at": "2026-10-01T02:35:23+00:00",
-          "from": "verified",
-          "note": "fork composition invalidates prior current proof",
-          "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
-          "to": "needs_reverification"
-        }
-      ],
-      "id": "pb-sandbox-contract-001",
-      "implementation_ref": "src/public/index.html,test-support/fixture-pdf.js,test-support/fixture-server.js,test/pb-sandbox.test.js,.github/workflows/ci.yml,README.md,proof/2026-09-30-pitney-bowes-sandbox/PROOF.md",
-      "question": "What is the bounded implementation?",
-      "rationale": "PR2 remains frozen and requires future reconciliation; this track is only a narrow sandbox exception.",
-      "reconciliation_sources": [
-        {
-          "role": "incoming",
-          "source_identity": "git:3fa70ca37e51e89b8c1a93ecc1aa6a6f4fa2560a",
-          "track_id": "gt-20261001022111-56c6e0"
-        }
-      ],
-      "repair_required": false,
-      "review_classifications": [],
-      "review_history": [
-        {
-          "classifications": [],
-          "ref": ".grilltrack/proof/pb-sandbox-review.md",
-          "result": "clean",
-          "reviewed_at": "2026-10-01T02:21:33+00:00",
-          "source_identity": "sha256:4a34c474ad615276dfc4a9f70571a87916fb98969349cedae5cdac3c846f08e8"
-        },
-        {
-          "classifications": [],
-          "ref": ".grilltrack/proof/pb-sandbox-review.md",
-          "result": "clean",
-          "reviewed_at": "2026-10-01T02:21:49+00:00",
-          "source_identity": "sha256:a51d81ee08310b15fa69dc39e7fcb71c5d03aa33cd3bcba5ae90b286f0d5f250"
-        },
-        {
-          "classifications": [
-            "required_fix"
-          ],
-          "ref": ".grilltrack/proof/pb-sandbox-review.md",
-          "result": "findings",
-          "reviewed_at": "2026-10-01T02:26:10+00:00",
-          "source_identity": "sha256:a51d81ee08310b15fa69dc39e7fcb71c5d03aa33cd3bcba5ae90b286f0d5f250"
-        }
-      ],
-      "review_ref": null,
-      "review_result": null,
-      "review_source_identity": null,
-      "status": "needs_reverification",
-      "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
-      "verification_ref": null
+      "updated_at": "2026-09-30T18:49:43+00:00",
+      "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
     },
     {
       "baseline_ref": "docs/CHARTER.md",
@@ -1140,26 +482,12 @@
           "review_source_identity": null,
           "to": "verified",
           "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
-        },
-        {
-          "at": "2026-10-01T02:35:23+00:00",
-          "from": "verified",
-          "note": "fork composition invalidates prior current proof",
-          "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
-          "to": "needs_reverification"
         }
       ],
       "id": "postage-api-unselected",
       "implementation_ref": "file:docs/decisions/vendor-account-funding-brief.md",
       "question": "May Ship use a third-party postage API, and is a vendor or funding model selected?",
       "rationale": "Trusted confirmed human choice. A recommendation is not a selection. No label kernel until vendor, account, and funding are decided.",
-      "reconciliation_sources": [
-        {
-          "role": "current",
-          "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
-          "track_id": "ship-usps-feasibility-20260930"
-        }
-      ],
       "repair_required": false,
       "review_classifications": [],
       "review_history": [
@@ -1176,10 +504,385 @@
       "review_ref": null,
       "review_result": null,
       "review_source_identity": null,
-      "status": "needs_reverification",
+      "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
-      "verification_ref": null
+      "updated_at": "2026-09-30T18:49:43+00:00",
+      "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+    },
+    {
+      "baseline_ref": "docs/CHARTER.md",
+      "candidate_refs": [],
+      "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
+      "context_ref": null,
+      "created_at": "2026-09-30T18:30:04+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [
+        "commerce-vs-ship-ownership"
+      ],
+      "domain": "Confirmed Ship product locks, USPS research, and Commerce contract docs",
+      "history": [
+        {
+          "at": "2026-09-30T18:30:08+00:00",
+          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:33:56+00:00",
+          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:34:02+00:00",
+          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
+          "from": "implemented",
+          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:47:26+00:00",
+          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
+          "from": "verified",
+          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "needs_reverification",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        },
+        {
+          "at": "2026-09-30T18:49:43+00:00",
+          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
+          "from": "needs_reverification",
+          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": ".grilltrack/proof/parent-review-20260930.md",
+          "review_result": "findings",
+          "review_source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2",
+          "to": "implemented",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        },
+        {
+          "at": "2026-09-30T18:49:43+00:00",
+          "choice": "Ship cannot depend on Inventory. Future packing-event integration must also support stores without Inventory.",
+          "from": "implemented",
+          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        }
+      ],
+      "id": "no-inventory-dependency",
+      "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+      "question": "May Ship depend on Inventory?",
+      "rationale": "Trusted confirmed human choice. Inventory remains nonblocking for Commerce v1.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": ".grilltrack/proof/parent-review-20260930.md",
+          "result": "findings",
+          "reviewed_at": "2026-09-30T18:47:26+00:00",
+          "source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2"
+        }
+      ],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-09-30T18:49:43+00:00",
+      "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+    },
+    {
+      "baseline_ref": "docs/CHARTER.md",
+      "candidate_refs": [],
+      "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
+      "context_ref": null,
+      "created_at": "2026-09-30T18:30:04+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [
+        "commerce-vs-ship-ownership"
+      ],
+      "domain": "Confirmed Ship product locks, USPS research, and Commerce contract docs",
+      "history": [
+        {
+          "at": "2026-09-30T18:30:08+00:00",
+          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:33:56+00:00",
+          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:34:03+00:00",
+          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
+          "from": "implemented",
+          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:47:26+00:00",
+          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
+          "from": "verified",
+          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "needs_reverification",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        },
+        {
+          "at": "2026-09-30T18:49:43+00:00",
+          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
+          "from": "needs_reverification",
+          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": ".grilltrack/proof/parent-review-20260930.md",
+          "review_result": "findings",
+          "review_source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2",
+          "to": "implemented",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        },
+        {
+          "at": "2026-09-30T18:49:43+00:00",
+          "choice": "Commerce owns canonical order and monetary totals. Shopper shipping charge and actual postage are distinct. Paid totals are immutable. label_created, dispatched, and delivered are separate states.",
+          "from": "implemented",
+          "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        }
+      ],
+      "id": "money-and-states",
+      "implementation_ref": "file:docs/contracts/commerce-ship-v1.md",
+      "question": "Who owns monetary totals, and which fulfillment states are distinct?",
+      "rationale": "Trusted confirmed human choice. Postage cost differences must not rewrite accepted checkout totals.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": ".grilltrack/proof/parent-review-20260930.md",
+          "result": "findings",
+          "reviewed_at": "2026-09-30T18:47:26+00:00",
+          "source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2"
+        }
+      ],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-09-30T18:49:43+00:00",
+      "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+    },
+    {
+      "baseline_ref": "package.json",
+      "candidate_refs": [],
+      "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
+      "context_ref": null,
+      "created_at": "2026-09-30T18:30:04+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [
+        "commerce-vs-ship-ownership"
+      ],
+      "domain": "Confirmed Ship product locks, USPS research, and Commerce contract docs",
+      "history": [
+        {
+          "at": "2026-09-30T18:30:08+00:00",
+          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:33:56+00:00",
+          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:34:03+00:00",
+          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
+          "from": "implemented",
+          "implementation_ref": "file:README.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-09-30T18:47:26+00:00",
+          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
+          "from": "verified",
+          "implementation_ref": "file:README.md",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "needs_reverification",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        },
+        {
+          "at": "2026-09-30T18:49:43+00:00",
+          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
+          "from": "needs_reverification",
+          "implementation_ref": "file:README.md",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": ".grilltrack/proof/parent-review-20260930.md",
+          "review_result": "findings",
+          "review_source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2",
+          "to": "implemented",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        },
+        {
+          "at": "2026-09-30T18:49:43+00:00",
+          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
+          "from": "implemented",
+          "implementation_ref": "file:README.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
+        }
+      ],
+      "id": "docs-only-slice",
+      "implementation_ref": "file:README.md",
+      "question": "What may this slice change in the repository?",
+      "rationale": "Trusted confirmed human choice. Neutral description update is allowed if needed.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": ".grilltrack/proof/parent-review-20260930.md",
+          "result": "findings",
+          "reviewed_at": "2026-09-30T18:47:26+00:00",
+          "source_identity": "sha256:41c016b30555b1e15b4522bfa9f8b3a6cb96983e614ab7db2c662f91878158a2"
+        }
+      ],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-09-30T18:49:43+00:00",
+      "verification_ref": "file:.grilltrack/proof/docs-inspection-20260930.md"
     },
     {
       "baseline_ref": null,
@@ -1201,13 +904,6 @@
       "implementation_ref": null,
       "question": "Which vendor, account model, and postage funding model should Ship use?",
       "rationale": "Documented platform versus single-account paths, merchant-funded fallbacks, and fetched fee/recovery facts. A recommendation is not a selection. No label kernel until this is decided.",
-      "reconciliation_sources": [
-        {
-          "role": "current",
-          "source_identity": "git:d78c0f557e8124df5515c0ba414273b5231d8909",
-          "track_id": "ship-usps-feasibility-20260930"
-        }
-      ],
       "repair_required": false,
       "review_classifications": [],
       "review_history": [],
@@ -1221,24 +917,45 @@
     }
   ],
   "last_activation": {
-    "at": "2026-10-01T02:35:23+00:00",
+    "at": "2026-09-30T18:46:42+00:00",
     "mechanism": "implicit"
   },
-  "last_pause": null,
-  "pause": null,
-  "recommendation": null,
-  "reconciliation": {
-    "plan_id": "ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
-    "refs": {
-      "base": "57ab06270faaadbb6497e4cad766aef9bd5b24bd",
-      "current": "d78c0f557e8124df5515c0ba414273b5231d8909",
-      "incoming": "3fa70ca37e51e89b8c1a93ecc1aa6a6f4fa2560a"
-    },
-    "snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495"
+  "last_pause": {
+    "artifact_refs": [
+      "docs/decisions/vendor-account-funding-brief.md",
+      "docs/research/usps-feasibility-20260930.md",
+      "docs/contracts/commerce-ship-v1.md",
+      ".grilltrack/proof/docs-inspection-20260930.md"
+    ],
+    "next_safe_action": "Resume only after an explicit vendor/account/funding lock or a request to revise the recommendation. Do not create accounts, contact vendors, or start a label kernel.",
+    "paused_at": "2026-09-30T18:34:03+00:00",
+    "reason": "Vendor, account, and funding remain unselected. Human confirmation is required before a label kernel. No closure.",
+    "resumed_at": "2026-09-30T18:46:42+00:00"
+  },
+  "pause": {
+    "artifact_refs": [
+      "docs/decisions/vendor-account-funding-brief.md",
+      "docs/research/usps-feasibility-20260930.md",
+      "docs/contracts/commerce-ship-v1.md",
+      ".grilltrack/proof/docs-inspection-20260930.md",
+      ".grilltrack/proof/parent-review-20260930.md"
+    ],
+    "next_safe_action": "Resume only after an explicit vendor/account/funding lock or a request to revise the recommendation. Do not create accounts, contact vendors, start a label kernel, or claim clean formal review.",
+    "paused_at": "2026-09-30T18:49:44+00:00",
+    "reason": "Vendor, account, and funding remain unselected after the parent-review correction pass. Human confirmation is required before a label kernel. No closure. No clean formal review."
+  },
+  "recommendation": {
+    "alternatives": [
+      "Ask a later cycle to compare only merchant-owned funding paths (Shippo OAuth, PB Individual, EasyPost decentralized, direct USPS Label Provider) if platform working capital is rejected in principle.",
+      "Keep postage-api-unselected and pause longer while Commerce checkout shipping charges are specified separately."
+    ],
+    "reason": "Parent findings were applied to public docs. Product locks persist. Vendor/account/funding remains the blocking product decision. A recommendation is not a selection. No clean formal review.",
+    "recommended": "Lock vendor, account model, and postage funding after reviewing the corrected 2026-09-30 brief. No label kernel before that lock.",
+    "recorded_at": "2026-09-30T18:49:43+00:00"
   },
   "schema_version": "grilltrack/v0.1",
-  "status": "active",
-  "title": "Ship PR4 reconciliation",
-  "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-01T02:35:23+00:00"
+  "status": "paused",
+  "title": "Ship USPS feasibility and Commerce contract",
+  "track_id": "ship-usps-feasibility-20260930",
+  "updated_at": "2026-09-30T18:49:44+00:00"
 }
