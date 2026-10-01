@@ -5,16 +5,16 @@ Mode: read-only handoff; no Commerce edit.
 
 ## Immutable source binding
 
-- Current source SHA: `8147f626aa391937b41e2b576d34a555c4349ffe`
+- Commerce source snapshot SHA: `8147f626aa391937b41e2b576d34a555c4349ffe`
 - Source availability: present in this repository at review time.
 - Canonical contract: `docs/contracts/commerce-ship-v1.md`
 - Projection source: `src/commerce-status.js`
 - No generated Commerce artifact, host registration, or runtime mount is
   present.
 
-The SHA above identifies the pre-correction source inspected for the handoff.
-The correction review records the post-correction immutable source separately;
-this handoff does not imply that Commerce was changed.
+The SHA above identifies the immutable source snapshot containing the Commerce
+interface. Later proof-only commits may change the packet without changing
+that source snapshot; this handoff does not imply that Commerce was changed.
 
 ## Minimal interface
 
