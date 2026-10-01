@@ -1,7 +1,7 @@
 {
   "name": "@dinkuskit/ship",
   "version": "0.0.0",
-  "description": "Parking-lot repository for DinkusKit shipping. Shape is not decided.",
+  "description": "Optional DinkusKit shipping automation. USPS label purchase and print required for coordinated Commerce v1; vendor unselected.",
   "type": "module",
   "private": true,
   "license": "MIT",
