@@ -1,6 +1,6 @@
 # PB consumer and unknown-outcome gate packet
 
-Date: 2026-10-01  
+Date: 2026-10-01
 Scope: value-free first-slice handoff only.
 
 ## Sanitized consumer result

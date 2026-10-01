@@ -1,11 +1,11 @@
 # Commerce order/action/interface handoff
 
-Date: 2026-10-01  
+Date: 2026-10-01
 Mode: read-only handoff; no Commerce edit.
 
 ## Immutable source binding
 
-- Current source SHA: `17f0dd481b16aba9eb2d16f5fc6ad3ea18351705`
+- Current source SHA: `ae3cc329f890d4bb0b4f2735125d12d40b8a1c76`
 - Source availability: present in this repository at review time.
 - Canonical contract: `docs/contracts/commerce-ship-v1.md`
 - Projection source: `src/commerce-status.js`
@@ -60,5 +60,5 @@ blocked under the existing contract.
 These hashes are recorded by the correction review after the bounded local
 commit:
 
-- `docs/contracts/commerce-ship-v1.md`: recorded in the review packet.
-- `src/commerce-status.js`: recorded in the review packet.
+- `docs/contracts/commerce-ship-v1.md`: `200e0ce52e66fabf9f2bd10f3dc5b5a4fce0a945b678bb3c7e60a2429adf7b32`
+- `src/commerce-status.js`: `1128c02cc9a0d2a77e7b2c46b1bb1e559af6aa7c73a1ad4d37ee4de79f0aaaaf`
