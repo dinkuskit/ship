@@ -7,7 +7,7 @@
     "confirmed_at": "2026-10-01T15:58:10+00:00",
     "domain": "PBsandbox Registry-enabled Ship plugin scaffold and Commerce handoff",
     "started_at": "2026-10-01T15:58:09+00:00",
-    "status": "confirmed",
+    "status": "inspected",
     "summary": "Implement and verify only the admitted private EmDash 1.0.1 plugin scaffold, its local fixture-backed workflow seam, package/install shape, and source-bound Commerce handoff; document that Registry installation remains gated on release/submission and sandbox runner configuration."
   },
   "decisions": [
@@ -1313,7 +1313,14 @@
   },
   "last_pause": null,
   "pause": null,
-  "recommendation": null,
+  "recommendation": {
+    "alternatives": [
+      "Close this local slice and defer live/provider/consumer/taste proof"
+    ],
+    "reason": "Merchant funds own postage; this milestone proves only the private package seam and fixture workflow. Registry, release, install, actual Commerce hook, PB availability, consumer, and taste remain explicit gates.",
+    "recommended": "Registry runner/release/install plus actual Commerce hook proof, after separately authorized host and identity gates",
+    "recorded_at": "2026-10-01T16:28:19+00:00"
+  },
   "reconciliation": {
     "plan_id": "ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
     "refs": {
@@ -1327,5 +1334,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-01T16:28:02+00:00"
+  "updated_at": "2026-10-01T16:28:19+00:00"
 }
