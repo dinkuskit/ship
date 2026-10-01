@@ -4,6 +4,11 @@
   "description": "Optional DinkusKit shipping automation. USPS label purchase and print required for coordinated Commerce v1; vendor unselected.",
   "type": "module",
   "private": true,
+  "scripts": {
+    "test": "node --test",
+    "dev": "node src/server.js",
+    "fixture:proof": "PORT=4328 node test-support/fixture-server.js"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
