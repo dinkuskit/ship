@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { request } from "node:http";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -9,6 +9,7 @@ import { createSandboxAdapter, isSafePdfUrl, SANDBOX_API_ORIGIN, SANDBOX_OAUTH_O
 import { FileStateStore, SandboxTask } from "../src/state.js";
 import { createApp } from "../src/server.js";
 import { createFixturePdf, fixturePdfTextLines } from "../test-support/fixture-pdf.js";
+import plugin from "../src/plugin.js";
 
 const credentials = { apiKey: "test-key", apiSecret: "test-secret", shipperId: "test-shipper" };
 const shipment = {
@@ -19,6 +20,33 @@ const shipment = {
 
 const rateResponse = { rates: [{ carrier: "USPS", serviceId: "PM", parcelType: "PKG", totalCarrierCharge: 8.6, specialServices: [{ specialServiceId: "DelCon" }] }] };
 const labelUrl = "https://stg-labels-cls.gcs.pitneybowes.com/usps/123/outbound/label/abc.pdf";
+
+test("local EmDash package seam has a private JSON route contract", async () => {
+  const manifestSource = await readFile(new URL("../emdash-plugin.jsonc", import.meta.url), "utf8");
+  const manifest = JSON.parse(manifestSource.replace(/^\s*\/\/.*$/gm, ""));
+  assert.equal(manifest.slug, "ship");
+  assert.deepEqual(manifest.capabilities, []);
+  assert.deepEqual(manifest.allowedHosts, []);
+  assert.deepEqual(manifest.storage, {});
+  assert.equal(manifest.publisher, undefined);
+
+  for (const [name, route] of Object.entries(plugin.routes)) {
+    assert.deepEqual(route.methods, ["POST"], name);
+    assert.equal(route.request.body, "json", name);
+    assert.equal(route.public, undefined, name);
+    assert.equal(typeof route.handler, "function", name);
+  }
+  assert.equal(plugin.routes.admin.permission, "plugins:manage");
+  assert.equal(plugin.routes.settings.permission, "plugins:manage");
+  assert.equal(plugin.routes.status.permission, "plugins:read");
+  assert.deepEqual((await plugin.routes.settings.handler({ input: {} }, {})).settings, {
+    surface: "ship-pb-sandbox-interface",
+    mode: "synthetic-usps-pm-only",
+    live: false,
+    testWorkflow: "fixture-only",
+    commerce: "read-only handoff",
+  });
+});
 
 test("fixture PDF is structurally valid and contains only synthetic proof text", async () => {
   const pdf = createFixturePdf();

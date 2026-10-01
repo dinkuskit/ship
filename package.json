@@ -4,6 +4,16 @@
   "description": "Optional DinkusKit shipping automation. USPS label purchase and print required for coordinated Commerce v1; vendor unselected.",
   "type": "module",
   "private": true,
+  "files": [
+    "src",
+    "emdash-plugin.jsonc",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/plugin.js",
+    "./plugin": "./src/plugin.js"
+  },
   "scripts": {
     "test": "node --test",
     "dev": "node src/server.js",

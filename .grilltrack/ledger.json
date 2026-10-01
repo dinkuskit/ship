@@ -1,7 +1,15 @@
 {
   "closeout": null,
   "created_at": "2026-10-01T02:35:23+00:00",
-  "current_focus": null,
+  "current_focus": {
+    "cadence": "sequential",
+    "confirmed": true,
+    "confirmed_at": "2026-10-01T15:58:10+00:00",
+    "domain": "PBsandbox Registry-enabled Ship plugin scaffold and Commerce handoff",
+    "started_at": "2026-10-01T15:58:09+00:00",
+    "status": "confirmed",
+    "summary": "Implement and verify only the admitted private EmDash 1.0.1 plugin scaffold, its local fixture-backed workflow seam, package/install shape, and source-bound Commerce handoff; document that Registry installation remains gated on release/submission and sandbox runner configuration."
+  },
   "decisions": [
     {
       "baseline_ref": "docs/CHARTER.md",
@@ -1218,6 +1226,77 @@
       "superseded_by": null,
       "updated_at": "2026-09-30T18:33:56+00:00",
       "verification_ref": null
+    },
+    {
+      "baseline_ref": "git:3ece87b00582eb376e266f8d53f935fc8fd23269",
+      "candidate_refs": [],
+      "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+      "context_ref": "docs/decisions/pb-sandbox-interface-scope.md",
+      "created_at": "2026-10-01T15:58:09+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [
+        "commerce-vs-ship-ownership"
+      ],
+      "domain": "PBsandbox Registry-enabled Ship plugin scaffold and Commerce handoff",
+      "history": [
+        {
+          "at": "2026-10-01T15:58:09+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-01T16:27:46+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-01T16:27:52+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "implemented",
+          "implementation_ref": "files:emdash-plugin.jsonc,src/plugin.js,package.json,README.md,docs/CITATIONS.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        }
+      ],
+      "id": "pb-registry-scaffold-001",
+      "implementation_ref": "files:emdash-plugin.jsonc,src/plugin.js,package.json,README.md,docs/CITATIONS.md",
+      "question": "What bounded implementation is admitted for the next PBsandbox milestone?",
+      "rationale": "Preserves settled Commerce ownership, merchant-funded postage, USPS domestic scope, attended review, immutable paid totals, distinct fulfillment states, non-Inventory dependency, and the existing unknown-operation safety boundary.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-10-01T16:27:52+00:00",
+      "verification_ref": ".grilltrack/proof/emdash-plugin-slice-20261001.md;test:npm test;package:npm pack --dry-run;import:node self-reference"
     }
   ],
   "last_activation": {
@@ -1240,5 +1319,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-01T02:35:23+00:00"
+  "updated_at": "2026-10-01T16:27:52+00:00"
 }

@@ -1,0 +1,14 @@
+{
+  "$schema": "./node_modules/@emdash-cms/plugin-cli/schemas/emdash-plugin.schema.json",
+  "slug": "ship",
+  // Publisher identity is intentionally omitted until a separately approved
+  // Registry account exists. This local package is not publishable.
+  "license": "MIT",
+  "author": { "name": "DinkusKit" },
+  "security": { "email": "security@dinkuskit.invalid" },
+  "name": "DinkusKit Ship",
+  "description": "Private synthetic shipping workflow seam for local EmDash integration tests.",
+  "capabilities": [],
+  "allowedHosts": [],
+  "storage": {}
+}

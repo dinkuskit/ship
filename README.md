@@ -93,4 +93,24 @@ The value-free credential packet is in
 [docs/credentials-setup.md](docs/credentials-setup.md). The exact live blocker
 is the absent approved wrapper.
 
+### Local EmDash package seam
+
+`emdash-plugin.jsonc` and `src/plugin.js` are the smallest package seam for a
+future EmDash host. The package export is the supported local package path:
+
+```sh
+node --input-type=module -e 'import("@dinkuskit/ship").then(({ default: plugin }) => console.log(Object.keys(plugin.routes)))'
+```
+
+The routes are private POST/JSON routes named `admin`, `settings`, and
+`status`. They return JSON-serializable, read-only synthetic settings and do
+not call Pitney Bowes. The manifest requests no capabilities, hosts, or
+storage. Publisher identity is intentionally absent, so Registry validation,
+release, install, and publication remain separate gates.
+
+The local proof is `npm test`; it checks the manifest and route shape alongside
+the fixture-backed quote → review → test-label workflow. It is not proof of a
+Registry runner, an EmDash host install, a provider hook, or Commerce runtime
+integration.
+
 Part of [Dinkus](https://github.com/dinkuskit). MIT.
