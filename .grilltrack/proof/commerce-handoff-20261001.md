@@ -5,7 +5,7 @@ Mode: read-only handoff; no Commerce edit.
 
 ## Immutable source binding
 
-- Current source SHA: `ae3cc329f890d4bb0b4f2735125d12d40b8a1c76`
+- Current source SHA: `8147f626aa391937b41e2b576d34a555c4349ffe`
 - Source availability: present in this repository at review time.
 - Canonical contract: `docs/contracts/commerce-ship-v1.md`
 - Projection source: `src/commerce-status.js`
