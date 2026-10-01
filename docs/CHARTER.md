@@ -58,3 +58,11 @@ label purchase and print capability required for coordinated Commerce v1.
 Vendor, account, and funding remain unselected. Do not start a label kernel
 until those are decided. The current brief is a recommendation, not a
 selection.
+
+## Narrow local exception
+
+The package-private PB sandbox interface experiment is permitted only as a
+loopback, synthetic, no-funding test surface. It is not a provider router,
+Commerce implementation, production contract, or product-shape decision. It
+does not select a vendor, account, or funding model, and must not silently
+overwrite the reconciled GrillTrack history.

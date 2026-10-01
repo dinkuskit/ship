@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ship merchant lab — PB sandbox</title>
+  <style>
+    :root { color-scheme: light; font: 16px/1.45 system-ui, sans-serif; }
+    body { max-width: 760px; margin: 0 auto; padding: 2rem 1rem; color: #17202a; }
+    header { border-bottom: 3px solid #17202a; margin-bottom: 1.5rem; }
+    .banner { background: #fff1c7; border: 2px solid #8a5a00; padding: .8rem; }
+    fieldset { margin: 1rem 0; padding: 1rem; border: 1px solid #87909a; }
+    legend { font-weight: 700; padding: 0 .35rem; }
+    .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; }
+    label { display: grid; gap: .25rem; font-weight: 600; }
+    input { font: inherit; padding: .45rem; }
+    button { font: inherit; font-weight: 700; padding: .65rem 1rem; cursor: pointer; }
+    button:disabled { cursor: not-allowed; opacity: .5; }
+    #quote, #result { margin-top: 1rem; padding: 1rem; background: #eef5ff; border-left: 4px solid #245a9b; }
+    .error { color: #9d1c1c; font-weight: 700; }
+    .small { font-size: .9rem; color: #48515a; }
+    @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Ship merchant lab</h1>
+    <p><strong>Pitney Bowes USPS sandbox</strong> · local loopback only</p>
+  </header>
+  <p class="banner"><strong>SANDBOX ONLY — NO REAL POSTAGE.</strong> This creates a clearly marked test label and must not be mailed.</p>
+  <p id="configuration" class="error"></p>
+  <form id="shipment-form">
+    <fieldset>
+      <legend>Synthetic shipment</legend>
+      <div class="grid">
+        <label>Origin street <input name="fromStreet" value="27 Waterview Drive" required></label>
+        <label>Destination street <input name="toStreet" value="1 Sullivan SQ" required></label>
+        <label>Origin city <input name="fromCity" value="Shelton" required></label>
+        <label>Destination city <input name="toCity" value="Berwick" required></label>
+        <label>Origin state <input name="fromState" value="CT" maxlength="2" required></label>
+        <label>Destination state <input name="toState" value="ME" maxlength="2" required></label>
+        <label>Origin postal code <input name="fromPostalCode" value="06484" inputmode="numeric" required></label>
+        <label>Destination postal code <input name="toPostalCode" value="03901" inputmode="numeric" required></label>
+        <label>Weight (oz) <input name="weightOz" type="number" min="0.01" step="0.01" value="1" required></label>
+        <label>Length (in) <input name="lengthIn" type="number" min="0.01" step="0.01" value="8" required></label>
+        <label>Width (in) <input name="widthIn" type="number" min="0.01" step="0.01" value="6" required></label>
+        <label>Height (in) <input name="heightIn" type="number" min="0.01" step="0.01" value="1" required></label>
+      </div>
+      <p class="small">Fixed service: USPS Priority Mail (PM), rectangular parcel (PKG), US domestic.</p>
+    <button type="submit">Get sandbox quote</button>
+    </fieldset>
+  </form>
+  <section id="quote" hidden aria-live="polite"></section>
+  <section id="result" hidden aria-live="polite"></section>
+  <script>
+    const form = document.querySelector("#shipment-form");
+    const quoteBox = document.querySelector("#quote");
+    const resultBox = document.querySelector("#result");
+    const configuration = document.querySelector("#configuration");
+    let current = null, generation = 0, busy = false, blocked = false;
+    let operationKey = localStorage.getItem("ship-pb-operation-key");
+    if (!operationKey) { operationKey = crypto.randomUUID().replaceAll("-", "").slice(0, 25); localStorage.setItem("ship-pb-operation-key", operationKey); }
+
+    function shipment() {
+      const data = new FormData(form);
+      return {
+        from: { country: "US", name: "Synthetic Sender", addressLines: [data.get("fromStreet")], cityTown: data.get("fromCity"), stateProvince: data.get("fromState").toUpperCase(), postalCode: data.get("fromPostalCode") },
+        to: { country: "US", name: "Synthetic Recipient", addressLines: [data.get("toStreet")], cityTown: data.get("toCity"), stateProvince: data.get("toState").toUpperCase(), postalCode: data.get("toPostalCode") },
+        parcel: {
+          weightOz: Number(data.get("weightOz")), lengthIn: Number(data.get("lengthIn")),
+          widthIn: Number(data.get("widthIn")), heightIn: Number(data.get("heightIn"))
+        }
+      };
+    }
+    function showError(box, error) {
+      box.hidden = false;
+      box.replaceChildren(Object.assign(document.createElement("p"), { className: "error", textContent: error.message || "The operation failed." }));
+    }
+    function renderSuccess(message, shipmentId, pdfPath) {
+      resultBox.hidden = false;
+      const summary = Object.assign(document.createElement("p"), { textContent: `${message}${shipmentId ? ` Shipment reference: ${shipmentId}` : ""}` });
+      const view = document.createElement("a"); view.href = pdfPath; view.textContent = "View PDF"; view.target = "_blank"; view.rel = "noreferrer";
+      const download = document.createElement("a"); download.href = `${pdfPath}?download=1`; download.textContent = "Download PDF";
+      const fresh = document.createElement("button"); fresh.type = "button"; fresh.textContent = "Start fresh synthetic experiment";
+      fresh.addEventListener("click", () => { localStorage.removeItem("ship-pb-operation-key"); location.reload(); });
+      resultBox.replaceChildren(summary, view, " ", download, " ", fresh);
+    }
+    function renderReview(quote, reviewedShipment) {
+      quoteBox.replaceChildren();
+      const title = document.createElement("h2"); title.textContent = "Review sandbox quote"; quoteBox.append(title);
+      const summary = document.createElement("p"); summary.textContent = `Service: ${quote.serviceLabel} (${quote.service})`; quoteBox.append(summary);
+      const price = document.createElement("p"); price.textContent = `Price: ${quote.currency} ${quote.amount.toFixed(2)}`; quoteBox.append(price);
+      const expires = document.createElement("p"); expires.textContent = `Quote expires: ${new Date(quote.expiresAt).toLocaleString()}`; quoteBox.append(expires);
+      const shipmentText = document.createElement("p");
+      shipmentText.textContent = `Address: ${reviewedShipment.from.addressLines.join(", ")}, ${reviewedShipment.from.cityTown}, ${reviewedShipment.from.stateProvince} ${reviewedShipment.from.postalCode} → ${reviewedShipment.to.addressLines.join(", ")}, ${reviewedShipment.to.cityTown}, ${reviewedShipment.to.stateProvince} ${reviewedShipment.to.postalCode}`;
+      quoteBox.append(shipmentText);
+      const packageText = document.createElement("p");
+      packageText.textContent = `Package: ${reviewedShipment.parcel.weightOz} oz, ${reviewedShipment.parcel.lengthIn} × ${reviewedShipment.parcel.widthIn} × ${reviewedShipment.parcel.heightIn} in`;
+      quoteBox.append(packageText);
+      const label = document.createElement("label"); const check = document.createElement("input"); check.type = "checkbox"; label.append(check, " I reviewed this service, shipment, and exact price; create a test label only."); quoteBox.append(label);
+      const button = document.createElement("button"); button.type = "button"; button.disabled = true; button.textContent = "Create test label"; quoteBox.append(button);
+      check.addEventListener("change", () => { button.disabled = !check.checked || busy; }); button.addEventListener("click", createLabel);
+    }
+    async function recover() {
+      const response = await fetch("/api/status"); const data = await response.json();
+      if (!data.configured) configuration.textContent = "Credentials not configured — live quote and mutation endpoints are fail-closed.";
+      const operation = data.operations[operationKey];
+      if (operation?.status === "label_created") {
+        renderSuccess("Resolved test label is available.", "", `/api/test-label/${operationKey}/pdf`);
+      }
+      if (operation?.status === "pending" || operation?.status === "unknown") {
+        blocked = true; form.querySelectorAll("input, button").forEach((element) => { element.disabled = true; });
+        resultBox.hidden = false; resultBox.textContent = "This operation is unresolved. It cannot be retried or replaced automatically.";
+      }
+    }
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (busy || blocked) return;
+      busy = true; const requestedGeneration = ++generation; const reviewedShipment = shipment();
+      quoteBox.hidden = false;
+      quoteBox.textContent = "Requesting a live PB sandbox quote…";
+      resultBox.hidden = true;
+      try {
+        const response = await fetch("/api/quote", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({shipment: reviewedShipment}) });
+        const data = await response.json();
+        if (!response.ok) throw data;
+        if (requestedGeneration === generation) { current = { ...data.quote, shipment: reviewedShipment }; renderReview(data.quote, reviewedShipment); }
+      } catch (error) { showError(quoteBox, error); }
+      finally { busy = false; }
+    });
+    form.addEventListener("input", () => { generation++; current = null; quoteBox.hidden = true; resultBox.hidden = true; });
+    async function createLabel() {
+      if (!current || busy) return; const button = [...quoteBox.querySelectorAll("button")].at(-1);
+      const reviewed = current; const beforeCreate = shipment();
+      if (JSON.stringify(beforeCreate) !== JSON.stringify(reviewed.shipment)) { showError(quoteBox, { message: "Shipment changed; get a fresh quote." }); return; }
+      busy = true;
+      button.disabled = true;
+      try {
+        const response = await fetch("/api/test-label", { method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({ input: reviewed.shipment, quoteId: reviewed.quoteId, review: { confirmed: true, service: reviewed.service, amount: reviewed.amount }, idempotencyKey: operationKey }) });
+        const data = await response.json();
+        if (!response.ok) throw data;
+        renderSuccess("SANDBOX TEST LABEL — DO NOT MAIL.", data.result.shipmentId || "sandbox response", data.downloadPath);
+      } catch (error) { showError(resultBox, error); button.disabled = false; }
+      finally { busy = false; }
+    }
+    recover().catch(() => { configuration.textContent = "Local status recovery failed."; });
+  </script>
+</body>
+</html>
