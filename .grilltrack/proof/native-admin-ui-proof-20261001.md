@@ -197,3 +197,34 @@ contact, public release/submission, Registry runner availability, actual
 Core/Commerce binding, and PB/provider/account/credential/production
 availability. Core and PB remain unknown where not independently proven.
 No repack was needed because code and package contents did not change.
+
+## Parent acceptance addendum — UI context and localization
+
+This documentation-only addendum follows the closed native slice after `ce1b`
+(`canonicalcompletedcleanupReadytrue`) and does not reopen acceptance.
+Pinned EmDash `1.0.1` guidance was checked at the immutable upstream
+[`AGENTS.md`](https://raw.githubusercontent.com/emdash-cms/emdash/0e8977c22/AGENTS.md)
+(`Kumo` React UI 196–226, Lingui user strings 227–264, Arabic/RTL 281) and
+[`CONTRIBUTING.md`](https://raw.githubusercontent.com/emdash-cms/emdash/0e8977c22/CONTRIBUTING.md)
+(i18n 164–190).
+
+The installed `blocks/dist/validation-CX9LT920.d.ts` surface provides
+`PluginUiContext.locale`, `direction: "ltr" | "rtl"`, and `contentLocale`;
+installed `emdash/src/plugins/types.ts` exposes `RouteContext.ui?`. The
+current native route passes `ctx.input` only. The worker is BlockKit/JSON,
+contains no React/Kumo imports, and has English user strings hardcoded in
+`src/native/admin.ts`.
+
+Therefore this proof does not claim localized plugin labels, Lingui or
+Arabic/RTL behavior, custom React/Kumo UI, or native UI registry proof. No
+source, dependency, cosmetic, or test change was made. The localization gap
+is recorded honestly while the existing local packaged native UI success
+remains accepted.
+
+## Handoff truth
+
+Full local packaged native UI success remains accepted; Commerce remains
+**UNVERIFIED**. Registry publisher/contact/publication/runner, PB/provider,
+account, credential, and production gates remain unknown or externally gated.
+No source fallback, provider, credential, publication, PR, push, merge, or
+external mutation occurred.
