@@ -1288,7 +1288,9 @@
       "question": "What bounded implementation is admitted for the next PBsandbox milestone?",
       "rationale": "Preserves settled Commerce ownership, merchant-funded postage, USPS domestic scope, attended review, immutable paid totals, distinct fulfillment states, non-Inventory dependency, and the existing unknown-operation safety boundary.",
       "repair_required": false,
-      "review_classifications": [],
+      "review_classifications": [
+        "human_gate"
+      ],
       "review_history": [
         {
           "classifications": [],
@@ -1296,14 +1298,23 @@
           "result": "clean",
           "reviewed_at": "2026-10-01T16:28:02+00:00",
           "source_identity": "git:05ad6eb4b965dc8a26200d43da7a5bf6f9b9c8b4"
+        },
+        {
+          "classifications": [
+            "human_gate"
+          ],
+          "ref": ".grilltrack/proof/firstslice-independent-review-20261001.md",
+          "result": "findings",
+          "reviewed_at": "2026-10-01T16:33:22+00:00",
+          "source_identity": "git:938908e2fecca4b335a0f70460d489d2b9eedde5"
         }
       ],
-      "review_ref": ".grilltrack/proof/emdash-plugin-slice-20261001.md",
-      "review_result": "clean",
-      "review_source_identity": "git:05ad6eb4b965dc8a26200d43da7a5bf6f9b9c8b4",
+      "review_ref": ".grilltrack/proof/firstslice-independent-review-20261001.md",
+      "review_result": "findings",
+      "review_source_identity": "git:938908e2fecca4b335a0f70460d489d2b9eedde5",
       "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-01T16:28:02+00:00",
+      "updated_at": "2026-10-01T16:33:22+00:00",
       "verification_ref": ".grilltrack/proof/emdash-plugin-slice-20261001.md;test:npm test;package:npm pack --dry-run;import:node self-reference"
     }
   ],
@@ -1334,5 +1345,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-01T16:28:19+00:00"
+  "updated_at": "2026-10-01T16:33:22+00:00"
 }
