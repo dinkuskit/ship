@@ -113,4 +113,9 @@ the fixture-backed quote → review → test-label workflow. It is not proof of 
 Registry runner, an EmDash host install, a provider hook, or Commerce runtime
 integration.
 
+The native EmDash entry is exported as `@dinkuskit/ship/native`. A local host
+must install the package from an `npm pack` tarball and import that entry;
+ancestor-relative imports of `src/native/index.ts` are not supported install
+proof.
+
 Part of [Dinkus](https://github.com/dinkuskit). MIT.

@@ -104,3 +104,34 @@ left as the parent CUA screenshot handoff.
 - Provider/account selection, credential binding, postage funding, quote/buy,
   label retrieval, print proof, and production host deployment remain outside
   this slice.
+
+## Package/install repair
+
+The initial host harness did not prove a package install: its plugin entry
+re-exported an ancestor-relative source file and the package had no native
+export. The repair adds `@dinkuskit/ship/native` → `./src/native/index.ts` and
+changes the host entry to import that installed package export. The host’s
+ancestor filesystem allowance was removed.
+
+The supported local tarball was `dinkuskit-ship-0.0.0.tgz`, installed with
+`npm install --ignore-scripts --no-save`. Its SHA-256 is
+`b6877585b7b05e9aca5d16c15cb8aefc6ab8fb49f9913d1c95713d357dc70dee`.
+The installed package is `@dinkuskit/ship@0.0.0`; EmDash is `1.0.1`. Tarball
+contents include both `src/native/index.ts` and `src/native/admin.ts`.
+
+The installed entry resolved to
+`host/node_modules/@dinkuskit/ship/src/native/index.ts`. `astro check`
+completed with `0 files`, `0 errors`, `0 warnings`, and `0 hints`. Auth-shell
+HTTP 200 was not counted as native proof: authenticated installed native block
+responses separately exercised Orders, synthetic order detail, Ship review,
+and settings, with no provider or Commerce action.
+
+The precise supported local development boot route, documented in the
+installed EmDash source, is:
+
+`http://127.0.0.1:4337/_emdash/api/setup/dev-bypass?content=0&redirect=/_emdash/admin/plugins/dinkuskit-ship/orders`
+
+It is development-only, local, credential-free, and not a production bypass.
+Parent CUA screenshot capture remains the visual gate. Commerce remains
+**UNVERIFIED** against the exact immutable source binding; no Commerce writes
+were performed.
