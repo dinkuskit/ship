@@ -9,25 +9,27 @@ The only supplied consumer result is retained verbatim as a shape-safe receipt:
 
 ```json
 {
-  "result": "no_matching_report_entry",
-  "returned": {
-    "transaction": 1,
-    "merchant": 1,
-    "postage_print": 0,
-    "valid_shipment": 0
+  "status": "no_matching_report_entry",
+  "counts": {
+    "returned": 1,
+    "transaction_matches": 1,
+    "merchant_matches": 1,
+    "postage_print_matches": 0,
+    "valid_shipment_matches": 0
   },
   "matched": false
 }
 ```
 
-This does not identify a provider account, transaction, merchant, shipment,
-label, amount, credential, endpoint, or report payload. It proves neither
-provider availability nor a successful purchase or print.
+This exact sanitized receipt does not identify a provider account,
+transaction, merchant, shipment, label, amount, credential, endpoint, or
+report payload. It proves neither provider availability nor a successful
+purchase or print.
 
 ## Unknown-operation gate
 
 - Original outcome: `purchase_unknown`.
-- Reconciliation result: `no_matching_report_entry`.
+- Reconciliation status: `no_matching_report_entry`.
 - Retry: not performed.
 - New idempotency key: remains blocked.
 - Existing operation: remains unresolved and must not be converted to

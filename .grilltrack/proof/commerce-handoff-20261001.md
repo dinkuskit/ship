@@ -1,24 +1,29 @@
-# Commerce order/action/interface handoff
+# Ship contract handoff boundary
 
 Date: 2026-10-01
 Mode: read-only handoff; no Commerce edit.
 
-## Immutable source binding
+## Immutable Ship contract source
 
-- Commerce source snapshot SHA: `8147f626aa391937b41e2b576d34a555c4349ffe`
-- Source availability: present in this repository at review time.
+- Ship contract source commit: `8147f626aa391937b41e2b576d34a555c4349ffe`
+- Commit subject: `docs: bind handoff to corrected source`
+- Source availability: present in this Ship repository at review time.
 - Canonical contract: `docs/contracts/commerce-ship-v1.md`
 - Projection source: `src/commerce-status.js`
-- No generated Commerce artifact, host registration, or runtime mount is
-  present.
 
-The SHA above identifies the immutable source snapshot containing the Commerce
-interface. Later proof-only commits may change the packet without changing
-that source snapshot; this handoff does not imply that Commerce was changed.
+This SHA identifies a Ship repository commit containing Ship's contract
+documentation. It is not a Commerce source commit and must not be labeled as
+the actual Commerce interface. No Commerce implementation was inspected or
+bound by this packet.
 
-## Minimal interface
+For context only, the parent reported actual Commerce `HEAD` as
+`51ab023b14490e3bff821e5310dd1c323092df30` at
+`/Users/bobbybones/Developer/dinkus/commerce`. That context does not change
+inspection permission, establish a source binding, or prove a mount.
 
-Commerce remains the source of truth for:
+## Ship-side contract boundary
+
+The Ship contract describes a proposed read-only boundary around:
 
 - trusted `commerce_order_id`;
 - monotonic `order_revision`;
@@ -40,6 +45,9 @@ get_status(ship_operation_id)
 The action boundary requires trusted order identity and revision, a
 merchant-attended confirmation, a current quote, an idempotency key, and
 explicit postage permission. Ship must never rewrite paid Commerce totals.
+
+No actual Commerce interface or Core mount seam is claimed. The actual Core
+mount seam is unverified and is not ready for routing.
 
 ## Unknowns kept unknown
 

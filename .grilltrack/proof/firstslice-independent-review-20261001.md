@@ -7,6 +7,8 @@ Date: 2026-10-01
 - Reviewed source: `git:938908e2fecca4b335a0f70460d489d2b9eedde5`
 - Review mode: delegated read-only defect-first inspection, followed by
   source-bound adjudication.
+- Corrective review scope: the exact current proof artifacts after the
+  provenance correction; the corrective result remains `findings`.
 - Prior `clean` record: `.grilltrack/proof/emdash-plugin-slice-20261001.md`
   is treated as an additive local claim only; it is not independent review
   evidence and is not used as this review's verdict.
@@ -22,7 +24,7 @@ Date: 2026-10-01
 | The manifest omits required `publisher` metadata. | Accepted | `human_gate` | No publisher DID is known or authorized. Do not invent one. Registry validation/release remains blocked until the owner supplies the approved identity. |
 | `security@dinkuskit.invalid` is a placeholder, not a usable security contact. | Accepted | `human_gate` | Keep the local scaffold blocked. Replace it only with an owner-approved monitored contact before distribution or publication. |
 | The delegated pass reported Markdown trailing whitespace. | Accepted and repaired | `reject_false_positive` after repair | The two intentional Markdown line-break spaces were removed. Final `git diff --check` is clean. |
-| The handoff source binding was described as current repository HEAD. | Rejected as a final defect | `reject_false_positive` | The packet now explicitly distinguishes the immutable Commerce source snapshot `8147f626aa391937b41e2b576d34a555c4349ffe` from later proof-only commits. |
+| The handoff incorrectly labeled Ship commit `8147f626aa391937b41e2b576d34a555c4349ffe` as Commerce source and bound it to an actual Commerce interface. | Accepted and corrected | `required_fix` | That SHA is a Ship contract-source commit (`docs: bind handoff to corrected source`), not a Commerce implementation commit. No Commerce implementation was inspected or bound. Parent Commerce `HEAD` `51ab023b14490e3bff821e5310dd1c323092df30` is context only; the actual Core mount seam remains unverified and not ready for routing. |
 
 ## Manifest and route inspection
 
@@ -43,17 +45,19 @@ is compatible with the pinned API-route source; this does not prove a runner.
 
 No native page, admin UI, EmDash host, Registry runner, Registry install,
 publisher identity, release, provider request, provider success, physical
-print, or Commerce runtime hook exists or was proven. This is a partial
-private package scaffold, not a completed milestone.
+print, Commerce implementation inspection, or Commerce runtime hook exists or
+was proven. The actual Core mount seam is unverified and not ready for routing.
+This is a partial private package scaffold, not a completed milestone.
 
 The PB packet records only:
 
 ```text
 no_matching_report_entry
-transaction=1
-merchant=1
-postage_print=0
-valid_shipment=0
+returned=1
+transaction_matches=1
+merchant_matches=1
+postage_print_matches=0
+valid_shipment_matches=0
 matched=false
 ```
 
@@ -78,5 +82,13 @@ postage permission.
 - `test/pb-sandbox.test.js`: `2985e814163d7029cf663dcc8139553dbfd518a4e3c3cbdfa344eaa2d6e39875`
 - `src/commerce-status.js`: `1128c02cc9a0d2a77e7b2c46b1bb1e559af6aa7c73a1ad4d37ee4de79f0aaaaf`
 - `docs/contracts/commerce-ship-v1.md`: `200e0ce52e66fabf9f2bd10f3dc5b5a4fce0a945b678bb3c7e60a2429adf7b32`
-- `.grilltrack/proof/commerce-handoff-20261001.md`: `ec4ab3aa1ca82eabab5573b37d593dce4caf5635d354cdee1f51725940d79693`
-- `.grilltrack/proof/pb-consumer-unknown-gate-20261001.md`: `a7771a0966896ff24a458abd85f0e992e1c8a7d51b7a1697efb51095968de0ae`
+- `.grilltrack/proof/commerce-handoff-20261001.md`: `40b2afa2a5b9bd82ac56e6227e6697d7971aeee3bd72b0df60ac42bb1d3ea4d5`
+- `.grilltrack/proof/pb-consumer-unknown-gate-20261001.md`: `928385561be41d9e01ccb68f3469429e49ceb9ecbd3ff26fb0aa77394573f3aa`
+
+## Finite first-slice stop
+
+The finite first slice stops at the partial scaffold. Remaining gates are
+publisher identity, monitored contact, native host, Registry, PB, and the
+actual Commerce mount seam. No Commerce implementation is claimed ready for
+routing. No source/runtime changes, deeper tests, new milestone, PR, push,
+secret/provider operation, or Commerce write is included.
