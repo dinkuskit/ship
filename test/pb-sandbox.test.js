@@ -33,12 +33,28 @@ test("local EmDash package seam has a private JSON route contract", async () => 
   for (const [name, route] of Object.entries(plugin.routes)) {
     assert.deepEqual(route.methods, ["POST"], name);
     assert.equal(route.request.body, "json", name);
+    assert.equal(route.request.maxBytes, 1024 * 1024, name);
     assert.equal(route.public, undefined, name);
     assert.equal(typeof route.handler, "function", name);
   }
   assert.equal(plugin.routes.admin.permission, "plugins:manage");
   assert.equal(plugin.routes.settings.permission, "plugins:manage");
   assert.equal(plugin.routes.status.permission, "plugins:read");
+  assert.deepEqual(await plugin.routes.admin.handler({ input: {} }, {
+    plugin: { id: "ship", version: "0.0.0" },
+  }), {
+    ok: true,
+    plugin: "ship",
+    version: "0.0.0",
+    settings: {
+      surface: "ship-pb-sandbox-interface",
+      mode: "synthetic-usps-pm-only",
+      live: false,
+      testWorkflow: "fixture-only",
+      commerce: "read-only handoff",
+    },
+    inputReceived: true,
+  });
   assert.deepEqual((await plugin.routes.settings.handler({ input: {} }, {})).settings, {
     surface: "ship-pb-sandbox-interface",
     mode: "synthetic-usps-pm-only",
