@@ -26,6 +26,18 @@ printable test-label artifact. Physical printing was **not performed**. A
 print-button attempt did not produce an observable print preview, so neither
 print-dialog success nor printer output is claimed.
 
+## Local fixture proof boundary
+
+The parent CUA run against the local fixture UI was unconfigured: the quote
+step was refused because live credentials were unavailable. No live proof is
+claimed. A separate fixture happy-path run reached the synthetic `$8.60`
+quote, explicit review checkbox, and `Create test label`, but Chrome exposed
+the fixture server's invalid placeholder PDF (`%PDF` header with no catalog,
+pages, or valid xref). That fixture defect is repaired by runtime generation
+of a one-page catalog/pages/font PDF containing the synthetic proof markings.
+The parent must still observe the repaired PDF in Chrome; this record does not
+claim that visual verification.
+
 ## Scope and evidence limits
 
 This proves that the registered sandbox account can retrieve a USPS Priority

@@ -36,3 +36,11 @@ Do not treat a provider list, a rate API, or a checkout UI as decided.
 
 Unselected. Do not start a kernel until those two questions are locked
 in this file.
+
+## Narrow local exception
+
+The package-private PB sandbox interface experiment is permitted only as a
+loopback, synthetic, no-funding test surface. It is not a provider router,
+Commerce implementation, production contract, or product-shape decision.
+Future reconciliation with the frozen Ship PR2 ledger is required before any
+merge or product decision; this exception must not silently overwrite PR2.

@@ -4,6 +4,11 @@
   "description": "Parking-lot repository for DinkusKit shipping. Shape is not decided.",
   "type": "module",
   "private": true,
+  "scripts": {
+    "test": "node --test",
+    "dev": "node src/server.js",
+    "fixture:proof": "PORT=4328 node test-support/fixture-server.js"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
