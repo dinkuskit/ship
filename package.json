@@ -18,7 +18,8 @@
   "scripts": {
     "test": "node --test",
     "dev": "node src/server.js",
-    "fixture:proof": "PORT=4328 node test-support/fixture-server.js"
+    "fixture:proof": "PORT=4328 node test-support/fixture-server.js",
+    "verify:sandbox": "node scripts/verify-sandbox-package.mjs"
   },
   "license": "MIT",
   "repository": {

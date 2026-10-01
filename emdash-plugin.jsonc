@@ -9,5 +9,13 @@
   "description": "Private synthetic shipping workflow seam for local EmDash integration tests.",
   "capabilities": [],
   "allowedHosts": [],
-  "storage": {}
+  "storage": {
+    "preferences": { "indexes": ["locale"] }
+  },
+  "admin": {
+    "pages": [
+      { "path": "/orders", "label": "Orders", "icon": "receipt" },
+      { "path": "/settings", "label": "Ship settings", "icon": "settings" }
+    ]
+  }
 }

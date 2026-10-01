@@ -27,7 +27,7 @@ test("local EmDash package seam has a private JSON route contract", async () => 
   assert.equal(manifest.slug, "ship");
   assert.deepEqual(manifest.capabilities, []);
   assert.deepEqual(manifest.allowedHosts, []);
-  assert.deepEqual(manifest.storage, {});
+  assert.deepEqual(manifest.storage, { preferences: { indexes: ["locale"] } });
   assert.equal(manifest.publisher, undefined);
 
   for (const [name, route] of Object.entries(plugin.routes)) {
@@ -40,28 +40,19 @@ test("local EmDash package seam has a private JSON route contract", async () => 
   assert.equal(plugin.routes.admin.permission, "plugins:manage");
   assert.equal(plugin.routes.settings.permission, "plugins:manage");
   assert.equal(plugin.routes.status.permission, "plugins:read");
-  assert.deepEqual(await plugin.routes.admin.handler({ input: {} }, {
-    plugin: { id: "ship", version: "0.0.0" },
-  }), {
-    ok: true,
-    plugin: "ship",
-    version: "0.0.0",
-    settings: {
-      surface: "ship-pb-sandbox-interface",
-      mode: "synthetic-usps-pm-only",
-      live: false,
-      testWorkflow: "fixture-only",
-      commerce: "read-only handoff",
+  const persistent = {
+    preferences: {
+      value: null,
+      get: async () => persistent.preferences.value,
+      put: async (_id, value) => { persistent.preferences.value = value; },
     },
-    inputReceived: true,
-  });
-  assert.deepEqual((await plugin.routes.settings.handler({ input: {} }, {})).settings, {
-    surface: "ship-pb-sandbox-interface",
-    mode: "synthetic-usps-pm-only",
-    live: false,
-    testWorkflow: "fixture-only",
-    commerce: "read-only handoff",
-  });
+  };
+  const result = await plugin.routes.admin.handler({
+    input: { type: "page_load", page: "/orders" },
+    ui: { locale: "en", direction: "ltr", surface: "admin-page" },
+  }, { plugin: { id: "ship", version: "0.0.0" }, storage: persistent });
+  assert.equal(result.blocks[0].text, "Orders");
+  assert.match(result.blocks.at(-1).text, /Host direction: ltr/);
 });
 
 test("fixture PDF is structurally valid and contains only synthetic proof text", async () => {
