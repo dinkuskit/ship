@@ -29,6 +29,8 @@ test("sandbox admin route renders the real Block Kit contract", async () => {
 
   assert.equal(result.blocks[0].type, "header");
   assert.equal(result.blocks[0].text, "Orders");
+  assert.match(result.blocks[1].description, /No trusted Commerce order/);
+  assert.doesNotMatch(JSON.stringify(result), /Order #1042|Sample Recipient|\$48\.00/);
   assert.equal(result.blocks.at(-1).type, "context");
   assert.match(result.blocks.at(-1).text, /Host direction: ltr/);
 });
@@ -62,7 +64,20 @@ test("host-attested Arabic RTL is translated without guessing direction", async 
   }, context);
 
   assert.equal(result.blocks[0].text, "إعدادات الشحن");
-  assert.match(result.blocks.at(-1).text, /Host locale: ar-SA · Host direction: rtl/);
+  assert.match(result.blocks.at(-1).text, /لغة المضيف: ar-SA · اتجاه المضيف: rtl/);
+  assert.doesNotMatch(JSON.stringify(result), /Local package proof|Display-only|Provider dashboard links/);
+});
+
+test("synthetic order data requires the explicit isolated fixture", async () => {
+  const result = await route({
+    input: { type: "page_load", page: "/order-detail", fixture: "synthetic-order-1042" },
+    ui: { locale: "ar-SA", direction: "rtl", surface: "admin-page" },
+  }, ctx());
+
+  assert.equal(result.blocks[0].text, "طلب اختبار اصطناعي");
+  assert.match(JSON.stringify(result), /الطلب رقم 1042/);
+  assert.match(JSON.stringify(result), /48\.00 دولار أمريكي/);
+  assert.doesNotMatch(JSON.stringify(result), /Order|Recipient|Delivery|Paid total|Inventory|Commerce owns/);
 });
 
 test("unknown locale falls back to English while preserving host direction", async () => {

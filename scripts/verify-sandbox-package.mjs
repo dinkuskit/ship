@@ -22,7 +22,15 @@ try {
   const tarball = join(temp, packed[0].filename);
   await run("npm", ["install", "--ignore-scripts", "--no-save", tarball], { cwd: temp });
 
-  const installed = await import("@dinkuskit/ship");
+  const installedEntry = pathToFileURL(join(
+    temp,
+    "node_modules",
+    "@dinkuskit",
+    "ship",
+    "src",
+    "plugin.js",
+  )).href;
+  const installed = await import(installedEntry);
   if (!installed.default?.routes?.admin) throw new Error("installed sandbox entry has no admin route");
   const installedManifest = await readFile(join(temp, "node_modules/@dinkuskit/ship/emdash-plugin.jsonc"), "utf8");
   if (!installedManifest.includes('"preferences"')) throw new Error("installed manifest lost storage contract");
@@ -30,8 +38,8 @@ try {
   const runnerModule = process.env.EMDASH_SANDBOX_RUNNER_MODULE;
   if (!runnerModule) {
     console.error("SANDBOX_GATE=blocked");
-    console.error("reason=EmDash 1.0.1 Node host exposes only NoopSandboxRunner");
-    console.error("required=EMDASH_SANDBOX_RUNNER_MODULE exporting createSandboxRunner");
+    console.error("reason=no supported EmDash runner configured");
+    console.error("required=configure @emdash-cms/sandbox-workerd/sandbox with workerd");
     console.error("package_install=passed");
     console.error("sandbox_execution=not_claimed");
     process.exitCode = 2;
@@ -42,10 +50,42 @@ try {
     if (typeof runner.createSandboxRunner !== "function") {
       throw new Error(`${runnerModule} does not export createSandboxRunner`);
     }
-    console.log("SANDBOX_GATE=runner-adapter-present");
     console.log("package_install=passed");
-    console.log("runner_factory=passed");
-    console.log("sandbox_execution=requires host db/options wiring");
+    console.log(`runner_module=${runnerModule}`);
+    if (!process.env.EMDASH_SANDBOX_HOST_URL) {
+      throw new Error("runner factory alone is not execution proof; set EMDASH_SANDBOX_HOST_URL");
+    }
+    const base = process.env.EMDASH_SANDBOX_HOST_URL.replace(/\/$/, "");
+    const bypass = await fetch(`${base}/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin`);
+    const cookie = bypass.headers.get("set-cookie")?.split(";")[0];
+    if (!cookie) throw new Error("sandbox host did not issue a local admin session");
+    const invoke = async (body, locale = "en-US") => {
+      const response = await fetch(`${base}/_emdash/api/plugins/dinkuskit-ship/admin`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-EmDash-Request": "1",
+          "Accept-Language": locale,
+          Cookie: cookie,
+        },
+        body: JSON.stringify(body),
+      });
+      if (!response.ok) throw new Error(`sandbox route returned ${response.status}`);
+      return response.json();
+    };
+    const orders = await invoke({ page: "/orders", type: "page_load" });
+    const arabic = await invoke({ page: "/settings", type: "page_load" }, "ar-SA");
+    const serialized = JSON.stringify({ orders, arabic });
+    if (/Order #1042|Sample Recipient|\$48\.00/.test(serialized)) {
+      throw new Error("default sandbox UI exposed synthetic Commerce data");
+    }
+    if (!serialized.includes("إعدادات الشحن") || !serialized.includes("اتجاه المضيف: rtl")) {
+      throw new Error("host-attested Arabic RTL response was not translated");
+    }
+    console.log("sandbox_execution=passed");
+    console.log("host_route=admin");
+    console.log("default_commerce_data=fail-closed");
+    console.log("host_attested_arabic_rtl=passed");
   }
 } finally {
   await rm(temp, { recursive: true, force: true });

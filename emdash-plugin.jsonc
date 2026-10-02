@@ -15,7 +15,9 @@
   "admin": {
     "pages": [
       { "path": "/orders", "label": "Orders", "icon": "receipt" },
-      { "path": "/settings", "label": "Ship settings", "icon": "settings" }
+      { "path": "/settings", "label": "Ship settings", "icon": "settings" },
+      { "path": "/order-detail", "label": "Order detail", "icon": "receipt" },
+      { "path": "/shipping", "label": "Shipping", "icon": "truck" }
     ]
   }
 }
