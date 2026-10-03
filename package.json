@@ -12,8 +12,7 @@
   ],
   "exports": {
     ".": "./src/plugin.js",
-    "./plugin": "./src/plugin.js",
-    "./native": "./src/native/index.ts"
+    "./plugin": "./src/plugin.js"
   },
   "scripts": {
     "test": "node --test",

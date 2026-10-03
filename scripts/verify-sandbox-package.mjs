@@ -93,6 +93,8 @@ try {
       return envelope.data;
     };
     const orders = await invoke({ page: "/orders", type: "page_load" });
+    const settingsAction = await invoke({ page: "/orders", type: "block_action", action_id: "open-settings" });
+    if (settingsAction.blocks[0]?.text !== "Ship settings") throw new Error("settings navigation action did not reach settings");
     const detail = await invoke({ page: "/order-detail", type: "page_load" }, "en-US", true);
     const shipping = await invoke({ page: "/shipping", type: "page_load" }, "en-US", true);
     await invoke({

@@ -137,9 +137,8 @@ This proves local config-managed sandbox execution, not signed Registry
 installation or Commerce/provider integration. See the dated proof under
 `proof/2026-10-03-emdash-sandbox-host/`.
 
-The native EmDash entry is exported as `@dinkuskit/ship/native`. A local host
-must install the package from an `npm pack` tarball and import that entry;
-ancestor-relative imports of `src/native/index.ts` are not supported install
-proof.
+Historical native preparation files remain in source, but no native package
+subpath is supported or exported. The installed sandbox entry is the current
+package contract.
 
 Part of [Dinkus](https://github.com/dinkuskit). MIT.

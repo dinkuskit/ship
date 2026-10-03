@@ -27,7 +27,7 @@ Development uses the runner's supported Miniflare/workerd path. The fresh host
 records `Loaded sandboxed plugin dinkuskit-ship:0.0.0`. There is no native Ship
 registration or direct source import in the host configuration.
 
-Current package SHA-256:
+Package SHA-256 at the initial sandbox acceptance checkpoint:
 `f2da608b4c66a0b6ba6349d88dcdf5d2e6570672c90510ecdec1870aefad497d`.
 All packed files were compared byte-for-byte with the host-installed package.
 
@@ -78,3 +78,28 @@ unapproved. Commerce order/address/package/authorized handoff remains absent.
 Provider actions remain disabled. No provider call, credential access, purchase,
 retry, account mutation or merge occurred. CI and official exact-source review
 must qualify the frozen PR before the maintainer merge gate.
+
+## Review repair
+
+Native ClawSweeper on head `971d34f20260c089bc5eb6dfb675487fe21712cd`
+reported P2: the documented native subpath exported TypeScript that imported
+an unpacked JavaScript sibling. Accepted as `required_fix`. The native export
+and README support claim were removed; historical native source/proof stays
+preserved. This PR supports only the standard sandbox package entry. Fresh
+package identity/runtime verification and exact-source review are required
+for the repaired candidate; the previous reviewer evidence does not clear it.
+
+OpenClaw also reported P2: the isolated fixture's Ship settings link declared
+an external `#settings` target. Accepted as `required_fix`: replaced by a
+supported admin block action returning the settings form. A focused navigation
+regression failed before repair and passed after it. No finding was dismissed.
+
+After both review repairs, 17 tests pass. The host was restarted with the
+fresh installed package. Corrected runtime verification also exercised the
+settings navigation action through the actual dispatcher and passed all
+package, persistence, unavailable-order, and Arabic RTL checks. The repaired
+package SHA-256 is
+`34f0acd87b07238162c10851df5cc9b67c6851a1ae31e2b934832e2913c6c3e8`.
+The prior settings captures remain evidence of the unchanged settings display;
+the new navigation behavior is covered by the failed-then-passed regression
+and current host dispatcher check.

@@ -108,3 +108,12 @@ test("direct detail and shipping requests cannot expose an unmounted order", asy
     assert.doesNotMatch(JSON.stringify(result), /1042|Sample Recipient|48\.00|Example Avenue/);
   }
 });
+
+test("fixture shipping review navigates to settings through an admin action", async () => {
+  const context = ctx();
+  const result = await route({ input: { type: "page_load", page: "/shipping", fixture: "synthetic-order-1042" } }, context);
+  const settings = result.blocks.find((b) => b.type === "actions").elements.find((e) => e.label === "Ship settings");
+  assert.equal(settings.type, "button");
+  const next = await route({ input: { type: "block_action", action_id: settings.action_id } }, context);
+  assert.equal(next.blocks[0].text, "Ship settings");
+});

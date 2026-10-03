@@ -146,7 +146,7 @@ function pageResponse(page, ui, t, saved, toast) {
         field(t.postage, t.postageUnavailable),
         field(t.labelPrint, t.labelUnavailable),
       ] },
-      { type: "actions", elements: [button("back-order-detail", t.detail), link(t.settings, "#settings")] },
+      { type: "actions", elements: [button("back-order-detail", t.detail), button("open-settings", t.settings)] },
       { type: "context", text: t.postageOwnership },
     ] };
   }
@@ -179,6 +179,9 @@ async function admin(routeCtx, ctx) {
   }
 
   const isolatedFixture = input.fixture === "synthetic-order-1042";
+  if (input.type === "block_action" && input.action_id === "open-settings") {
+    return pageResponse("settings", ui, t, saved);
+  }
   if (input.type === "block_action" && isolatedFixture) {
     if (input.action_id === "open-order" && input.fixture === "synthetic-order-1042") {
       return pageResponse("order-detail", ui, t, saved);
