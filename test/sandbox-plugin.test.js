@@ -95,3 +95,16 @@ test("sandbox route exposes no provider mutation actions", () => {
   const source = JSON.stringify(plugin);
   assert.doesNotMatch(source, /quote|purchase|retry|createLabel|credentials/i);
 });
+
+test("direct detail and shipping requests cannot expose an unmounted order", async () => {
+  for (const input of [
+    { type: "page_load", page: "/order-detail" },
+    { type: "page_load", page: "/shipping" },
+    { type: "block_action", action_id: "make-postage-label" },
+    { type: "block_action", action_id: "back-order-detail" },
+  ]) {
+    const result = await route({ input, ui: { locale: "en", direction: "ltr" } }, ctx());
+    assert.equal(result.blocks[0].text, "Orders");
+    assert.doesNotMatch(JSON.stringify(result), /1042|Sample Recipient|48\.00|Example Avenue/);
+  }
+});

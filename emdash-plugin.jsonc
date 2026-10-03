@@ -6,7 +6,7 @@
   "license": "MIT",
   "author": { "name": "DinkusKit" },
   "name": "DinkusKit Ship",
-  "description": "Private synthetic shipping workflow seam for local EmDash integration tests.",
+  "description": "Ship settings and an unavailable-order state for a private local EmDash sandbox. Provider actions remain disabled.",
   "capabilities": [],
   "allowedHosts": [],
   "storage": {

@@ -19,7 +19,8 @@
     "test": "node --test",
     "dev": "node src/server.js",
     "fixture:proof": "PORT=4328 node test-support/fixture-server.js",
-    "verify:sandbox": "node scripts/verify-sandbox-package.mjs"
+    "verify:sandbox": "node scripts/verify-sandbox-package.mjs",
+    "prepare:sandbox": "node scripts/prepare-sandbox-host.mjs"
   },
   "license": "MIT",
   "repository": {

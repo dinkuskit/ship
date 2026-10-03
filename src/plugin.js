@@ -27,6 +27,7 @@ const COPY = {
     postageOwnership: "Merchant-funded postage remains separate from the immutable paid Commerce total.",
     order: "Order", recipient: "Recipient", delivery: "Delivery", paidTotal: "Paid total",
     status: "Status", ready: "Paid · ready for shipment review", inventoryLabel: "Inventory", postage: "Postage",
+    providerStatus: "Provider status", postageFunding: "Postage funding",
     postageUnavailable: "Unavailable · requires provider setup", labelPrint: "Label / print",
     labelUnavailable: "Not created / not available", providerField: "Provider",
     providerDashboard: "Provider dashboard", postageBalance: "Postage balance", transactionHistory: "Transaction history",
@@ -54,6 +55,7 @@ const COPY = {
     postageOwnership: "تبقى رسوم الشحن التي يمولها التاجر منفصلة عن إجمالي Commerce المدفوع والثابت.",
     order: "الطلب", recipient: "المستلم", delivery: "التسليم", paidTotal: "الإجمالي المدفوع",
     status: "الحالة", inventoryLabel: "المخزون", ready: "مدفوع · جاهز لمراجعة الشحن", postage: "رسوم الشحن",
+    providerStatus: "حالة المزود", postageFunding: "تمويل رسوم الشحن",
     postageUnavailable: "غير متاح · يتطلب إعداد المزود", labelPrint: "الملصق / الطباعة",
     labelUnavailable: "لم يُنشأ / غير متاح", providerField: "المزود",
     providerDashboard: "لوحة مزود الخدمة", postageBalance: "رصيد رسوم الشحن", transactionHistory: "سجل المعاملات",
@@ -100,9 +102,9 @@ function pageResponse(page, ui, t, saved, toast) {
       { type: "header", text: t.settings },
       { type: "banner", title: t.notConnected, description: t.localProof, variant: "alert" },
       { type: "fields", fields: [
-        field("Provider status", t.provider),
-        field("Postage funding", t.funding),
-        field("Inventory", t.inventory),
+        field(t.providerStatus, t.provider),
+        field(t.postageFunding, t.funding),
+        field(t.inventoryLabel, t.inventory),
       ] },
       { type: "form", fields: [{
         type: "toggle", action_id: "showDashboardLinks", label: t.dashboard,
@@ -176,7 +178,8 @@ async function admin(routeCtx, ctx) {
     });
   }
 
-  if (input.type === "block_action") {
+  const isolatedFixture = input.fixture === "synthetic-order-1042";
+  if (input.type === "block_action" && isolatedFixture) {
     if (input.action_id === "open-order" && input.fixture === "synthetic-order-1042") {
       return pageResponse("order-detail", ui, t, saved);
     }
@@ -185,11 +188,10 @@ async function admin(routeCtx, ctx) {
     if (input.action_id === "back-order-detail") return pageResponse("order-detail", ui, t, saved);
   }
 
-  const page = input.fixture === "synthetic-order-1042" && input.page?.includes("order-detail")
-    ? "order-detail"
-    : input.page?.includes("settings") ? "settings"
-    : input.page?.includes("shipping") ? "shipping"
-      : input.page?.includes("order-detail") ? "order-detail" : "orders";
+  const page = input.page === "/settings" ? "settings"
+    : isolatedFixture && input.page === "/shipping" ? "shipping"
+    : isolatedFixture && input.page === "/order-detail" ? "order-detail"
+    : "orders";
   return pageResponse(page, ui, t, saved);
 }
 

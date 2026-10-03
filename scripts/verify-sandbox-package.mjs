@@ -2,6 +2,7 @@
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { createHash } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -56,10 +57,23 @@ try {
       throw new Error("runner factory alone is not execution proof; set EMDASH_SANDBOX_HOST_URL");
     }
     const base = process.env.EMDASH_SANDBOX_HOST_URL.replace(/\/$/, "");
+    const url = new URL(base);
+    if (url.protocol !== "http:" || !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) || url.username || url.password) {
+      throw new Error("sandbox proof requires an HTTP loopback host");
+    }
+    const hostDirectory = process.env.EMDASH_SANDBOX_HOST_DIR;
+    if (!hostDirectory) throw new Error("set EMDASH_SANDBOX_HOST_DIR to verify the host-installed package identity");
+    for (const { path: file } of packed[0].files) {
+      const fresh = await readFile(join(temp, "node_modules/@dinkuskit/ship", file));
+      const actual = await readFile(join(hostDirectory, "node_modules/@dinkuskit/ship", file));
+      if (!fresh.equals(actual)) throw new Error(`host-installed package differs: ${file}`);
+    }
+    console.log(`package_sha256=${createHash("sha256").update(await readFile(tarball)).digest("hex")}`);
+    console.log("host_installed_package=matched");
     const bypass = await fetch(`${base}/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin`);
     const cookie = bypass.headers.get("set-cookie")?.split(";")[0];
     if (!cookie) throw new Error("sandbox host did not issue a local admin session");
-    const invoke = async (body, locale = "en-US") => {
+    const invoke = async (body, locale = "en-US", allowUnavailable = false) => {
       const response = await fetch(`${base}/_emdash/api/plugins/dinkuskit-ship/admin`, {
         method: "POST",
         headers: {
@@ -70,10 +84,17 @@ try {
         },
         body: JSON.stringify(body),
       });
+      if (allowUnavailable && response.status === 400) return { unavailable: true };
       if (!response.ok) throw new Error(`sandbox route returned ${response.status}`);
-      return response.json();
+      const envelope = await response.json();
+      if (envelope.success !== true || !Array.isArray(envelope.data?.blocks)) {
+        throw new Error("sandbox host returned an invalid admin response envelope");
+      }
+      return envelope.data;
     };
     const orders = await invoke({ page: "/orders", type: "page_load" });
+    const detail = await invoke({ page: "/order-detail", type: "page_load" }, "en-US", true);
+    const shipping = await invoke({ page: "/shipping", type: "page_load" }, "en-US", true);
     await invoke({
       page: "/settings",
       type: "form_submit",
@@ -82,14 +103,14 @@ try {
     });
     const persisted = await invoke({ page: "/settings", type: "page_load" });
     const arabic = await invoke({ page: "/settings", type: "page_load" }, "ar-SA");
-    const serialized = JSON.stringify({ orders, persisted, arabic });
+    const serialized = JSON.stringify({ orders, detail, shipping, persisted, arabic });
     if (/Order #1042|Sample Recipient|\$48\.00/.test(serialized)) {
       throw new Error("default sandbox UI exposed synthetic Commerce data");
     }
     if (!serialized.includes("إعدادات الشحن") || !serialized.includes("اتجاه المضيف: rtl")) {
       throw new Error("host-attested Arabic RTL response was not translated");
     }
-    if (persisted.blocks?.some((block) =>
+    if (persisted.blocks?.find((block) => block.type === "form")?.fields?.[0]?.initial_value !== false || persisted.blocks?.some((block) =>
       block.type === "actions" && block.elements?.some((element) =>
         element.label === "Provider dashboard"
       )

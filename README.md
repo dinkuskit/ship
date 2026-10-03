@@ -6,9 +6,10 @@ is no label kernel, provider adapter, or published plugin yet.
 
 ## Status
 
-Product locks for coordinated Commerce v1 are recorded. Vendor, account, and
-funding are **not selected**. This repository currently holds charter,
-research, and contract documents only.
+Product locks and historical decisions are recorded below. The private local
+sandbox package now renders Ship settings through pinned EmDash 1.0.1.
+Commerce orders are unavailable until the authorized Core handoff exists;
+provider actions remain disabled. This is not a signed Registry release.
 
 - [Charter](docs/CHARTER.md)
 - [USPS feasibility research, 2026-09-30](docs/research/usps-feasibility-20260930.md)
@@ -102,16 +103,39 @@ future EmDash host. The package export is the supported local package path:
 node --input-type=module -e 'import("@dinkuskit/ship").then(({ default: plugin }) => console.log(Object.keys(plugin.routes)))'
 ```
 
-The routes are private POST/JSON routes named `admin`, `settings`, and
-`status`. They return JSON-serializable, read-only synthetic settings and do
-not call Pitney Bowes. The manifest requests no capabilities, hosts, or
-storage. Publisher identity is intentionally absent, so Registry validation,
-release, install, and publication remain separate gates.
+The private POST/JSON routes `admin`, `settings`, and `status` do not call
+Pitney Bowes. The Block Kit admin settings action persists a display preference
+in plugin-scoped storage. English and Arabic copy use the host's attested
+locale and direction. Unmounted orders fail closed. Synthetic order examples
+require the explicit isolated test fixture selector. Publisher identity and
+security contact remain absent; signed Registry release and publication are
+separate gates.
 
-The local proof is `npm test`; it checks the manifest and route shape alongside
-the fixture-backed quote → review → test-label workflow. It is not proof of a
-Registry runner, an EmDash host install, a provider hook, or Commerce runtime
-integration.
+`npm test` checks route contracts and deterministic fixtures. To prepare a
+config-managed sandbox host from a fresh packed package:
+
+```sh
+npm run prepare:sandbox
+cd runs/sandbox-host-local/host
+npm run dev
+```
+
+The loopback host runs on port 4343. Stop an existing task-owned host before
+starting another on that port. Use the installed runner, host directory, and
+URL with `verify:sandbox`:
+
+```sh
+EMDASH_SANDBOX_RUNNER_MODULE=file:///absolute/host/node_modules/@emdash-cms/sandbox-workerd/dist/sandbox/index.mjs \
+EMDASH_SANDBOX_HOST_DIR=/absolute/host \
+EMDASH_SANDBOX_HOST_URL=http://127.0.0.1:4343 npm run verify:sandbox
+```
+
+Run that command from this repository. Verification compares the current
+packed package with the host-installed files, exercises the actual private
+admin dispatcher, and checks storage persistence and Arabic RTL responses.
+This proves local config-managed sandbox execution, not signed Registry
+installation or Commerce/provider integration. See the dated proof under
+`proof/2026-10-03-emdash-sandbox-host/`.
 
 The native EmDash entry is exported as `@dinkuskit/ship/native`. A local host
 must install the package from an `npm pack` tarball and import that entry;
