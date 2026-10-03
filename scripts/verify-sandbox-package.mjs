@@ -74,16 +74,31 @@ try {
       return response.json();
     };
     const orders = await invoke({ page: "/orders", type: "page_load" });
+    await invoke({
+      page: "/settings",
+      type: "form_submit",
+      action_id: "save-preferences",
+      values: { showDashboardLinks: false },
+    });
+    const persisted = await invoke({ page: "/settings", type: "page_load" });
     const arabic = await invoke({ page: "/settings", type: "page_load" }, "ar-SA");
-    const serialized = JSON.stringify({ orders, arabic });
+    const serialized = JSON.stringify({ orders, persisted, arabic });
     if (/Order #1042|Sample Recipient|\$48\.00/.test(serialized)) {
       throw new Error("default sandbox UI exposed synthetic Commerce data");
     }
     if (!serialized.includes("إعدادات الشحن") || !serialized.includes("اتجاه المضيف: rtl")) {
       throw new Error("host-attested Arabic RTL response was not translated");
     }
+    if (persisted.blocks?.some((block) =>
+      block.type === "actions" && block.elements?.some((element) =>
+        element.label === "Provider dashboard"
+      )
+    )) {
+      throw new Error("settings action did not persist through host storage");
+    }
     console.log("sandbox_execution=passed");
     console.log("host_route=admin");
+    console.log("settings_persistence=passed");
     console.log("default_commerce_data=fail-closed");
     console.log("host_attested_arabic_rtl=passed");
   }

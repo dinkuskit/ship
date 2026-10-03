@@ -10,8 +10,8 @@ const COPY = {
   en: {
     orders: "Orders", settings: "Ship settings", unavailableData: "Commerce order data unavailable",
     emptyOrders: "No trusted Commerce order is mounted. This package is ready for a bounded Core handoff.",
-    proposeHandoff: "Propose a Commerce order handoff", handoff: "Proposed handoff · not mounted",
-    handoffDescription: "Core may provide one immutable paid order snapshot here; no Commerce capability is mounted.",
+    handoff: "No Commerce order mounted",
+    handoffDescription: "Core has not mounted an immutable paid order snapshot; Ship remains read-only.",
     synthetic: "Synthetic proof fixture",
     sample: "Use the explicit isolated fixture only to test this package seam.",
     open: "Open synthetic fixture", detail: "Synthetic order fixture",
@@ -38,8 +38,8 @@ const COPY = {
   ar: {
     orders: "الطلبات", settings: "إعدادات الشحن", unavailableData: "بيانات طلب Commerce غير متاحة",
     emptyOrders: "لا يوجد طلب موثوق من Commerce. الحزمة جاهزة لتسليم محدود إلى Core.",
-    proposeHandoff: "اقتراح تسليم طلب Commerce", handoff: "تسليم مقترح · غير مركّب",
-    handoffDescription: "يمكن لـ Core توفير لقطة واحدة ثابتة لطلب مدفوع هنا؛ لا توجد قدرة Commerce مركّبة.",
+    handoff: "لا يوجد طلب Commerce مركّب",
+    handoffDescription: "لم يركّب Core لقطة ثابتة لطلب مدفوع؛ يظل Ship للقراءة فقط.",
     synthetic: "بيانات اختبار اصطناعية", sample: "استخدم بيانات الاختبار المعزولة الصريحة فقط لاختبار هذه الحزمة.",
     open: "فتح بيانات الاختبار", detail: "طلب اختبار اصطناعي",
     label: "إنشاء ملصق شحن", back: "العودة إلى الطلبات", shipping: "الشحن",
@@ -153,7 +153,6 @@ function pageResponse(page, ui, t, saved, toast) {
     { type: "header", text: t.orders },
     { type: "banner", title: t.unavailableData, description: t.emptyOrders, variant: "alert" },
     { type: "fields", fields: [field(t.status, t.handoff), field(t.commerceReadOnly, t.handoffDescription)] },
-    { type: "actions", elements: [button("propose-order-handoff", t.proposeHandoff)] },
     { type: "context", text: t.context(ui) },
   ] };
 }

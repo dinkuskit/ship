@@ -31,6 +31,7 @@ test("sandbox admin route renders the real Block Kit contract", async () => {
   assert.equal(result.blocks[0].text, "Orders");
   assert.match(result.blocks[1].description, /No trusted Commerce order/);
   assert.doesNotMatch(JSON.stringify(result), /Order #1042|Sample Recipient|\$48\.00/);
+  assert.doesNotMatch(JSON.stringify(result), /Propose a Commerce order handoff|propose-order-handoff/);
   assert.equal(result.blocks.at(-1).type, "context");
   assert.match(result.blocks.at(-1).text, /Host direction: ltr/);
 });
