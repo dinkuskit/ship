@@ -3,6 +3,19 @@
 Public links that support the research and brief. Evidence hashes live in
 ignored `.artifacts/`. Do not treat this list as vendor selection.
 
+## EmDash plugin contract (fetched 2026-10-01)
+
+- https://docs.emdashcms.com/plugins/creating-plugins/manifest/
+- https://docs.emdashcms.com/plugins/creating-plugins/api-routes/
+- https://docs.emdashcms.com/plugins/creating-native-plugins/your-first-native-plugin/
+- https://docs.emdashcms.com/plugins/creating-native-plugins/distributing/
+
+These sources define the URL-safe plugin slug, empty trust-contract defaults,
+private JSON route behavior, POST body declaration, standard JSON envelope,
+native route context, and package export/install boundary. They do not prove
+that this repository has an EmDash host, Registry runner, publisher identity,
+release, or Commerce hook.
+
 ## Stripe
 
 - https://docs.stripe.com/api/shipping_rates

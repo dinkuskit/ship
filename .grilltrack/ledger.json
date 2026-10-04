@@ -1,7 +1,15 @@
 {
   "closeout": null,
   "created_at": "2026-10-01T02:35:23+00:00",
-  "current_focus": null,
+  "current_focus": {
+    "cadence": "sequential",
+    "confirmed": true,
+    "confirmed_at": "2026-10-01T23:41:23+00:00",
+    "domain": "PBsandbox Registry-enabled Ship plugin scaffold and Commerce handoff",
+    "started_at": "2026-10-01T23:41:23+00:00",
+    "status": "confirmed",
+    "summary": "Implement and verify the packaged sandbox-format BlockKit admin persistence slice, with exact install proof and a fail-closed gate when no real EmDash sandbox runner is configured."
+  },
   "decisions": [
     {
       "baseline_ref": "docs/CHARTER.md",
@@ -1218,15 +1226,228 @@
       "superseded_by": null,
       "updated_at": "2026-09-30T18:33:56+00:00",
       "verification_ref": null
+    },
+    {
+      "baseline_ref": "git:3ece87b00582eb376e266f8d53f935fc8fd23269",
+      "candidate_refs": [],
+      "choice": "A private packaged sandbox-format EmDash 1.0.1 BlockKit admin slice with ctx.storage persistence and host-attested locale/direction; no native-wrapper or fake-runner claim, and a fail-closed external-runner gate.",
+      "context_ref": "docs/decisions/pb-sandbox-interface-scope.md",
+      "created_at": "2026-10-01T15:58:09+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [
+        "commerce-vs-ship-ownership"
+      ],
+      "domain": "PBsandbox Registry-enabled Ship plugin scaffold and Commerce handoff",
+      "history": [
+        {
+          "at": "2026-10-01T15:58:09+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-01T16:27:46+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-01T16:27:52+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "implemented",
+          "implementation_ref": "files:emdash-plugin.jsonc,src/plugin.js,package.json,README.md,docs/CITATIONS.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-01T16:36:24+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "verified",
+          "implementation_ref": "files:emdash-plugin.jsonc,src/plugin.js,package.json,README.md,docs/CITATIONS.md",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [
+            "human_gate"
+          ],
+          "review_ref": ".grilltrack/proof/firstslice-independent-review-20261001.md",
+          "review_result": "findings",
+          "review_source_identity": "git:938908e2fecca4b335a0f70460d489d2b9eedde5",
+          "to": "needs_reverification",
+          "verification_ref": ".grilltrack/proof/emdash-plugin-slice-20261001.md;test:npm test;package:npm pack --dry-run;import:node self-reference"
+        },
+        {
+          "at": "2026-10-01T23:15:51+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "needs_reverification",
+          "implementation_ref": "files:emdash-plugin.jsonc,src/plugin.js,package.json,README.md,docs/CITATIONS.md",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": ".grilltrack/proof/firstslice-independent-review-20261001.md",
+          "review_result": "findings",
+          "review_source_identity": "git:d237936535bbf5d5442c47c9ae6b9fe01aca9b9a",
+          "to": "implemented",
+          "verification_ref": ".grilltrack/proof/emdash-plugin-slice-20261001.md;test:npm test;package:npm pack --dry-run;import:node self-reference"
+        },
+        {
+          "at": "2026-10-01T23:15:51+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "implemented",
+          "implementation_ref": "files:src/native/index.ts,src/native/admin.ts,emdash-plugin.jsonc,runs/native-admin-ui-proof-20261001/host",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": ".grilltrack/proof/emdash-plugin-slice-20261001.md;test:npm test;package:npm pack --dry-run;import:node self-reference"
+        },
+        {
+          "at": "2026-10-01T23:41:23+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "verified",
+          "implementation_ref": "files:src/native/index.ts,src/native/admin.ts,emdash-plugin.jsonc,runs/native-admin-ui-proof-20261001/host",
+          "note": "Approved bounded follow-up: packaged sandbox BlockKit admin persistence and exact runner gate.",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": ".grilltrack/proof/native-admin-ui-proof-20261001.md",
+          "review_result": "clean",
+          "review_source_identity": "git:77ff353521755610eed4385269eb6583df3f76e0",
+          "to": "reopened",
+          "verification_ref": ".grilltrack/proof/native-admin-ui-proof-20261001.md;test:npm test;host:EmDash 1.0.1 typecheck;host:127.0.0.1:4337"
+        },
+        {
+          "at": "2026-10-01T23:41:23+00:00",
+          "choice": "A private 0.0.0 EmDash 1.0.1 sandboxed plugin scaffold with native Ship settings and an attended synthetic test-label workflow, read-only Commerce handoff, no @dinkuskit/blocks dependency, no production/provider/account mutation, and local package/install-shape verification only.",
+          "from": "reopened",
+          "implementation_ref": "files:src/native/index.ts,src/native/admin.ts,emdash-plugin.jsonc,runs/native-admin-ui-proof-20261001/host",
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": ".grilltrack/proof/native-admin-ui-proof-20261001.md",
+          "review_result": "clean",
+          "review_source_identity": "git:77ff353521755610eed4385269eb6583df3f76e0",
+          "to": "locked",
+          "verification_ref": ".grilltrack/proof/native-admin-ui-proof-20261001.md;test:npm test;host:EmDash 1.0.1 typecheck;host:127.0.0.1:4337"
+        },
+        {
+          "at": "2026-10-01T23:41:23+00:00",
+          "choice": "A private packaged sandbox-format EmDash 1.0.1 BlockKit admin slice with ctx.storage persistence and host-attested locale/direction; no native-wrapper or fake-runner claim, and a fail-closed external-runner gate.",
+          "from": "locked",
+          "implementation_ref": "files:src/native/index.ts,src/native/admin.ts,emdash-plugin.jsonc,runs/native-admin-ui-proof-20261001/host",
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": ".grilltrack/proof/native-admin-ui-proof-20261001.md",
+          "review_result": "clean",
+          "review_source_identity": "git:77ff353521755610eed4385269eb6583df3f76e0",
+          "to": "implemented",
+          "verification_ref": ".grilltrack/proof/native-admin-ui-proof-20261001.md;test:npm test;host:EmDash 1.0.1 typecheck;host:127.0.0.1:4337"
+        },
+        {
+          "at": "2026-10-01T23:41:23+00:00",
+          "choice": "A private packaged sandbox-format EmDash 1.0.1 BlockKit admin slice with ctx.storage persistence and host-attested locale/direction; no native-wrapper or fake-runner claim, and a fail-closed external-runner gate.",
+          "from": "implemented",
+          "implementation_ref": "files:src/plugin.js,emdash-plugin.jsonc,package.json,scripts/verify-sandbox-package.mjs,test/sandbox-plugin.test.js,test/pb-sandbox.test.js,proof/2026-10-01-emdash-sandbox-blockkit",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": ".grilltrack/proof/native-admin-ui-proof-20261001.md;test:npm test;host:EmDash 1.0.1 typecheck;host:127.0.0.1:4337"
+        }
+      ],
+      "id": "pb-registry-scaffold-001",
+      "implementation_ref": "files:src/plugin.js,emdash-plugin.jsonc,package.json,scripts/verify-sandbox-package.mjs,test/sandbox-plugin.test.js,test/pb-sandbox.test.js,proof/2026-10-01-emdash-sandbox-blockkit",
+      "question": "What bounded implementation is admitted for the next PBsandbox milestone?",
+      "rationale": "Preserves existing Commerce/provider/identity boundaries while proving the supported package contract and truthful runtime gate.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [
+        {
+          "classifications": [],
+          "ref": ".grilltrack/proof/emdash-plugin-slice-20261001.md",
+          "result": "clean",
+          "reviewed_at": "2026-10-01T16:28:02+00:00",
+          "source_identity": "git:05ad6eb4b965dc8a26200d43da7a5bf6f9b9c8b4"
+        },
+        {
+          "classifications": [
+            "human_gate"
+          ],
+          "ref": ".grilltrack/proof/firstslice-independent-review-20261001.md",
+          "result": "findings",
+          "reviewed_at": "2026-10-01T16:33:22+00:00",
+          "source_identity": "git:938908e2fecca4b335a0f70460d489d2b9eedde5"
+        },
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": ".grilltrack/proof/firstslice-independent-review-20261001.md",
+          "result": "findings",
+          "reviewed_at": "2026-10-01T16:36:24+00:00",
+          "source_identity": "git:d237936535bbf5d5442c47c9ae6b9fe01aca9b9a"
+        },
+        {
+          "classifications": [],
+          "ref": ".grilltrack/proof/native-admin-ui-proof-20261001.md",
+          "result": "clean",
+          "reviewed_at": "2026-10-01T23:16:23+00:00",
+          "source_identity": "git:77ff353521755610eed4385269eb6583df3f76e0"
+        }
+      ],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-10-01T23:41:23+00:00",
+      "verification_ref": "proof/2026-10-01-emdash-sandbox-blockkit/PROOF.md;test:npm test (14 passed);package:private tarball install;gate:npm run verify:sandbox (blocked exit 2)"
     }
   ],
   "last_activation": {
-    "at": "2026-10-01T02:35:23+00:00",
+    "at": "2026-10-01T23:41:23+00:00",
     "mechanism": "implicit"
   },
   "last_pause": null,
   "pause": null,
-  "recommendation": null,
+  "recommendation": {
+    "alternatives": [
+      "Close this local slice and defer live/provider/consumer/taste proof"
+    ],
+    "reason": "Merchant funds own postage; this milestone proves only the private package seam and fixture workflow. Registry, release, install, actual Commerce hook, PB availability, consumer, and taste remain explicit gates.",
+    "recommended": "Registry runner/release/install plus actual Commerce hook proof, after separately authorized host and identity gates",
+    "recorded_at": "2026-10-01T16:28:19+00:00"
+  },
   "reconciliation": {
     "plan_id": "ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
     "refs": {
@@ -1240,5 +1461,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-01T02:35:23+00:00"
+  "updated_at": "2026-10-01T23:41:23+00:00"
 }

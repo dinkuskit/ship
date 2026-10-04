@@ -4,10 +4,22 @@
   "description": "Optional DinkusKit shipping automation. USPS label purchase and print required for coordinated Commerce v1; vendor unselected.",
   "type": "module",
   "private": true,
+  "files": [
+    "src",
+    "emdash-plugin.jsonc",
+    "README.md",
+    "LICENSE"
+  ],
+  "exports": {
+    ".": "./src/plugin.js",
+    "./plugin": "./src/plugin.js"
+  },
   "scripts": {
     "test": "node --test",
     "dev": "node src/server.js",
-    "fixture:proof": "PORT=4328 node test-support/fixture-server.js"
+    "fixture:proof": "PORT=4328 node test-support/fixture-server.js",
+    "verify:sandbox": "node scripts/verify-sandbox-package.mjs",
+    "prepare:sandbox": "node scripts/prepare-sandbox-host.mjs"
   },
   "license": "MIT",
   "repository": {
