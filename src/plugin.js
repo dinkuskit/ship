@@ -1,5 +1,7 @@
 // True sandbox-format entry: plain Block Kit JSON, no React/Kumo/host imports.
 
+import { projectSyntheticQuoteRequest } from "./package-validation.js";
+
 const LINK_URLS = Object.freeze([
   "https://developerhub-sandbox.shippingapi.pitneybowes.com/",
   "https://developerhub-sandbox.shippingapi.pitneybowes.com/shipping/postage-balance",
@@ -31,6 +33,11 @@ const COPY = {
     postageUnavailable: "Unavailable · requires provider setup", labelPrint: "Label / print",
     labelUnavailable: "Not created / not available", providerField: "Provider",
     providerDashboard: "Provider dashboard", postageBalance: "Postage balance", transactionHistory: "Transaction history",
+    package: "Package", weight: "Weight (lb)", dimensions: "Dimensions (in)",
+    quotePrerequisite: "Quote prerequisite", quoteUnavailable: "Unavailable · Commerce order binding is not available",
+    operationGate: "Operation gate", operationUnknown: "Original provider outcome unknown · blocked",
+    validation: "Package validation", valid: "Valid fixture package · quote request projection ready",
+    editPackage: "Edit package", updatePackage: "Update package", invalidPackage: "Package needs correction",
     context: (ui) => `Host locale: ${ui.locale} · Host direction: ${ui.direction} · Commerce: read-only handoff`,
     commerceReadOnly: "Commerce: read-only handoff",
     fixtureBanner: "Display-only isolated test fixture; this package does not read Commerce.",
@@ -59,6 +66,11 @@ const COPY = {
     postageUnavailable: "غير متاح · يتطلب إعداد المزود", labelPrint: "الملصق / الطباعة",
     labelUnavailable: "لم يُنشأ / غير متاح", providerField: "المزود",
     providerDashboard: "لوحة مزود الخدمة", postageBalance: "رصيد رسوم الشحن", transactionHistory: "سجل المعاملات",
+    package: "الطرد", weight: "الوزن (رطل)", dimensions: "الأبعاد (بوصة)",
+    quotePrerequisite: "متطلب عرض السعر", quoteUnavailable: "غير متاح · ربط طلب Commerce غير متاح",
+    operationGate: "بوابة العملية", operationUnknown: "نتيجة المزود الأصلية غير معروفة · محظورة",
+    validation: "التحقق من الطرد", valid: "طرد الاختبار صالح · إسقاط طلب عرض السعر جاهز",
+    editPackage: "تعديل الطرد", updatePackage: "تحديث الطرد", invalidPackage: "يحتاج الطرد إلى تصحيح",
     context: (ui) => `لغة المضيف: ${ui.locale} · اتجاه المضيف: ${ui.direction} · Commerce: تسليم للقراءة فقط`,
     commerceReadOnly: "Commerce: تسليم للقراءة فقط",
     fixtureBanner: "بيانات اختبار معزولة للعرض فقط؛ هذه الحزمة لا تقرأ Commerce.",
@@ -96,10 +108,27 @@ async function preferences(ctx) {
     : { showDashboardLinks: true };
 }
 
-function pageResponse(page, ui, t, saved, toast) {
+const DEFAULT_PACKAGE = Object.freeze({ weightLb: "2", lengthIn: "10", widthIn: "8", heightIn: "4" });
+
+function packageForm(t, values, submitLabel = t.updatePackage) {
+  return {
+    type: "form",
+    fields: [
+      { type: "text", action_id: "weightLb", label: t.weight, initial_value: values.weightLb },
+      { type: "text", action_id: "lengthIn", label: "Length", initial_value: values.lengthIn },
+      { type: "text", action_id: "widthIn", label: "Width", initial_value: values.widthIn },
+      { type: "text", action_id: "heightIn", label: "Height", initial_value: values.heightIn },
+    ],
+    submit: { label: submitLabel, action_id: "update-package" },
+  };
+}
+
+function pageResponse(page, ui, t, saved, toast, fixture = false, packageValues = DEFAULT_PACKAGE, packageResult = null) {
+  const fixtureOrder = t.fixtureOrder;
   if (page === "settings") {
     const blocks = [
       { type: "header", text: t.settings },
+      ...(fixture ? [{ type: "banner", title: t.synthetic, description: t.fixtureBanner, variant: "alert" }] : []),
       { type: "banner", title: t.notConnected, description: t.localProof, variant: "alert" },
       { type: "fields", fields: [
         field(t.providerStatus, t.provider),
@@ -137,15 +166,22 @@ function pageResponse(page, ui, t, saved, toast) {
   }
 
   if (page === "shipping") {
+    const packageStatus = packageResult?.ok ? t.valid : packageResult ? `${t.invalidPackage} · ${packageResult.message}` : t.valid;
     return { blocks: [
       { type: "header", text: t.shipping },
+      { type: "banner", title: t.synthetic, description: t.fixtureBanner, variant: "alert" },
       { type: "banner", title: t.review, description: t.unavailable, variant: "alert" },
       { type: "fields", fields: [
         field(t.order, t.fixtureOrder.number), field(t.recipient, `${t.fixtureOrder.recipient} · ${t.fixtureOrder.destination}`),
         field(t.paidTotal, t.fixtureOrder.paidTotal), field(t.providerField, t.provider),
+        field(t.package, `${packageValues.weightLb} lb · ${packageValues.lengthIn} × ${packageValues.widthIn} × ${packageValues.heightIn} in`),
+        field(t.validation, packageStatus),
+        field(t.quotePrerequisite, t.quoteUnavailable),
+        field(t.operationGate, t.operationUnknown),
         field(t.postage, t.postageUnavailable),
         field(t.labelPrint, t.labelUnavailable),
       ] },
+      packageForm(t, packageValues),
       { type: "actions", elements: [button("back-order-detail", t.detail), button("open-settings", t.settings)] },
       { type: "context", text: t.postageOwnership },
     ] };
@@ -153,8 +189,14 @@ function pageResponse(page, ui, t, saved, toast) {
 
   return { blocks: [
     { type: "header", text: t.orders },
-    { type: "banner", title: t.unavailableData, description: t.emptyOrders, variant: "alert" },
-    { type: "fields", fields: [field(t.status, t.handoff), field(t.commerceReadOnly, t.handoffDescription)] },
+    ...(fixture ? [
+      { type: "banner", title: t.synthetic, description: t.fixtureBanner, variant: "alert" },
+      { type: "fields", fields: [field(t.order, fixtureOrder.number), field(t.recipient, fixtureOrder.recipient), field(t.paidTotal, fixtureOrder.paidTotal)] },
+      { type: "actions", elements: [button("open-order", t.open)] },
+    ] : [
+      { type: "banner", title: t.unavailableData, description: t.emptyOrders, variant: "alert" },
+      { type: "fields", fields: [field(t.status, t.handoff), field(t.commerceReadOnly, t.handoffDescription)] },
+    ]),
     { type: "context", text: t.context(ui) },
   ] };
 }
@@ -179,15 +221,26 @@ async function admin(routeCtx, ctx) {
   }
 
   const isolatedFixture = input.fixture === "synthetic-order-1042";
+  const packageValues = {
+    ...DEFAULT_PACKAGE,
+    ...(input.values && typeof input.values === "object" ? input.values : {}),
+  };
+  if (isolatedFixture && input.type === "form_submit" && input.action_id === "update-package") {
+    const packageResult = projectSyntheticQuoteRequest({
+      order: { fixture: "synthetic-order-1042" },
+      package: packageValues,
+    });
+    return pageResponse("shipping", ui, t, saved, undefined, true, packageValues, packageResult);
+  }
   if (input.type === "block_action" && input.action_id === "open-settings") {
-    return pageResponse("settings", ui, t, saved);
+    return pageResponse("settings", ui, t, saved, undefined, isolatedFixture);
   }
   if (input.type === "block_action" && isolatedFixture) {
     if (input.action_id === "open-order" && input.fixture === "synthetic-order-1042") {
       return pageResponse("order-detail", ui, t, saved);
     }
     if (input.action_id === "make-postage-label") return pageResponse("shipping", ui, t, saved);
-    if (input.action_id === "back-orders") return pageResponse("orders", ui, t, saved);
+    if (input.action_id === "back-orders") return pageResponse("orders", ui, t, saved, undefined, true);
     if (input.action_id === "back-order-detail") return pageResponse("order-detail", ui, t, saved);
   }
 
@@ -195,7 +248,7 @@ async function admin(routeCtx, ctx) {
     : isolatedFixture && input.page === "/shipping" ? "shipping"
     : isolatedFixture && input.page === "/order-detail" ? "order-detail"
     : "orders";
-  return pageResponse(page, ui, t, saved);
+  return pageResponse(page, ui, t, saved, undefined, isolatedFixture);
 }
 
 const plugin = {

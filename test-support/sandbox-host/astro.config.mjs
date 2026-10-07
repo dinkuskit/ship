@@ -10,7 +10,7 @@ export default defineConfig({
     resolve: { dedupe: ["emdash", "@emdash-cms/blocks"] },
     ssr: { noExternal: ["emdash", "@emdash-cms/admin", "@emdash-cms/blocks"] },
   },
-  server: { host: "127.0.0.1", port: 4343, strictPort: true },
+  server: { host: "127.0.0.1", port: Number(process.env.PORT ?? 4343), strictPort: true },
   adapter: node({ mode: "standalone" }),
   integrations: [
     react(),

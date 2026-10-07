@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 
 const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const host = resolve(root, "runs/sandbox-host-local/host");
+const host = resolve(root, process.env.EMDASH_SANDBOX_HOST_DIR ?? "runs/sandbox-host-local/host");
 await mkdir(join(host, ".artifacts"), { recursive: true });
 await mkdir(join(host, "src"), { recursive: true });
 await mkdir(join(host, ".emdash/uploads"), { recursive: true });
