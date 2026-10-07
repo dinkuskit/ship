@@ -31,6 +31,9 @@ try {
     "src",
     "plugin.js",
   )).href;
+  const backendBytes = (await readFile(new URL(installedEntry))).byteLength;
+  if (backendBytes > 128 * 1024) throw new Error("standard backend exceeds the 128 KiB bundle cap");
+  console.log(`backend_bytes=${backendBytes};cap_bytes=131072`);
   const installed = await import(installedEntry);
   if (!installed.default?.routes?.admin) throw new Error("installed sandbox entry has no admin route");
   const installedManifest = await readFile(join(temp, "node_modules/@dinkuskit/ship/emdash-plugin.jsonc"), "utf8");
@@ -70,10 +73,22 @@ try {
     }
     console.log(`package_sha256=${createHash("sha256").update(await readFile(tarball)).digest("hex")}`);
     console.log("host_installed_package=matched");
+    const denied = await fetch(`${base}/_emdash/api/plugins/dinkuskit-ship/admin`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-EmDash-Request": "1",
+      },
+      body: JSON.stringify({ page: "/orders", type: "page_load" }),
+    });
+    if (denied.status !== 401 && denied.status !== 403) {
+      throw new Error(`unauthenticated admin request was not denied: ${denied.status}`);
+    }
+    console.log(`authorization_denial=passed:${denied.status}`);
     const bypass = await fetch(`${base}/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin`);
     const cookie = bypass.headers.get("set-cookie")?.split(";")[0];
     if (!cookie) throw new Error("sandbox host did not issue a local admin session");
-    const invoke = async (body, locale = "en-US", allowUnavailable = false) => {
+    const invoke = async (body, locale = "en-US") => {
       const response = await fetch(`${base}/_emdash/api/plugins/dinkuskit-ship/admin`, {
         method: "POST",
         headers: {
@@ -84,7 +99,6 @@ try {
         },
         body: JSON.stringify(body),
       });
-      if (allowUnavailable && response.status === 400) return { unavailable: true };
       if (!response.ok) throw new Error(`sandbox route returned ${response.status}`);
       const envelope = await response.json();
       if (envelope.success !== true || !Array.isArray(envelope.data?.blocks)) {
@@ -95,8 +109,8 @@ try {
     const orders = await invoke({ page: "/orders", type: "page_load" });
     const settingsAction = await invoke({ page: "/orders", type: "block_action", action_id: "open-settings" });
     if (settingsAction.blocks[0]?.text !== "Ship settings") throw new Error("settings navigation action did not reach settings");
-    const detail = await invoke({ page: "/order-detail", type: "page_load" }, "en-US", true);
-    const shipping = await invoke({ page: "/shipping", type: "page_load" }, "en-US", true);
+    const detail = await invoke({ page: "/order-detail", type: "page_load" }, "en-US");
+    const shipping = await invoke({ page: "/shipping", type: "page_load" }, "en-US");
     const fixtureDetail = await invoke({
       page: "/proof-fixture", type: "block_action", action_id: "open-order",
     });
@@ -120,11 +134,15 @@ try {
     const arabic = await invoke({ page: "/settings", type: "page_load" }, "ar-SA");
     const arabicFixture = await invoke({ page: "/proof-fixture", type: "block_action", action_id: "make-postage-label" }, "ar-SA");
     const arabicInvalid = await invoke({ page: "/proof-fixture", type: "form_submit", action_id: "update-package", values: { weightLb: "0", lengthIn: "10", widthIn: "8", heightIn: "4" } }, "ar-SA");
+    const fallback = await invoke({ page: "/proof-fixture", type: "block_action", action_id: "make-postage-label" }, "fr-FR");
+    const fallbackLabels = fallback.blocks.find(block => block.type === "form").fields.slice(1).map(field => field.label);
+    if (JSON.stringify(fallbackLabels) !== JSON.stringify(["Length", "Width", "Height"])) throw new Error("unsupported host locale did not fall back to English");
+    const afterInvalid = await invoke({ page: "/proof-fixture", type: "block_action", action_id: "make-postage-label" }, "en-US");
     const invalidStatus = arabicInvalid.blocks.find(block => block.type === "fields").fields.find(field => field.label === "التحقق من الطرد").value;
     if (invalidStatus !== "يحتاج الطرد إلى تصحيح · يجب أن يكون الوزن والأبعاد أكبر من الصفر.") throw new Error("installed invalid package message is not Arabic");
     const arabicLabels = arabicFixture.blocks.find(block => block.type === "form").fields.slice(1).map(field => field.label);
     if (JSON.stringify(arabicLabels) !== JSON.stringify(["الطول", "العرض", "الارتفاع"])) throw new Error("installed fixture dimension labels are not Arabic");
-    const serialized = JSON.stringify({ orders, detail, shipping, fixtureDetail, fixtureShipping, fixtureUpdated, persisted, arabic });
+    const serialized = JSON.stringify({ orders, detail, shipping, fixtureDetail, fixtureShipping, fixtureUpdated, persisted, arabic, afterInvalid });
     if (/Order #1042|Sample Recipient|\$48\.00/.test(JSON.stringify({ orders, detail, shipping, persisted, arabic }))) {
       throw new Error("default sandbox UI exposed synthetic Commerce data");
     }
@@ -144,11 +162,18 @@ try {
     )) {
       throw new Error("settings action did not persist through host storage");
     }
+    const persistedPackage = afterInvalid.blocks?.find((block) => block.type === "fields")?.fields
+      ?.find((field) => field.label === "Package")?.value;
+    if (persistedPackage !== "3.5 lb · 12 × 9 × 5 in") {
+      throw new Error(`invalid package submission overwrote valid persisted package: ${persistedPackage}`);
+    }
     console.log("sandbox_execution=passed");
     console.log("host_route=admin");
     console.log("settings_persistence=passed");
+    console.log("invalid_package_persistence=preserved");
     console.log("default_commerce_data=fail-closed");
     console.log("host_attested_arabic_rtl=passed");
+    console.log("host_locale_fallback=passed");
   }
 } finally {
   await rm(temp, { recursive: true, force: true });
