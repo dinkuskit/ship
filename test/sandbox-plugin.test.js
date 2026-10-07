@@ -207,6 +207,92 @@ test("invalid package form remains visibly unavailable", async () => {
   assert.match(JSON.stringify(result), /Commerce order binding is not available/);
 });
 
+test("package form maps every visible validation code to Arabic copy", async () => {
+  const cases = [
+    {
+      name: "invalid number",
+      values: { weightLb: "NaN", lengthIn: "10", widthIn: "8", heightIn: "4" },
+      message: "يجب أن يكون الوزن والأبعاد قيمًا عشرية منتهية.",
+    },
+    {
+      name: "nonpositive",
+      values: { weightLb: "2", lengthIn: "0", widthIn: "8", heightIn: "4" },
+      message: "يجب أن يكون الوزن والأبعاد أكبر من الصفر.",
+    },
+    {
+      name: "weight out of range",
+      values: { weightLb: "71", lengthIn: "10", widthIn: "8", heightIn: "4" },
+      message: "يجب ألا يزيد الوزن عن 70 رطل.",
+    },
+    {
+      name: "dimensions out of range",
+      values: { weightLb: "2", lengthIn: "85", widthIn: "8", heightIn: "4" },
+      message: "يجب ألا يتجاوز الطول مع المحيط 108 بوصة.",
+    },
+  ];
+
+  for (const testCase of cases) {
+    const result = await route({
+      input: {
+        type: "form_submit",
+        action_id: "update-package",
+        fixture: "synthetic-order-1042",
+        values: testCase.values,
+      },
+      ui: { locale: "ar-SA", direction: "rtl" },
+    }, ctx());
+    const validation = result.blocks.find((block) => block.type === "fields")
+      .fields.find((field) => field.label === "التحقق من الطرد");
+
+    assert.equal(validation.value, `يحتاج الطرد إلى تصحيح · ${testCase.message}`, testCase.name);
+    assert.doesNotMatch(validation.value, /Weight|Length|girth|must|finite|greater/);
+  }
+});
+
+test("package form keeps English validation copy for default and locale fallback", async () => {
+  const cases = [
+    {
+      name: "invalid number",
+      values: { weightLb: "NaN", lengthIn: "10", widthIn: "8", heightIn: "4" },
+      message: "Weight and dimensions must be finite decimal values.",
+    },
+    {
+      name: "nonpositive",
+      values: { weightLb: "2", lengthIn: "0", widthIn: "8", heightIn: "4" },
+      message: "Weight and dimensions must be greater than zero.",
+    },
+    {
+      name: "weight out of range",
+      values: { weightLb: "71", lengthIn: "10", widthIn: "8", heightIn: "4" },
+      message: "Weight must be no more than 70 lb.",
+    },
+    {
+      name: "dimensions out of range",
+      values: { weightLb: "2", lengthIn: "85", widthIn: "8", heightIn: "4" },
+      message: "Length plus girth must be no more than 108 in.",
+    },
+  ];
+
+  for (const locale of [undefined, "zz-ZZ"]) {
+    for (const testCase of cases) {
+      const result = await route({
+        input: {
+          type: "form_submit",
+          action_id: "update-package",
+          fixture: "synthetic-order-1042",
+          values: testCase.values,
+        },
+        ui: locale ? { locale, direction: "ltr" } : undefined,
+      }, ctx());
+      const validation = result.blocks.find((block) => block.type === "fields")
+        .fields.find((field) => field.label === "Package validation");
+
+      assert.equal(validation.value, `Package needs correction · ${testCase.message}`,
+        `${locale ?? "default"}: ${testCase.name}`);
+    }
+  }
+});
+
 test("package projection rejects invalid, nonfinite, nonpositive, out-of-range, and missing orders", () => {
   const base = { weightLb: "2", lengthIn: "10", widthIn: "8", heightIn: "4" };
   assert.equal(projectSyntheticQuoteRequest({ package: base }).code, "no_order");

@@ -114,6 +114,14 @@ const COPY = {
     operationGate: "Operation gate", operationUnknown: "Original provider outcome unknown · blocked",
     validation: "Package validation", valid: "Valid fixture package · quote request projection ready",
     editPackage: "Edit package", updatePackage: "Update package", invalidPackage: "Package needs correction",
+    packageErrors: {
+      invalid_number: "Weight and dimensions must be finite decimal values.",
+      nonpositive: "Weight and dimensions must be greater than zero.",
+      weight_out_of_range: `Weight must be no more than ${MAX_WEIGHT_LB} lb.`,
+      dimensions_out_of_range: `Length plus girth must be no more than ${MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN} in.`,
+      no_order: "A synthetic fixture order is required before package review.",
+      fallback: "The package could not be reviewed.",
+    },
     context: (ui) => `Host locale: ${ui.locale} · Host direction: ${ui.direction} · Commerce: read-only handoff`,
     commerceReadOnly: "Commerce: read-only handoff",
     fixtureBanner: "Display-only isolated test fixture; this package does not read Commerce.",
@@ -147,6 +155,14 @@ const COPY = {
     operationGate: "بوابة العملية", operationUnknown: "نتيجة المزود الأصلية غير معروفة · محظورة",
     validation: "التحقق من الطرد", valid: "طرد الاختبار صالح · إسقاط طلب عرض السعر جاهز",
     editPackage: "تعديل الطرد", updatePackage: "تحديث الطرد", invalidPackage: "يحتاج الطرد إلى تصحيح",
+    packageErrors: {
+      invalid_number: "يجب أن يكون الوزن والأبعاد قيمًا عشرية منتهية.",
+      nonpositive: "يجب أن يكون الوزن والأبعاد أكبر من الصفر.",
+      weight_out_of_range: `يجب ألا يزيد الوزن عن ${MAX_WEIGHT_LB} رطل.`,
+      dimensions_out_of_range: `يجب ألا يتجاوز الطول مع المحيط ${MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN} بوصة.`,
+      no_order: "يلزم وجود طلب من بيانات الاختبار الاصطناعية قبل مراجعة الطرد.",
+      fallback: "تعذر مراجعة الطرد.",
+    },
     context: (ui) => `لغة المضيف: ${ui.locale} · اتجاه المضيف: ${ui.direction} · Commerce: تسليم للقراءة فقط`,
     commerceReadOnly: "Commerce: تسليم للقراءة فقط",
     fixtureBanner: "بيانات اختبار معزولة للعرض فقط؛ هذه الحزمة لا تقرأ Commerce.",
@@ -175,6 +191,10 @@ function hostUi(routeCtx) {
 
 function copy(locale) {
   return COPY[locale.split("-")[0]] ?? COPY.en;
+}
+
+function packageErrorMessage(t, code) {
+  return t.packageErrors[code] ?? t.packageErrors.fallback;
 }
 
 async function preferences(ctx) {
@@ -242,7 +262,8 @@ function pageResponse(page, ui, t, saved, toast, fixture = false, packageValues 
   }
 
   if (page === "shipping") {
-    const packageStatus = packageResult?.ok ? t.valid : packageResult ? `${t.invalidPackage} · ${packageResult.message}` : t.valid;
+    const packageStatus = packageResult?.ok ? t.valid :
+      packageResult ? `${t.invalidPackage} · ${packageErrorMessage(t, packageResult.code)}` : t.valid;
     return { blocks: [
       { type: "header", text: t.shipping },
       { type: "banner", title: t.synthetic, description: t.fixtureBanner, variant: "alert" },
