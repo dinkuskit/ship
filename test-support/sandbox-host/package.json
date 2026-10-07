@@ -6,7 +6,7 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "dev": "astro dev --host 127.0.0.1 --port 4343",
+    "dev": "astro dev --host 127.0.0.1",
     "typecheck": "astro check"
   },
   "dependencies": {

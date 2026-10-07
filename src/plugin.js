@@ -1,5 +1,83 @@
 // True sandbox-format entry: plain Block Kit JSON, no React/Kumo/host imports.
 
+const MAX_WEIGHT_LB = 70;
+const MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN = 108;
+
+const SYNTHETIC_DESTINATION = Object.freeze({
+  country: "US",
+  addressLine: "100 Example Avenue",
+  city: "Anytown",
+  region: "CA",
+  postalCode: "90210",
+});
+
+const SYNTHETIC_PAID_TOTAL = Object.freeze({
+  amount: 48,
+  currency: "USD",
+  status: "paid",
+});
+
+function invalid(code, message) {
+  return Object.freeze({ ok: false, code, message });
+}
+
+function decimal(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || value.length > 30 || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function validatePackage(packageInput) {
+  const weightLb = decimal(packageInput?.weightLb);
+  const lengthIn = decimal(packageInput?.lengthIn);
+  const widthIn = decimal(packageInput?.widthIn);
+  const heightIn = decimal(packageInput?.heightIn);
+  if ([weightLb, lengthIn, widthIn, heightIn].some((value) => value === null)) {
+    return invalid("invalid_number", "Weight and dimensions must be finite decimal values.");
+  }
+  if ([weightLb, lengthIn, widthIn, heightIn].some((value) => value <= 0)) {
+    return invalid("nonpositive", "Weight and dimensions must be greater than zero.");
+  }
+  if (weightLb > MAX_WEIGHT_LB) {
+    return invalid("weight_out_of_range", `Weight must be no more than ${MAX_WEIGHT_LB} lb.`);
+  }
+  const [longest, middle, shortest] = [lengthIn, widthIn, heightIn].sort((a, b) => b - a);
+  if (longest + (2 * (middle + shortest)) > MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN) {
+    return invalid(
+      "dimensions_out_of_range",
+      `Length plus girth must be no more than ${MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN} in.`,
+    );
+  }
+  return Object.freeze({ ok: true, package: Object.freeze({
+    weight: weightLb,
+    weightUnit: "lb",
+    dimensions: Object.freeze({ length: lengthIn, width: widthIn, height: heightIn, unit: "in" }),
+  }) });
+}
+
+export function projectSyntheticQuoteRequest({ order, package: packageInput } = {}) {
+  if (order?.fixture !== "synthetic-order-1042") {
+    return invalid("no_order", "A synthetic fixture order is required before package review.");
+  }
+  const result = validatePackage(packageInput);
+  if (!result.ok) return result;
+  return Object.freeze({
+    ok: true,
+    request: Object.freeze({
+      destination: SYNTHETIC_DESTINATION,
+      package: result.package,
+      service: "USPS Priority Mail",
+      quotePrerequisite: "commerce_unavailable",
+      operationGate: "original_provider_unknown",
+    }),
+    paidTotal: SYNTHETIC_PAID_TOTAL,
+  });
+}
+
+export { SYNTHETIC_DESTINATION, SYNTHETIC_PAID_TOTAL, validatePackage };
+
+
 const LINK_URLS = Object.freeze([
   "https://developerhub-sandbox.shippingapi.pitneybowes.com/",
   "https://developerhub-sandbox.shippingapi.pitneybowes.com/shipping/postage-balance",
@@ -31,6 +109,19 @@ const COPY = {
     postageUnavailable: "Unavailable · requires provider setup", labelPrint: "Label / print",
     labelUnavailable: "Not created / not available", providerField: "Provider",
     providerDashboard: "Provider dashboard", postageBalance: "Postage balance", transactionHistory: "Transaction history",
+    package: "Package", weight: "Weight (lb)", length: "Length", width: "Width", height: "Height", dimensions: "Dimensions (in)",
+    quotePrerequisite: "Quote prerequisite", quoteUnavailable: "Unavailable · Commerce order binding is not available",
+    operationGate: "Operation gate", operationUnknown: "Original provider outcome unknown · blocked",
+    validation: "Package validation", valid: "Valid fixture package · quote request projection ready",
+    editPackage: "Edit package", updatePackage: "Update package", invalidPackage: "Package needs correction",
+    packageErrors: {
+      invalid_number: "Weight and dimensions must be finite decimal values.",
+      nonpositive: "Weight and dimensions must be greater than zero.",
+      weight_out_of_range: `Weight must be no more than ${MAX_WEIGHT_LB} lb.`,
+      dimensions_out_of_range: `Length plus girth must be no more than ${MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN} in.`,
+      no_order: "A synthetic fixture order is required before package review.",
+      fallback: "The package could not be reviewed.",
+    },
     context: (ui) => `Host locale: ${ui.locale} · Host direction: ${ui.direction} · Commerce: read-only handoff`,
     commerceReadOnly: "Commerce: read-only handoff",
     fixtureBanner: "Display-only isolated test fixture; this package does not read Commerce.",
@@ -59,6 +150,19 @@ const COPY = {
     postageUnavailable: "غير متاح · يتطلب إعداد المزود", labelPrint: "الملصق / الطباعة",
     labelUnavailable: "لم يُنشأ / غير متاح", providerField: "المزود",
     providerDashboard: "لوحة مزود الخدمة", postageBalance: "رصيد رسوم الشحن", transactionHistory: "سجل المعاملات",
+    package: "الطرد", weight: "الوزن (رطل)", length: "الطول", width: "العرض", height: "الارتفاع", dimensions: "الأبعاد (بوصة)",
+    quotePrerequisite: "متطلب عرض السعر", quoteUnavailable: "غير متاح · ربط طلب Commerce غير متاح",
+    operationGate: "بوابة العملية", operationUnknown: "نتيجة المزود الأصلية غير معروفة · محظورة",
+    validation: "التحقق من الطرد", valid: "طرد الاختبار صالح · إسقاط طلب عرض السعر جاهز",
+    editPackage: "تعديل الطرد", updatePackage: "تحديث الطرد", invalidPackage: "يحتاج الطرد إلى تصحيح",
+    packageErrors: {
+      invalid_number: "يجب أن يكون الوزن والأبعاد قيمًا عشرية منتهية.",
+      nonpositive: "يجب أن يكون الوزن والأبعاد أكبر من الصفر.",
+      weight_out_of_range: `يجب ألا يزيد الوزن عن ${MAX_WEIGHT_LB} رطل.`,
+      dimensions_out_of_range: `يجب ألا يتجاوز الطول مع المحيط ${MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN} بوصة.`,
+      no_order: "يلزم وجود طلب من بيانات الاختبار الاصطناعية قبل مراجعة الطرد.",
+      fallback: "تعذر مراجعة الطرد.",
+    },
     context: (ui) => `لغة المضيف: ${ui.locale} · اتجاه المضيف: ${ui.direction} · Commerce: تسليم للقراءة فقط`,
     commerceReadOnly: "Commerce: تسليم للقراءة فقط",
     fixtureBanner: "بيانات اختبار معزولة للعرض فقط؛ هذه الحزمة لا تقرأ Commerce.",
@@ -89,6 +193,10 @@ function copy(locale) {
   return COPY[locale.split("-")[0]] ?? COPY.en;
 }
 
+function packageErrorMessage(t, code) {
+  return t.packageErrors[code] ?? t.packageErrors.fallback;
+}
+
 async function preferences(ctx) {
   const value = await ctx.storage.preferences.get("admin");
   return value && typeof value === "object"
@@ -96,10 +204,27 @@ async function preferences(ctx) {
     : { showDashboardLinks: true };
 }
 
-function pageResponse(page, ui, t, saved, toast) {
+const DEFAULT_PACKAGE = Object.freeze({ weightLb: "2", lengthIn: "10", widthIn: "8", heightIn: "4" });
+
+function packageForm(t, values, submitLabel = t.updatePackage) {
+  return {
+    type: "form",
+    fields: [
+      { type: "text_input", action_id: "weightLb", label: t.weight, initial_value: values.weightLb },
+      { type: "text_input", action_id: "lengthIn", label: t.length, initial_value: values.lengthIn },
+      { type: "text_input", action_id: "widthIn", label: t.width, initial_value: values.widthIn },
+      { type: "text_input", action_id: "heightIn", label: t.height, initial_value: values.heightIn },
+    ],
+    submit: { label: submitLabel, action_id: "update-package" },
+  };
+}
+
+function pageResponse(page, ui, t, saved, toast, fixture = false, packageValues = DEFAULT_PACKAGE, packageResult = null) {
+  const fixtureOrder = t.fixtureOrder;
   if (page === "settings") {
     const blocks = [
       { type: "header", text: t.settings },
+      ...(fixture ? [{ type: "banner", title: t.synthetic, description: t.fixtureBanner, variant: "alert" }] : []),
       { type: "banner", title: t.notConnected, description: t.localProof, variant: "alert" },
       { type: "fields", fields: [
         field(t.providerStatus, t.provider),
@@ -137,15 +262,23 @@ function pageResponse(page, ui, t, saved, toast) {
   }
 
   if (page === "shipping") {
+    const packageStatus = packageResult?.ok ? t.valid :
+      packageResult ? `${t.invalidPackage} · ${packageErrorMessage(t, packageResult.code)}` : t.valid;
     return { blocks: [
       { type: "header", text: t.shipping },
+      { type: "banner", title: t.synthetic, description: t.fixtureBanner, variant: "alert" },
       { type: "banner", title: t.review, description: t.unavailable, variant: "alert" },
       { type: "fields", fields: [
         field(t.order, t.fixtureOrder.number), field(t.recipient, `${t.fixtureOrder.recipient} · ${t.fixtureOrder.destination}`),
         field(t.paidTotal, t.fixtureOrder.paidTotal), field(t.providerField, t.provider),
+        field(t.package, `${packageValues.weightLb} lb · ${packageValues.lengthIn} × ${packageValues.widthIn} × ${packageValues.heightIn} in`),
+        field(t.validation, packageStatus),
+        field(t.quotePrerequisite, t.quoteUnavailable),
+        field(t.operationGate, t.operationUnknown),
         field(t.postage, t.postageUnavailable),
         field(t.labelPrint, t.labelUnavailable),
       ] },
+      packageForm(t, packageValues),
       { type: "actions", elements: [button("back-order-detail", t.detail), button("open-settings", t.settings)] },
       { type: "context", text: t.postageOwnership },
     ] };
@@ -153,8 +286,14 @@ function pageResponse(page, ui, t, saved, toast) {
 
   return { blocks: [
     { type: "header", text: t.orders },
-    { type: "banner", title: t.unavailableData, description: t.emptyOrders, variant: "alert" },
-    { type: "fields", fields: [field(t.status, t.handoff), field(t.commerceReadOnly, t.handoffDescription)] },
+    ...(fixture ? [
+      { type: "banner", title: t.synthetic, description: t.fixtureBanner, variant: "alert" },
+      { type: "fields", fields: [field(t.order, fixtureOrder.number), field(t.recipient, fixtureOrder.recipient), field(t.paidTotal, fixtureOrder.paidTotal)] },
+      { type: "actions", elements: [button("open-order", t.open)] },
+    ] : [
+      { type: "banner", title: t.unavailableData, description: t.emptyOrders, variant: "alert" },
+      { type: "fields", fields: [field(t.status, t.handoff), field(t.commerceReadOnly, t.handoffDescription)] },
+    ]),
     { type: "context", text: t.context(ui) },
   ] };
 }
@@ -178,16 +317,31 @@ async function admin(routeCtx, ctx) {
     });
   }
 
-  const isolatedFixture = input.fixture === "synthetic-order-1042";
+  const isolatedFixture = input.fixture === "synthetic-order-1042" || input.page === "/proof-fixture";
+  const storedPackage = isolatedFixture ? await ctx.storage.preferences.get("synthetic-package") : null;
+  const submitted = input.type === "form_submit" && input.action_id === "update-package";
+  const source = submitted ? input.values : storedPackage ?? DEFAULT_PACKAGE;
+  const packageValues = Object.fromEntries(Object.keys(DEFAULT_PACKAGE).map(key => [key,
+    typeof source?.[key] === "string" ? source[key].slice(0, 30) :
+    typeof source?.[key] === "number" ? String(source[key]) : "",
+  ]));
+  if (isolatedFixture && input.type === "form_submit" && input.action_id === "update-package") {
+    const packageResult = projectSyntheticQuoteRequest({
+      order: { fixture: "synthetic-order-1042" },
+      package: packageValues,
+    });
+    if (packageResult.ok) await ctx.storage.preferences.put("synthetic-package", packageValues);
+    return pageResponse("shipping", ui, t, saved, undefined, true, packageValues, packageResult);
+  }
   if (input.type === "block_action" && input.action_id === "open-settings") {
-    return pageResponse("settings", ui, t, saved);
+    return pageResponse("settings", ui, t, saved, undefined, isolatedFixture);
   }
   if (input.type === "block_action" && isolatedFixture) {
-    if (input.action_id === "open-order" && input.fixture === "synthetic-order-1042") {
+    if (input.action_id === "open-order") {
       return pageResponse("order-detail", ui, t, saved);
     }
-    if (input.action_id === "make-postage-label") return pageResponse("shipping", ui, t, saved);
-    if (input.action_id === "back-orders") return pageResponse("orders", ui, t, saved);
+    if (input.action_id === "make-postage-label") return pageResponse("shipping", ui, t, saved, undefined, true, packageValues);
+    if (input.action_id === "back-orders") return pageResponse("orders", ui, t, saved, undefined, true);
     if (input.action_id === "back-order-detail") return pageResponse("order-detail", ui, t, saved);
   }
 
@@ -195,7 +349,7 @@ async function admin(routeCtx, ctx) {
     : isolatedFixture && input.page === "/shipping" ? "shipping"
     : isolatedFixture && input.page === "/order-detail" ? "order-detail"
     : "orders";
-  return pageResponse(page, ui, t, saved);
+  return pageResponse(page, ui, t, saved, undefined, isolatedFixture, packageValues);
 }
 
 const plugin = {

@@ -97,6 +97,19 @@ try {
     if (settingsAction.blocks[0]?.text !== "Ship settings") throw new Error("settings navigation action did not reach settings");
     const detail = await invoke({ page: "/order-detail", type: "page_load" }, "en-US", true);
     const shipping = await invoke({ page: "/shipping", type: "page_load" }, "en-US", true);
+    const fixtureDetail = await invoke({
+      page: "/proof-fixture", type: "block_action", action_id: "open-order",
+    });
+    const fixtureShipping = await invoke({
+      page: "/proof-fixture", type: "block_action", action_id: "make-postage-label",
+    });
+    const fixtureUpdated = await invoke({
+      page: "/proof-fixture",
+      type: "form_submit",
+      action_id: "update-package",
+      fixture: "synthetic-order-1042",
+      values: { weightLb: "3.5", lengthIn: "12", widthIn: "9", heightIn: "5" },
+    });
     await invoke({
       page: "/settings",
       type: "form_submit",
@@ -105,9 +118,21 @@ try {
     });
     const persisted = await invoke({ page: "/settings", type: "page_load" });
     const arabic = await invoke({ page: "/settings", type: "page_load" }, "ar-SA");
-    const serialized = JSON.stringify({ orders, detail, shipping, persisted, arabic });
-    if (/Order #1042|Sample Recipient|\$48\.00/.test(serialized)) {
+    const arabicFixture = await invoke({ page: "/proof-fixture", type: "block_action", action_id: "make-postage-label" }, "ar-SA");
+    const arabicInvalid = await invoke({ page: "/proof-fixture", type: "form_submit", action_id: "update-package", values: { weightLb: "0", lengthIn: "10", widthIn: "8", heightIn: "4" } }, "ar-SA");
+    const invalidStatus = arabicInvalid.blocks.find(block => block.type === "fields").fields.find(field => field.label === "التحقق من الطرد").value;
+    if (invalidStatus !== "يحتاج الطرد إلى تصحيح · يجب أن يكون الوزن والأبعاد أكبر من الصفر.") throw new Error("installed invalid package message is not Arabic");
+    const arabicLabels = arabicFixture.blocks.find(block => block.type === "form").fields.slice(1).map(field => field.label);
+    if (JSON.stringify(arabicLabels) !== JSON.stringify(["الطول", "العرض", "الارتفاع"])) throw new Error("installed fixture dimension labels are not Arabic");
+    const serialized = JSON.stringify({ orders, detail, shipping, fixtureDetail, fixtureShipping, fixtureUpdated, persisted, arabic });
+    if (/Order #1042|Sample Recipient|\$48\.00/.test(JSON.stringify({ orders, detail, shipping, persisted, arabic }))) {
       throw new Error("default sandbox UI exposed synthetic Commerce data");
+    }
+    if (!serialized.includes("Display-only isolated test fixture") ||
+      !serialized.includes("Commerce order binding is not available") ||
+      !serialized.includes("Original provider outcome unknown") ||
+      !serialized.includes("3.5 lb")) {
+      throw new Error("fixture package flow did not preserve its explicit fail-closed boundaries");
     }
     if (!serialized.includes("إعدادات الشحن") || !serialized.includes("اتجاه المضيف: rtl")) {
       throw new Error("host-attested Arabic RTL response was not translated");

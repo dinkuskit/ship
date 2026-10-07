@@ -4,11 +4,11 @@
   "current_focus": {
     "cadence": "sequential",
     "confirmed": true,
-    "confirmed_at": "2026-10-01T23:41:23+00:00",
+    "confirmed_at": "2026-10-07T02:47:44+00:00",
     "domain": "PBsandbox Registry-enabled Ship plugin scaffold and Commerce handoff",
-    "started_at": "2026-10-01T23:41:23+00:00",
+    "started_at": "2026-10-07T02:47:34+00:00",
     "status": "confirmed",
-    "summary": "Implement and verify the packaged sandbox-format BlockKit admin persistence slice, with exact install proof and a fail-closed gate when no real EmDash sandbox runner is configured."
+    "summary": "User authorized continued Ship work; same synthetic package form scope, no provider mutation or Commerce write"
   },
   "decisions": [
     {
@@ -1432,10 +1432,135 @@
       "superseded_by": null,
       "updated_at": "2026-10-01T23:41:23+00:00",
       "verification_ref": "proof/2026-10-01-emdash-sandbox-blockkit/PROOF.md;test:npm test (14 passed);package:private tarball install;gate:npm run verify:sandbox (blocked exit 2)"
+    },
+    {
+      "baseline_ref": "git:16f962eb8f3f373f0231a736a3f4ceb34bac94e6",
+      "candidate_refs": [],
+      "choice": "Synthetic fixture-only Ship sandbox BlockKit package editing and validation for US domestic weight/dimensions, with fixed fixture destination and immutable paid totals; quote prerequisite remains Commerce-unavailable and original provider unknown remains blocked.",
+      "context_ref": "README.md;docs/CHARTER.md;docs/contracts/commerce-ship-v1.md",
+      "created_at": "2026-10-07T02:33:01+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [],
+      "domain": "PBsandbox Registry-enabled Ship plugin scaffold and Commerce handoff",
+      "history": [
+        {
+          "at": "2026-10-07T02:33:01+00:00",
+          "choice": "Synthetic fixture-only Ship sandbox BlockKit package editing and validation for US domestic weight/dimensions, with fixed fixture destination and immutable paid totals; quote prerequisite remains Commerce-unavailable and original provider unknown remains blocked.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-07T02:33:24+00:00",
+          "choice": "Synthetic fixture-only Ship sandbox BlockKit package editing and validation for US domestic weight/dimensions, with fixed fixture destination and immutable paid totals; quote prerequisite remains Commerce-unavailable and original provider unknown remains blocked.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-07T02:33:24+00:00",
+          "choice": "Synthetic fixture-only Ship sandbox BlockKit package editing and validation for US domestic weight/dimensions, with fixed fixture destination and immutable paid totals; quote prerequisite remains Commerce-unavailable and original provider unknown remains blocked.",
+          "from": "implemented",
+          "implementation_ref": "src/plugin.js,src/package-validation.js,test/sandbox-plugin.test.js,scripts/verify-sandbox-package.mjs",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-07T02:47:34+00:00",
+          "choice": "Synthetic fixture-only Ship sandbox BlockKit package editing and validation for US domestic weight/dimensions, with fixed fixture destination and immutable paid totals; quote prerequisite remains Commerce-unavailable and original provider unknown remains blocked.",
+          "from": "verified",
+          "implementation_ref": "src/plugin.js,src/package-validation.js,test/sandbox-plugin.test.js,scripts/verify-sandbox-package.mjs",
+          "note": "Repair installed sandbox module loading and form fields; add actual runtime and GUI proof within the same authorized scope",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "reopened",
+          "verification_ref": "runs/ignoredruns/order-sandbox-quotes-20261006/PROOF.md;npm test (22 passed);verify:sandbox package_install=passed sandbox_execution=not_claimed"
+        },
+        {
+          "at": "2026-10-07T02:47:34+00:00",
+          "choice": "Synthetic fixture-only Ship sandbox BlockKit package editing and validation for US domestic weight/dimensions, with fixed fixture destination and immutable paid totals; quote prerequisite remains Commerce-unavailable and original provider unknown remains blocked.",
+          "from": "reopened",
+          "implementation_ref": "src/plugin.js,src/package-validation.js,test/sandbox-plugin.test.js,scripts/verify-sandbox-package.mjs",
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": "runs/ignoredruns/order-sandbox-quotes-20261006/PROOF.md;npm test (22 passed);verify:sandbox package_install=passed sandbox_execution=not_claimed"
+        },
+        {
+          "at": "2026-10-07T02:47:44+00:00",
+          "choice": "Synthetic fixture-only Ship sandbox BlockKit package editing and validation for US domestic weight/dimensions, with fixed fixture destination and immutable paid totals; quote prerequisite remains Commerce-unavailable and original provider unknown remains blocked.",
+          "from": "locked",
+          "implementation_ref": "src/plugin.js,src/package-validation.js,test/sandbox-plugin.test.js,scripts/verify-sandbox-package.mjs",
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": "runs/ignoredruns/order-sandbox-quotes-20261006/PROOF.md;npm test (22 passed);verify:sandbox package_install=passed sandbox_execution=not_claimed"
+        },
+        {
+          "at": "2026-10-07T02:47:44+00:00",
+          "choice": "Synthetic fixture-only Ship sandbox BlockKit package editing and validation for US domestic weight/dimensions, with fixed fixture destination and immutable paid totals; quote prerequisite remains Commerce-unavailable and original provider unknown remains blocked.",
+          "from": "implemented",
+          "implementation_ref": "src/plugin.js,src/package-validation.js,scripts/verify-sandbox-package.mjs,test/sandbox-plugin.test.js",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "runs/ignoredruns/order-sandbox-quotes-20261006/PROOF.md;npm test (22 passed);verify:sandbox package_install=passed sandbox_execution=not_claimed"
+        }
+      ],
+      "id": "ship-order-sandbox-quotes-001",
+      "implementation_ref": "src/plugin.js,src/package-validation.js,scripts/verify-sandbox-package.mjs,test/sandbox-plugin.test.js",
+      "question": "What is the current authorized Ship implementation slice?",
+      "rationale": "Parent/human authorization explicitly bounds this implementation; no Commerce contract or qualified live binding exists.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-10-07T02:47:44+00:00",
+      "verification_ref": "proof/2026-10-06-package-form/PROOF.md"
     }
   ],
   "last_activation": {
-    "at": "2026-10-01T23:41:23+00:00",
+    "at": "2026-10-07T02:47:34+00:00",
     "mechanism": "implicit"
   },
   "last_pause": null,
@@ -1461,5 +1586,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-01T23:41:23+00:00"
+  "updated_at": "2026-10-07T02:47:44+00:00"
 }
