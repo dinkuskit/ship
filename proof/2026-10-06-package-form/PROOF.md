@@ -13,3 +13,9 @@ Scope: explicitly isolated synthetic fixture; no Commerce order read, provider q
 Repairs: self-contained sandbox entry (runner does not include sibling modules), supported text_input fields, page-scoped fixture actions, retained valid package values, strict decimal parsing, longest-side length-plus-girth validation, and verifier separation of default versus fixture data.
 
 Limits: no real-order shipping proof. Canonical Commerce order handoff and approved runtime credential binding remain missing. Unknown historical provider operation remains unretried. Review admission was fenced; no alternate or duplicate review dispatched. Not merge-ready.
+
+## Accepted localization repair
+
+Original comprehensive OpenClaw request `req-20261007T050244Z-139220227541`, head `dfe5eb8391cec819a62ceb72917817f63e039989`, qualified comprehensive/native P3/applied P3 and reported one P3 finding: dimension labels bypassed Arabic translation. Disposition: `required_fix`, accepted. Native receiver 37574388058 reported no findings for that old head; its trusted receiver source was `40f57db114a1f768aa7df99bce758883c72e2849` with source-pin guard and integration `9d90452b2b70db072888bd6830fdbc6208f35d36`. Historical reviews do not clear the repaired revision.
+
+Repair adds only Length/Width/Height translation keys and uses them in the form. English remains default/fallback. Exact-label regressions cover English, Arabic, and unknown locale. Parent verified 27 passing tests and installed sandbox execution with explicit Arabic fixture-label assertions; package SHA256 `8d5810f7daa85cddd6b88d0cabbe47f129dad56af01466a7b6a1ade413eda9f5`. Cursor ACP job `0530900b-706d-47f3-a3e8-4dddefc69738` completed with cleanupReady; worker PID absent. Replacement CI and reviews required before maintainer gate.

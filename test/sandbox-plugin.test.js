@@ -92,6 +92,48 @@ test("unknown locale falls back to English while preserving host direction", asy
   assert.match(result.blocks.at(-1).text, /Host locale: zz-ZZ · Host direction: rtl/);
 });
 
+test("package form uses exact English dimension labels by default", async () => {
+  const result = await route({
+    input: { type: "block_action", page: "/proof-fixture", action_id: "make-postage-label" },
+    ui: { direction: "ltr" },
+  }, ctx());
+  const form = result.blocks.find((block) => block.type === "form");
+
+  assert.deepEqual(
+    form.fields.filter((field) => ["lengthIn", "widthIn", "heightIn"].includes(field.action_id))
+      .map((field) => field.label),
+    ["Length", "Width", "Height"],
+  );
+});
+
+test("package form uses exact Arabic dimension labels for an RTL host", async () => {
+  const result = await route({
+    input: { type: "block_action", page: "/proof-fixture", action_id: "make-postage-label" },
+    ui: { locale: "ar-SA", direction: "rtl", surface: "admin-page" },
+  }, ctx());
+  const form = result.blocks.find((block) => block.type === "form");
+
+  assert.deepEqual(
+    form.fields.filter((field) => ["lengthIn", "widthIn", "heightIn"].includes(field.action_id))
+      .map((field) => field.label),
+    ["الطول", "العرض", "الارتفاع"],
+  );
+});
+
+test("package form uses exact English dimension labels for unknown locales", async () => {
+  const result = await route({
+    input: { type: "block_action", page: "/proof-fixture", action_id: "make-postage-label" },
+    ui: { locale: "zz-ZZ", direction: "rtl", surface: "admin-page" },
+  }, ctx());
+  const form = result.blocks.find((block) => block.type === "form");
+
+  assert.deepEqual(
+    form.fields.filter((field) => ["lengthIn", "widthIn", "heightIn"].includes(field.action_id))
+      .map((field) => field.label),
+    ["Length", "Width", "Height"],
+  );
+});
+
 test("sandbox route exposes no provider mutation actions", () => {
   const source = JSON.stringify(plugin);
   assert.doesNotMatch(source, /quote|purchase|retry|createLabel|credentials/i);
@@ -121,7 +163,7 @@ test("fixture shipping review navigates to settings through an admin action", as
 
 test("synthetic shipping form exposes editable package and fail-closed prerequisites", async () => {
   const result = await route({
-    input: { type: "page_load", page: "/shipping", fixture: "synthetic-order-1042" },
+    input: { type: "block_action", page: "/proof-fixture", action_id: "make-postage-label" },
     ui: { locale: "en", direction: "ltr" },
   }, ctx());
   const serialized = JSON.stringify(result);
