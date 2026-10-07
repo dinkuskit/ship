@@ -28,6 +28,7 @@ export default defineConfig({
         storage: { preferences: { indexes: ["locale"] } },
         adminPages: [
           { path: "/orders", label: "Orders", icon: "receipt" },
+          { path: "/proof-fixture", label: "Synthetic package proof", icon: "flask" },
           { path: "/settings", label: "Ship settings", icon: "settings" },
         ],
       }],

@@ -1,6 +1,82 @@
 // True sandbox-format entry: plain Block Kit JSON, no React/Kumo/host imports.
 
-import { projectSyntheticQuoteRequest } from "./package-validation.js";
+const MAX_WEIGHT_LB = 70;
+const MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN = 108;
+
+const SYNTHETIC_DESTINATION = Object.freeze({
+  country: "US",
+  addressLine: "100 Example Avenue",
+  city: "Anytown",
+  region: "CA",
+  postalCode: "90210",
+});
+
+const SYNTHETIC_PAID_TOTAL = Object.freeze({
+  amount: 48,
+  currency: "USD",
+  status: "paid",
+});
+
+function invalid(code, message) {
+  return Object.freeze({ ok: false, code, message });
+}
+
+function decimal(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || value.length > 30 || !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(value.trim())) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function validatePackage(packageInput) {
+  const weightLb = decimal(packageInput?.weightLb);
+  const lengthIn = decimal(packageInput?.lengthIn);
+  const widthIn = decimal(packageInput?.widthIn);
+  const heightIn = decimal(packageInput?.heightIn);
+  if ([weightLb, lengthIn, widthIn, heightIn].some((value) => value === null)) {
+    return invalid("invalid_number", "Weight and dimensions must be finite decimal values.");
+  }
+  if ([weightLb, lengthIn, widthIn, heightIn].some((value) => value <= 0)) {
+    return invalid("nonpositive", "Weight and dimensions must be greater than zero.");
+  }
+  if (weightLb > MAX_WEIGHT_LB) {
+    return invalid("weight_out_of_range", `Weight must be no more than ${MAX_WEIGHT_LB} lb.`);
+  }
+  const [longest, middle, shortest] = [lengthIn, widthIn, heightIn].sort((a, b) => b - a);
+  if (longest + (2 * (middle + shortest)) > MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN) {
+    return invalid(
+      "dimensions_out_of_range",
+      `Length plus girth must be no more than ${MAX_PRIORITY_LENGTH_PLUS_GIRTH_IN} in.`,
+    );
+  }
+  return Object.freeze({ ok: true, package: Object.freeze({
+    weight: weightLb,
+    weightUnit: "lb",
+    dimensions: Object.freeze({ length: lengthIn, width: widthIn, height: heightIn, unit: "in" }),
+  }) });
+}
+
+export function projectSyntheticQuoteRequest({ order, package: packageInput } = {}) {
+  if (order?.fixture !== "synthetic-order-1042") {
+    return invalid("no_order", "A synthetic fixture order is required before package review.");
+  }
+  const result = validatePackage(packageInput);
+  if (!result.ok) return result;
+  return Object.freeze({
+    ok: true,
+    request: Object.freeze({
+      destination: SYNTHETIC_DESTINATION,
+      package: result.package,
+      service: "USPS Priority Mail",
+      quotePrerequisite: "commerce_unavailable",
+      operationGate: "original_provider_unknown",
+    }),
+    paidTotal: SYNTHETIC_PAID_TOTAL,
+  });
+}
+
+export { SYNTHETIC_DESTINATION, SYNTHETIC_PAID_TOTAL, validatePackage };
+
 
 const LINK_URLS = Object.freeze([
   "https://developerhub-sandbox.shippingapi.pitneybowes.com/",
@@ -114,10 +190,10 @@ function packageForm(t, values, submitLabel = t.updatePackage) {
   return {
     type: "form",
     fields: [
-      { type: "text", action_id: "weightLb", label: t.weight, initial_value: values.weightLb },
-      { type: "text", action_id: "lengthIn", label: "Length", initial_value: values.lengthIn },
-      { type: "text", action_id: "widthIn", label: "Width", initial_value: values.widthIn },
-      { type: "text", action_id: "heightIn", label: "Height", initial_value: values.heightIn },
+      { type: "text_input", action_id: "weightLb", label: t.weight, initial_value: values.weightLb },
+      { type: "text_input", action_id: "lengthIn", label: "Length", initial_value: values.lengthIn },
+      { type: "text_input", action_id: "widthIn", label: "Width", initial_value: values.widthIn },
+      { type: "text_input", action_id: "heightIn", label: "Height", initial_value: values.heightIn },
     ],
     submit: { label: submitLabel, action_id: "update-package" },
   };
@@ -220,26 +296,30 @@ async function admin(routeCtx, ctx) {
     });
   }
 
-  const isolatedFixture = input.fixture === "synthetic-order-1042";
-  const packageValues = {
-    ...DEFAULT_PACKAGE,
-    ...(input.values && typeof input.values === "object" ? input.values : {}),
-  };
+  const isolatedFixture = input.fixture === "synthetic-order-1042" || input.page === "/proof-fixture";
+  const storedPackage = isolatedFixture ? await ctx.storage.preferences.get("synthetic-package") : null;
+  const submitted = input.type === "form_submit" && input.action_id === "update-package";
+  const source = submitted ? input.values : storedPackage ?? DEFAULT_PACKAGE;
+  const packageValues = Object.fromEntries(Object.keys(DEFAULT_PACKAGE).map(key => [key,
+    typeof source?.[key] === "string" ? source[key].slice(0, 30) :
+    typeof source?.[key] === "number" ? String(source[key]) : "",
+  ]));
   if (isolatedFixture && input.type === "form_submit" && input.action_id === "update-package") {
     const packageResult = projectSyntheticQuoteRequest({
       order: { fixture: "synthetic-order-1042" },
       package: packageValues,
     });
+    if (packageResult.ok) await ctx.storage.preferences.put("synthetic-package", packageValues);
     return pageResponse("shipping", ui, t, saved, undefined, true, packageValues, packageResult);
   }
   if (input.type === "block_action" && input.action_id === "open-settings") {
     return pageResponse("settings", ui, t, saved, undefined, isolatedFixture);
   }
   if (input.type === "block_action" && isolatedFixture) {
-    if (input.action_id === "open-order" && input.fixture === "synthetic-order-1042") {
+    if (input.action_id === "open-order") {
       return pageResponse("order-detail", ui, t, saved);
     }
-    if (input.action_id === "make-postage-label") return pageResponse("shipping", ui, t, saved);
+    if (input.action_id === "make-postage-label") return pageResponse("shipping", ui, t, saved, undefined, true, packageValues);
     if (input.action_id === "back-orders") return pageResponse("orders", ui, t, saved, undefined, true);
     if (input.action_id === "back-order-detail") return pageResponse("order-detail", ui, t, saved);
   }
@@ -248,7 +328,7 @@ async function admin(routeCtx, ctx) {
     : isolatedFixture && input.page === "/shipping" ? "shipping"
     : isolatedFixture && input.page === "/order-detail" ? "order-detail"
     : "orders";
-  return pageResponse(page, ui, t, saved, undefined, isolatedFixture);
+  return pageResponse(page, ui, t, saved, undefined, isolatedFixture, packageValues);
 }
 
 const plugin = {

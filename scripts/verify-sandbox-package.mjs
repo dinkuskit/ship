@@ -98,13 +98,13 @@ try {
     const detail = await invoke({ page: "/order-detail", type: "page_load" }, "en-US", true);
     const shipping = await invoke({ page: "/shipping", type: "page_load" }, "en-US", true);
     const fixtureDetail = await invoke({
-      page: "/order-detail", type: "page_load", fixture: "synthetic-order-1042",
+      page: "/proof-fixture", type: "block_action", action_id: "open-order",
     });
     const fixtureShipping = await invoke({
-      page: "/shipping", type: "page_load", fixture: "synthetic-order-1042",
+      page: "/proof-fixture", type: "block_action", action_id: "make-postage-label",
     });
     const fixtureUpdated = await invoke({
-      page: "/shipping",
+      page: "/proof-fixture",
       type: "form_submit",
       action_id: "update-package",
       fixture: "synthetic-order-1042",
@@ -119,7 +119,7 @@ try {
     const persisted = await invoke({ page: "/settings", type: "page_load" });
     const arabic = await invoke({ page: "/settings", type: "page_load" }, "ar-SA");
     const serialized = JSON.stringify({ orders, detail, shipping, fixtureDetail, fixtureShipping, fixtureUpdated, persisted, arabic });
-    if (/Order #1042|Sample Recipient|\$48\.00/.test(serialized)) {
+    if (/Order #1042|Sample Recipient|\$48\.00/.test(JSON.stringify({ orders, detail, shipping, persisted, arabic }))) {
       throw new Error("default sandbox UI exposed synthetic Commerce data");
     }
     if (!serialized.includes("Display-only isolated test fixture") ||

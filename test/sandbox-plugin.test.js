@@ -183,3 +183,26 @@ test("package projection is isolated and does not mutate submitted data", () => 
   assert.equal(result.paidTotal.amount, 48);
   assert.equal(packageInput.destination, "untrusted");
 });
+
+test("fixture package form uses renderable Block Kit fields and page-scoped actions", async () => {
+  const context = ctx();
+  const input = { page: "/proof-fixture", type: "block_action", action_id: "make-postage-label" };
+  const result = await route({ input }, context);
+  const form = result.blocks.find(b => b.type === "form");
+  assert.ok(form);
+  assert.ok(form.fields.every(f => f.type === "text_input"));
+  const changed = await route({ input: { page: "/proof-fixture", type: "form_submit", action_id: "update-package", values: { weightLb: "3.5", lengthIn: "12", widthIn: "9", heightIn: "5" } } }, context);
+  assert.match(JSON.stringify(changed), /3\.5 lb/);
+  const back = await route({ input }, context);
+  assert.match(JSON.stringify(back), /3\.5 lb/);
+});
+
+test("package decimals reject hex and malformed UI values", async () => {
+  const base = { weightLb: "2", lengthIn: "10", widthIn: "8", heightIn: "4" };
+  for (const weightLb of ["0x10", "1e2", {}, [], true]) {
+    assert.equal(projectSyntheticQuoteRequest({ order: { fixture: "synthetic-order-1042" }, package: {...base, weightLb} }).ok, false);
+  }
+  const result = await route({input:{page:"/proof-fixture",type:"form_submit",action_id:"update-package",values:{weightLb:{unexpected:true},lengthIn:"10",widthIn:"8",heightIn:"4"}}},ctx());
+  assert.match(JSON.stringify(result), /Package needs correction/);
+  assert.equal(typeof result.blocks.find(b=>b.type==="form").fields[0].initial_value,"string");
+});
