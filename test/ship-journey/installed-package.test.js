@@ -56,6 +56,10 @@ test("complete packed-file comparison rejects a tampered installed byte", async 
 });
 
 test("loopback URL validation is exact and credential-free", () => {
+  const credentialed = new URL("http://127.0.0.1:4343");
+  credentialed.username = "synthetic-user";
+  credentialed.password = "synthetic-value";
+  assert.throws(() => validateLoopbackUrl(credentialed.href), /credential-free/);
   for (const value of ["http://127.0.0.1:4343", "http://[::1]:4343", "http://localhost:4343"]) {
     assert.equal(validateLoopbackUrl(value).protocol, "http:");
   }
@@ -63,7 +67,6 @@ test("loopback URL validation is exact and credential-free", () => {
     "https://127.0.0.1:4343",
     "http://127.0.0.2:4343",
     "http://[::2]:4343",
-    "http://user:pass@127.0.0.1:4343",
     "http://10.0.0.1:4343",
   ]) {
     assert.throws(() => validateLoopbackUrl(value), /loopback|valid URL/);
