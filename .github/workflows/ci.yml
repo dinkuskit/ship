@@ -46,6 +46,6 @@ jobs:
       - run: npm run verify:bundle
       - run: |
           set -euo pipefail
-          for file in src/*.js test-support/*.js test/*.js; do
+          for file in src/*.js scripts/*.mjs test-support/*.js test/*.js; do
             node --check "$file"
           done

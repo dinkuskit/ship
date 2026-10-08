@@ -1,5 +1,5 @@
-import { verifySandboxBehavior } from "./verify-sandbox-behavior.mjs";
 #!/usr/bin/env node
+import { verifySandboxBehavior } from "./verify-sandbox-behavior.mjs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";

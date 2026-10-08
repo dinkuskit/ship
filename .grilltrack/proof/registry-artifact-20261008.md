@@ -19,7 +19,7 @@ That is package authorship, not merchant authentication.
 ## Artifact and installed runtime
 
 - Official `@emdash-cms/plugin-cli@0.13.3` `bundlePlugin`; plugin types 0.6.0.
-- Exact verified artifact SHA-256: `d3125cb9496e78b22beba48dbbcd87fdb4dcc32591050dc256c6f66726f7597c`; 11046 bytes.
+- Exact verified artifact SHA-256: `4bd0fea6d821f7f73d4fb902e9cacf1061782f1eeb5aff8a9a906a4e37043e07`; 11046 bytes.
 - Backend SHA-256: `90f89e8e99296c2e1956e6a1942ed7add9a3913f4b16adb2dc2704afccac7c62`; 18,644 / 131,072 bytes.
 - Extracted total: 30,437 / 262,144 bytes; 3 / 20 files. All files individually
   checked; generated metadata matches declared storage, pages and private routes.
@@ -46,7 +46,8 @@ npm package dry-run and official bundle checks; CI installs locked dependencies
 and runs the bundle check. Build uses ordinary Node 24.16.0 locally.
 
 Ignored local evidence: `runs/ship-registry-artifact-runs/20261008/` and
-`runs/registry-artifact-xcGeZy/` (artifact, receipt and host log).
+`runs/registry-artifact-f5Bl2s/` (final artifact, receipt and host log);
+`runs/registry-artifact-xcGeZy/` retains the identical-backend browser fixture.
 
 ## Limits and review
 
@@ -55,4 +56,21 @@ install-consent or a public listing. No provider request, real order, postage
 purchase, PDF, printing, merchant authentication or cross-plugin transport is
 added. Native asset/provider/workflow sources and Commerce/Inventory are
 unchanged. Merge, publication, deployment and provider activation remain human
-gates. Independent canonical review pending.
+gates. Independent canonical re-review pending.
+
+
+## Accepted review findings
+
+Canonical Codex P0–P3 review of `9ecba6e14f831c3b50238436a22cb8ec9ac7517b`
+found two P2 defects, both accepted and corrected:
+
+1. Restored the legacy verifier shebang to line one. All verification scripts
+   now pass `node --check`; both full and CI gates include these syntax checks.
+   Legacy package installation succeeds and reports the expected missing-runner
+   gate when intentionally invoked without a host.
+2. Added SIGINT/SIGTERM cleanup for the Registry verifier’s owned process group.
+   An actual interrupted fresh host exited with 143 after SIGTERM; probing its
+   process group confirmed it was gone. The normal Registry behavior/restart
+   proof also passed again after the fix.
+
+No finding was rejected or deferred. No review finding changed product scope.

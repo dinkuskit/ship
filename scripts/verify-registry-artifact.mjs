@@ -101,26 +101,45 @@ await new Promise(resolve => server.close(resolve));
 const base = `http://127.0.0.1:${port}`;
 const astroPackage = JSON.parse(await readFile(join(host, "node_modules/astro/package.json"), "utf8"));
 const astroBin = resolve(host, "node_modules/astro", astroPackage.bin.astro);
-let child, output = "";
+let child, stopPromise, interrupted, output = "";
 async function start() {
+ if (interrupted) throw new Error(`interrupted by ${interrupted}`);
  child = spawn(process.execPath, [astroBin, "dev", "--host", "127.0.0.1", "--port", String(port)], { cwd: host, detached: true, env: { ...process.env, ASTRO_DEV_BACKGROUND: "1" }, stdio: ["ignore", "pipe", "pipe"] });
  child.stdout.on("data", chunk => { output += String(chunk); });
  child.stderr.on("data", chunk => { output += String(chunk); });
  const deadline = Date.now() + 60000;
  while (Date.now() < deadline) {
   if (child.exitCode !== null) throw new Error(`host exited ${child.exitCode}`);
-  try { const response = await fetch(`${base}/_emdash/api/setup/status`); if (response.status < 500) return; } catch {}
+  try { const response = await fetch(`${base}/_emdash/api/setup/status`); if (response.status < 500) { console.log(`registry_host_pid=${child.pid};url=${base}`); return; } } catch {}
   await new Promise(resolve => setTimeout(resolve, 250));
  }
  throw new Error("Registry host startup timed out");
 }
 async function stop() {
- if (!child || child.exitCode !== null) return;
- const exited = new Promise(resolve => child.once("exit", resolve));
- process.kill(-child.pid, "SIGTERM");
- await exited;
+ if (stopPromise) return stopPromise;
+ const owned = child;
+ if (!owned) return;
  child = undefined;
+ stopPromise = (async () => {
+  const running = owned.exitCode === null && owned.signalCode === null;
+  const exited = running ? new Promise(resolve => owned.once("exit", resolve)) : Promise.resolve();
+  try { process.kill(-owned.pid, "SIGTERM"); } catch (error) { if (error.code !== "ESRCH") throw error; }
+  const timer = setTimeout(() => {
+   try { process.kill(-owned.pid, "SIGKILL"); } catch (error) { if (error.code !== "ESRCH") console.error("Owned host cleanup failed"); }
+  }, 5000);
+  try { await exited; } finally { clearTimeout(timer); }
+ })();
+ try { await stopPromise; } finally { stopPromise = undefined; }
 }
+const handleSignal = signal => {
+ if (interrupted) return;
+ interrupted = signal;
+ void stop().then(() => writeFile(join(packet, "host.log"), output)).finally(() => {
+  process.exit(signal === "SIGINT" ? 130 : 143);
+ });
+};
+process.on("SIGINT", handleSignal);
+process.on("SIGTERM", handleSignal);
 try {
  await start();
  process.env.EMDASH_SANDBOX_PERMISSION_PROOF = "1";
@@ -145,4 +164,6 @@ try {
 } finally {
  await stop();
  await writeFile(join(packet, "host.log"), output);
+ process.off("SIGINT", handleSignal);
+ process.off("SIGTERM", handleSignal);
 }
