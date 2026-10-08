@@ -15,6 +15,8 @@ provider actions. No request or environment flag enables the workflow.
 `@dinkuskit/ship/host-label-assets` exports `createHostLabelAssets` and
 `createLabelLinks` for an explicitly configured native host mount.
 These are package code exports, not a claim that Registry mediates these ports.
+The [Registry-only private asset proposal](../decisions/registry-private-label-assets-proposal.md)
+records the remaining platform gap and unapproved acceptance criteria.
 
 The host builds `workflowFactory(ctx)` using host-owned provider and order ports,
 `ctx.storage.operations` CAS methods, and the existing saved origin in
