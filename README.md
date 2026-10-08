@@ -7,7 +7,7 @@ is no label kernel, provider adapter, or published plugin yet.
 ## Status
 
 Product locks and historical decisions are recorded below. The private local
-sandbox package now renders Ship settings through pinned EmDash 1.0.1.
+sandbox package now renders Ship settings through pinned EmDash 1.2.0.
 Commerce orders are unavailable until the authorized Core handoff exists;
 provider actions remain disabled. This is not a signed Registry release.
 
@@ -26,15 +26,16 @@ USPS label purchase and printing inside DinkusKit is required for coordinated
 Commerce v1 even if Ship is optional to install. The merchant reviews address,
 package, service, and price, then explicitly buys and prints a label.
 
-A third-party postage API behind the DinkusKit interface is acceptable. No
-vendor is selected. Ship cannot depend on Inventory. Paid Commerce totals stay
+A third-party postage API behind the DinkusKit interface is acceptable. Pitney
+Bowes is selected, with merchant-owned and merchant-funded postage accounts.
+Ship cannot depend on Inventory. Paid Commerce totals stay
 immutable and distinct from postage.
 
 ## What this is not
 
 - Not Inventory.
 - Not Payments. Payments does not own shipping rates or postage.
-- Not a provider, account, or funding selection.
+- Provider connection and account setup remain separate work.
 - Not authorization to buy postage, install a printer client, or change
   devices.
 
@@ -107,9 +108,16 @@ node --input-type=module -e 'import("@dinkuskit/ship").then(({ default: plugin }
 ```
 
 The private POST/JSON routes `admin`, `settings`, and `status` do not call
-Pitney Bowes. The Block Kit admin settings action persists a display preference
-in plugin-scoped storage. English and Arabic copy use the host's attested
-locale and direction. Unmounted orders fail closed. Synthetic order examples
+Pitney Bowes. The Block Kit admin settings action persists display preferences
+and one merchant-managed U.S. ship-from address in plugin-scoped storage.
+The address requires a name or company, street, city, recognized U.S. postal
+region, five-digit ZIP or ZIP+4, and country `US`. Each text field is limited
+to 100 characters. Invalid submissions preserve the previously saved record.
+Saving the origin is structural local configuration only; it does not verify
+provider readiness. Merchant-owned Pitney Bowes postage accounts are the
+settled account direction; merchant payment of provider fees is preferred,
+while subsidy amounts remain unapproved. English and Arabic copy use the
+host's attested locale and direction. Unmounted orders fail closed. Synthetic order examples
 require the explicit isolated test fixture selector. Publisher identity and
 security contact remain absent; signed Registry release and publication are
 separate gates.
@@ -135,7 +143,8 @@ EMDASH_SANDBOX_HOST_URL=http://127.0.0.1:4343 npm run verify:sandbox
 
 Run that command from this repository. Verification compares the current
 packed package with the host-installed files, exercises the actual private
-admin dispatcher, and checks storage persistence and Arabic RTL responses.
+admin dispatcher, checks origin and preference storage independently, validates
+invalid-origin preservation, and checks Arabic RTL responses.
 This proves local config-managed sandbox execution, not signed Registry
 installation or Commerce/provider integration. See the dated proof under
 `proof/2026-10-03-emdash-sandbox-host/`.

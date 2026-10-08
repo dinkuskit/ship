@@ -1,7 +1,9 @@
 # USPS label feasibility, 2026-09-30
 
-Current-primary-doc comparison. No vendor, account, or funding model is
-selected. Public claims below are backed by fetched official pages listed in
+Research snapshot from 2026-09-30. The settled decision recorded on 2026-10-08
+selects Pitney Bowes, with merchant-owned and merchant-funded postage accounts.
+No provider connection or postage purchase is authorized by the settings slice.
+Historical public claims below are backed by fetched official pages listed in
 [CITATIONS.md](../CITATIONS.md). Short paraphrases are preferred.
 
 ## Method

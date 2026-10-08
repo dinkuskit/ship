@@ -1,9 +1,12 @@
 # Minimal Commerce ↔ Ship contract (document, not code)
 
-Recommended v1 document contract. No implementation. Ship must not require
-Inventory. Commerce remains source of paid money. Vendor, account, and funding
-are unselected. Every new numeric, origin, package, and service limit below is
-**proposed, not approved**.
+Recommended v1 document contract. Ship must not require Inventory. Commerce
+remains source of paid money. Pitney Bowes is the selected provider direction
+for the next integration boundary, with merchant-managed and merchant-funded
+accounts; this document still does not authorize provider connection or
+postage purchase. Every new numeric, origin, package, and service limit below
+is **proposed, not approved**, except the one-store U.S. origin shape noted
+below.
 
 ## Ownership
 
@@ -66,14 +69,17 @@ Proposed fields:
 - `service` (token plus human label)
 - `quote_id`, `quote_amount`, `quote_currency`, `quote_expires_at`
 
-**Proposed, not approved, per attended purchase:** exactly one U.S. ship-from
-origin and exactly one rectangular parcel. **Proposed service allowlist, not
-approved:** USPS Ground Advantage and Priority Mail only.
+The settings slice admits exactly one merchant-managed U.S. ship-from origin
+per store, with bounded name/company, address lines, city, two-letter state
+code, ZIP, and explicit `US` country. Structural saving is not provider
+verification. Per attended purchase, exactly one origin and one rectangular
+parcel remain proposed, not approved. **Proposed service allowlist, not approved:** USPS Ground
+Advantage and Priority Mail only.
 
 ## Funding and confirmation
 
 - `funding_identity` (opaque: merchant postage account, platform wallet, or
-  unselected)
+  merchant-owned and merchant-funded; subsidy amounts unapproved)
 - `merchant_confirmation` required: tenant-authorized Buy label click, actor,
   timestamp
 - Quote shown to the merchant immediately before confirmation; expired quotes

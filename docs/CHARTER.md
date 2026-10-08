@@ -23,8 +23,10 @@ reopened here.
   service, and price, then explicitly clicks Buy label and prints.
 - Automatic purchase on packed or ready events is later work. Automatic
   physical printing is distinct and is not a new unattended v1 gate.
-- A third-party postage API behind the DinkusKit interface is acceptable. No
-  vendor, account, or funding model is selected.
+- Pitney Bowes is the selected provider direction for the next integration
+  boundary. Accounts remain merchant-managed and merchant-funded; merchant
+  payment of extra provider fees is preferred, while subsidy amounts are not
+  approved.
 - Ship cannot depend on Inventory.
 - Commerce owns canonical order and monetary totals. The shopper shipping
   charge and actual postage are distinct. Paid totals are immutable.
@@ -55,9 +57,10 @@ label purchase and print capability required for coordinated Commerce v1.
 
 ## Next focused grill
 
-Vendor, account, and funding remain unselected. Do not start a label kernel
-until those are decided. The current brief is a recommendation, not a
-selection.
+The next integration boundary remains separately gated. Do not connect a
+provider, create an account, or start live postage work from this settings
+slice. Ship stores one merchant-managed U.S. ship-from address per store;
+structural saving does not imply provider readiness.
 
 ## Narrow local exception
 

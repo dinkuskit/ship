@@ -35,6 +35,14 @@ settings/package persistence, and locale behavior. It changes only disposable
 host settings. Without a supported runner it exits 2 and reports
 `SANDBOX_GATE=blocked`; do not convert that into a pass.
 
+The origin checks cover create/edit/reload, invalid-input preservation and
+status privacy. Set `EMDASH_SANDBOX_PERMISSION_PROOF=1` only for a task-owned
+host under this repository's ignored `runs/` directory. That focused check
+temporarily lowers the synthetic development user's role, requires HTTP 403
+for private routes, restores the original administrator role in `finally`,
+and checks that denied writes preserved the saved origin. Without that opt-in,
+the verifier prints `insufficient_role_denial=not_run`.
+
 Current host pins and migration limitations live in README and the dated
 EmDash migration proof. Tests do not establish signed Registry installation,
 Commerce integration, live Pitney Bowes calls, postage purchase, printing, or
