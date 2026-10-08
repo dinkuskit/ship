@@ -75,3 +75,9 @@ test('500 recovery excludes throttling, opaque, and malformed responses',async()
  const adapter=adapterWith((_url,options)=>{assert.equal(options.headers['X-PB-UnifiedErrorStructure'],'true');return new Response(JSON.stringify({errors:[{errorCode:'fixture-500',errorDescription:'fake-private'}]}),{status:500});});
  await assert.rejects(adapter.createLabel(shipment,'op'),e=>e.purchaseOutcome==='unknown'&&e.recoveryReason==='http_500'&&!JSON.stringify(e).includes('fake-private'));
 });
+test('OAuth failure never advertises shipment recovery or dispatches shipment',async()=>{
+ let calls=[];
+ const adapter=createSandboxAdapter({credentials,fetchImpl:async(url)=>{calls.push(url);return new Response(JSON.stringify({errors:[{errorCode:'fixture-500'}]}),{status:500});}});
+ await assert.rejects(adapter.createLabel(shipment,'op'),e=>e.purchaseOutcome==='not_started'&&e.recoveryReason===undefined);
+ assert.equal(calls.length,1);assert.match(calls[0],/\/oauth\/token$/);
+});

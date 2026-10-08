@@ -81,7 +81,7 @@ async function readResponseBytes(response, operation, maxBytes) {
   return result;
 }
 
-async function readBody(response, operation) {
+async function readBody(response, operation, shipmentCreate = false) {
   const text = new TextDecoder().decode(await readResponseBytes(response, operation, MAX_PROVIDER_BODY));
   let body;
   try { body = JSON.parse(text); } catch {
@@ -93,7 +93,7 @@ async function readBody(response, operation) {
     // Only a recognizable standard error response can qualify a 500 lookup.
     // Throttling follows different PB troubleshooting steps; opaque errors stay
     // unknown without a recovery reason. No error payload escapes the adapter.
-    const qualified500 = response.status === 500 && Array.isArray(body?.errors) &&
+    const qualified500 = shipmentCreate && response.status === 500 && Array.isArray(body?.errors) &&
       body.errors.length > 0 && body.errors.every((error) =>
         typeof error?.errorCode === "string" && error.errorCode.length > 0 &&
         error.errorCode !== "PB-APIM-ERR-1006");
@@ -393,7 +393,7 @@ export function createSandboxAdapter({
         throw withOutcome(new PublicShipError("network", "The sandbox could not be reached", 502), "unknown", "no_response");
       }
       try {
-        return normalizeLabel(await readBody(response, "Sandbox test-label request"));
+        return normalizeLabel(await readBody(response, "Sandbox test-label request", true));
       } catch (error) {
         // PB cautions against resubmitting failed creates without checking the
         // original label. An HTTP error alone never proves a safe second buy.
