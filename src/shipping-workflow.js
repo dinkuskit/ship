@@ -7,7 +7,7 @@ const US_STATES = new Set([
   "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN",
   "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH",
   "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA",
-  "WV", "WI", "WY", "AS", "GU", "MP", "PR", "VI", "UM", "AA", "AE", "AP",
+  "WV", "WI", "WY", "AS", "GU", "MP", "PR", "VI", "AA", "AE", "AP",
 ]);
 const FIXED_MESSAGES = {
   auth_invalid: "Shipping authorization is invalid",
@@ -356,6 +356,7 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
         quoteRecord.quoteId !== input.quoteId) fail("conflict", 409);
     validateConfirmation(input.confirmation, quoteRecord);
     if (record.operation) {
+      if (record.operation.key === key && record.operation.fingerprint !== ctx.fingerprint) fail("conflict", 409);
       if (record.operation.key === key && record.operation.fingerprint === ctx.fingerprint &&
           record.operation.amount === quoteRecord.amount && record.operation.status === "label_created") {
         return clone(record.operation.result);
@@ -366,7 +367,9 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
     const operationId = fixedKey(String(idFactory()).slice(0, 25));
     const operation = {
       id: operationId, key, fingerprint: ctx.fingerprint, amount: quoteRecord.amount,
-      status: "purchase_pending", createdAt: clock(), request: {
+      status: "purchase_pending", createdAt: clock(),
+      confirmation: { actorId: ctx.auth.actorId, confirmedAt: clock(), service: quoteRecord.service, amount: quoteRecord.amount, currency: quoteRecord.currency },
+      request: {
         service: "PM", amount: quoteRecord.amount, currency: "USD",
       },
     };

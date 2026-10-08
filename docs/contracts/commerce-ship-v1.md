@@ -19,6 +19,12 @@ below.
 | Manual fulfillment without Ship | Commerce |
 | On-hand stock | Inventory, if present; never required |
 
+Current-source caveat (October 8): Commerce canonical paid orders live in
+checkout attempt snapshots and have no per-order revision, fulfillment destination,
+consent evidence or shop identity. Aggregate CAS is not an order revision.
+The fields below describe a future contract, not current authority. The installed
+fixture seam is documented [separately](installed-ship-workflow.md).
+
 ## Identity, tenant, and idempotency
 
 - `commerce_order_id` (stable)
@@ -61,8 +67,10 @@ Proposed fields:
 
 - weight: decimal value plus `weight_unit` (`oz` or `lb`)
 - dimensions: length, width, height plus `dimension_unit` (`in`)
-- money: decimal amount plus ISO `currency` (postage and fees never rewrite
-  paid Commerce totals)
+- paid money: unsigned decimal MINOR-UNIT STRING from canonical `order.total.minor`,
+  plus ISO `currency`; zero-total completed orders need no processor paymentId
+- postage money: provider decimal dollars plus ISO `currency`; postage and fees
+  never rewrite paid Commerce totals
 - `packaging_type` (proposed first kernel: rectangular parcel)
 - origin: street, city, region, postal, country; merchant ship-from identity
 - `carrier` (`usps` for approved v1)
