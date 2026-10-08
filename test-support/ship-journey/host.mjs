@@ -72,11 +72,11 @@ export async function prepareInstalledEmdashHost({ repoRoot = root, onInterrupte
   }
 }
 
-export async function configureJourneyHost(host) {
+export async function configureJourneyHost(host, { entrySource = journeyEntrySource() } = {}) {
   const entryDirectory = join(host.hostDirectory, "node_modules", "@dinkuskit", "ship-journey");
   await mkdir(entryDirectory, { recursive: true });
   const source = join(entryDirectory, "entry-source.mjs");
-  await writeFile(source, journeyEntrySource());
+  await writeFile(source, entrySource);
   const esbuild = join(host.hostDirectory, "node_modules", ".bin", "esbuild");
   await run(esbuild, ["--bundle", "--format=esm", "--platform=neutral", source, "--outfile=index.mjs"], {
     cwd: entryDirectory, maxBuffer: 10 * 1024 * 1024,

@@ -1,15 +1,16 @@
 import basePlugin from './plugin.js';
-import { ShipWorkflowError } from './shipping-workflow.js';
+import { createShipWorkflow, ShipWorkflowError } from './shipping-workflow.js';
 
 const ACTIONS = new Set(['load', 'review', 'quote', 'buy', 'reconcile', 'label', 'pdf', 'print']);
 const route = handler => ({ permission: 'plugins:manage', methods: ['POST'], request: { body: 'json', maxBytes: 16384 }, handler });
+const rawRoute = handler => ({ ...route(handler), response: 'raw' });
 const unavailable = () => { throw new ShipWorkflowError('unavailable', 'Shipping dependencies are unavailable', 503); };
 const field = (label, value) => ({ label, value: String(value) });
 const inputField = (action_id, label, value = '') => ({ type: 'text_input', action_id, label, initial_value: String(value) });
 
 // Host-owned injection only. This factory does not establish HTTP authorization:
 // mount exclusively behind EmDash's authenticated private dispatch/RBAC/CSRF.
-export function createShipPlugin({ workflowFactory, authorityPort } = {}) {
+export function createShipPlugin({ workflowFactory, authorityPort, browserAssetPort } = {}) {
   async function authorized(routeCtx, ctx) {
     if (!routeCtx?.user || !authorityPort?.authorize || typeof workflowFactory !== 'function') unavailable();
     let auth;
@@ -60,6 +61,57 @@ export function createShipPlugin({ workflowFactory, authorityPort } = {}) {
     response: 'raw',
   };
 
+  const labelStored = rawRoute(async (routeCtx, ctx) => {
+    if (typeof browserAssetPort?.links !== 'function' || typeof ctx?.storage?.operations?.getVersioned !== 'function') {
+      throw new ShipWorkflowError('unavailable', 'Stored label browser access is unavailable', 503);
+    }
+    const values = routeCtx?.input;
+    const keys = values && typeof values === 'object' && !Array.isArray(values) ? Object.keys(values) : [];
+    if (keys.length !== 2 || !keys.includes('orderId') || !keys.includes('operationId') ||
+        typeof values.orderId !== 'string' || typeof values.operationId !== 'string') {
+      throw new ShipWorkflowError('validation');
+    }
+    const { auth, workflow } = await authorized(routeCtx, ctx);
+    const inspected = await workflow.inspect(auth, { orderId: values.orderId });
+    const existingLabel = await workflow.label(auth, { orderId: values.orderId });
+    if (existingLabel?.operationId !== values.operationId) {
+      throw new ShipWorkflowError('not_found', 'Stored label is unavailable', 404);
+    }
+    if (inspected?.pdfStatus !== 'stored') {
+      throw new ShipWorkflowError('not_found', 'Stored label is unavailable', 404);
+    }
+    const readOnlyWorkflow = createShipWorkflow({
+      store: {
+        getOrigin: async () => null,
+        getVersioned: key => ctx.storage.operations.getVersioned(key),
+        compareAndSet: async () => { throw new Error('read-only'); },
+      },
+      orderPort: { getPaidOrder: async () => { throw new Error('read-only'); } },
+      providerPort: {},
+    });
+    const ownLabel = await readOnlyWorkflow.label(auth, { orderId: values.orderId });
+    if (ownLabel?.operationId !== values.operationId) {
+      throw new ShipWorkflowError('not_found', 'Stored label is unavailable', 404);
+    }
+    const bytes = await readOnlyWorkflow.pdf(auth, { orderId: values.orderId });
+    if (!(bytes instanceof Uint8Array)) throw new ShipWorkflowError('pdf_invalid', 'Stored label is invalid', 502);
+    const afterRead = await readOnlyWorkflow.label(auth, { orderId: values.orderId });
+    if (afterRead?.operationId !== values.operationId) {
+      throw new ShipWorkflowError('conflict', 'Stored label changed during read', 409);
+    }
+    return {
+      __emdashPluginResponse: true,
+      status: 200,
+      headers: [
+        ['content-type', 'application/pdf'],
+        ['content-disposition', 'inline; filename="shipping-label.pdf"'],
+        ['cache-control', 'private, no-store'],
+        ['x-content-type-options', 'nosniff'],
+      ],
+      body: { kind: 'bytes', value: bytes },
+    };
+  });
+
   async function admin(routeCtx, ctx) {
     const input = routeCtx?.input || {};
     if (!String(input.action_id || '').startsWith('journey-') && input.page !== '/journey') {
@@ -107,8 +159,17 @@ export function createShipPlugin({ workflowFactory, authorityPort } = {}) {
       blocks.push({ type: 'form', fields: [inputField('orderId', 'Order', v.orderId)], submit: { label: 'Store private PDF', action_id: 'journey-pdf' } });
       blocks.push({ type: 'form', fields: [inputField('orderId', 'Order', v.orderId)], submit: { label: 'Record print request', action_id: 'journey-print' } });
     }
+    if (state.labelStatus === 'label_created' && state.pdfStatus === 'stored' && typeof browserAssetPort?.links === 'function') {
+      const bound = await authorized(routeCtx, ctx);
+      const label = await bound.workflow.label(bound.auth, { orderId: v.orderId });
+      const links = await browserAssetPort.links({ orderId: v.orderId, operationId: label.operationId, requestUrl: routeCtx.request?.url });
+      if (links) blocks.push({ type: 'actions', elements: [links.view, links.download, links.print] });
+    }
     if (state.labelStatus === 'label_created') blocks.push({ type: 'context', text: 'Label created. Private PDF download is available through the host API; browser view/download/print requires an authenticated host asset mediator. Print requests do not confirm physical printing or delivery.' });
     return { blocks, ...(toast ? { toast } : {}) };
   }
-  return { ...basePlugin, routes: { ...basePlugin.routes, admin: route(admin), journey, 'label-pdf': labelPdf } };
+  return {
+    ...basePlugin,
+    routes: { ...basePlugin.routes, admin: route(admin), journey, 'label-pdf': labelPdf, 'label-stored': labelStored },
+  };
 }

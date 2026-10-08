@@ -14,7 +14,8 @@
     ".": "./src/plugin.js",
     "./plugin": "./src/plugin.js",
     "./workflow": "./src/shipping-workflow.js",
-    "./installed": "./src/installed-workflow.js"
+    "./installed": "./src/installed-workflow.js",
+    "./host-label-assets": "./src/host-label-assets.js"
   },
   "scripts": {
     "test": "node --test",

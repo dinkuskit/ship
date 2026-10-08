@@ -4,11 +4,11 @@
   "current_focus": {
     "cadence": "sequential",
     "confirmed": true,
-    "confirmed_at": "2026-10-08T14:14:05+00:00",
-    "domain": "Installed paid-order Ship workflow and durable label operations",
-    "started_at": "2026-10-08T14:14:04+00:00",
+    "confirmed_at": "2026-10-08T17:45:13+00:00",
+    "domain": "Authorized native browser access to stored Ship labels",
+    "started_at": "2026-10-08T17:45:13+00:00",
     "status": "confirmed",
-    "summary": "Direct delegation confirms implementation and reviews for the bounded installed milestone; real Commerce consent/revision/shop authority, browser asset mediation and production mounting remain external gates. Existing PB lab scope is retained, not broader proposed services or formats."
+    "summary": "Previously authorized native browser adapter and exact candidate are approved for packaging with independent installed and visible fixture proof. Runtime source remains unchanged; real provider, production Commerce, physical printing, Registry and deployment are excluded. Human merge authority remains separate."
   },
   "decisions": [
     {
@@ -2028,6 +2028,145 @@
       "superseded_by": null,
       "updated_at": "2026-10-08T14:39:27+00:00",
       "verification_ref": "file:.grilltrack/proof/installed-workflow-20261008.md"
+    },
+    {
+      "baseline_ref": "git:b822093466b0c021b149795a05b0751004f6bb0f",
+      "candidate_refs": [],
+      "choice": "Optional authenticated native host adapter for operation-bound stored PDF view, exact download and an explicit browser print attempt; no postage purchase, recovery or provider fetch through this path.",
+      "context_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md",
+      "created_at": "2026-10-08T17:45:13+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [
+        "installed-paid-workflow"
+      ],
+      "domain": "Authorized native browser access to stored Ship labels",
+      "history": [
+        {
+          "at": "2026-10-08T17:45:13+00:00",
+          "choice": "Optional authenticated native host adapter for operation-bound stored PDF view, exact download and an explicit browser print attempt; no postage purchase, recovery or provider fetch through this path.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-08T17:45:13+00:00",
+          "choice": "Optional authenticated native host adapter for operation-bound stored PDF view, exact download and an explicit browser print attempt; no postage purchase, recovery or provider fetch through this path.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-08T17:45:13+00:00",
+          "choice": "Optional authenticated native host adapter for operation-bound stored PDF view, exact download and an explicit browser print attempt; no postage purchase, recovery or provider fetch through this path.",
+          "from": "implemented",
+          "implementation_ref": "file:src/host-label-assets.js",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-08T18:24:20+00:00",
+          "choice": "Optional authenticated native host adapter for operation-bound stored PDF view, exact download and an explicit browser print attempt; no postage purchase, recovery or provider fetch through this path.",
+          "from": "verified",
+          "implementation_ref": "file:src/host-label-assets.js",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md",
+          "review_result": "clean",
+          "review_source_identity": "git:4ca4bcc8fbffd611b41e83144d135a73bd4dd526",
+          "to": "needs_reverification",
+          "verification_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md"
+        },
+        {
+          "at": "2026-10-08T18:24:20+00:00",
+          "choice": "Optional authenticated native host adapter for operation-bound stored PDF view, exact download and an explicit browser print attempt; no postage purchase, recovery or provider fetch through this path.",
+          "from": "needs_reverification",
+          "implementation_ref": "file:src/host-label-assets.js",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md",
+          "review_result": "findings",
+          "review_source_identity": "git:604c117ff41c582fbc9359f00c4197ba4d5ef38c",
+          "to": "implemented",
+          "verification_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md"
+        },
+        {
+          "at": "2026-10-08T18:24:20+00:00",
+          "choice": "Optional authenticated native host adapter for operation-bound stored PDF view, exact download and an explicit browser print attempt; no postage purchase, recovery or provider fetch through this path.",
+          "from": "implemented",
+          "implementation_ref": "file:docs/contracts/installed-ship-workflow.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md"
+        }
+      ],
+      "id": "browser-stored-label-assets",
+      "implementation_ref": "file:docs/contracts/installed-ship-workflow.md",
+      "question": "Which already-authorized browser label slice is being delivered?",
+      "rationale": "Already-approved bounded implementation and delivery; independent synthetic installed/browser proof preserves production exclusions.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [
+        {
+          "classifications": [],
+          "ref": "file:.grilltrack/proof/browser-label-assets-20261008.md",
+          "result": "clean",
+          "reviewed_at": "2026-10-08T17:49:18+00:00",
+          "source_identity": "git:4ca4bcc8fbffd611b41e83144d135a73bd4dd526"
+        },
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": "file:.grilltrack/proof/browser-label-assets-20261008.md",
+          "result": "findings",
+          "reviewed_at": "2026-10-08T18:24:20+00:00",
+          "source_identity": "git:604c117ff41c582fbc9359f00c4197ba4d5ef38c"
+        },
+        {
+          "classifications": [],
+          "ref": "file:.grilltrack/proof/browser-label-assets-20261008.md",
+          "result": "clean",
+          "reviewed_at": "2026-10-08T18:26:34+00:00",
+          "source_identity": "git:0a4137c66dc8e0224c307d2f881de25099095cef"
+        }
+      ],
+      "review_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md",
+      "review_result": "clean",
+      "review_source_identity": "git:0a4137c66dc8e0224c307d2f881de25099095cef",
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-10-08T18:26:34+00:00",
+      "verification_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md"
     }
   ],
   "last_activation": {
@@ -2057,5 +2196,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-08T14:39:27+00:00"
+  "updated_at": "2026-10-08T18:26:34+00:00"
 }
