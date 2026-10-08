@@ -75,7 +75,7 @@ export async function cleanupDisposableRun(directory) {
     throw new Error("refusing to clean a directory without the Ship journey ownership marker");
   }
   const { rm } = await import("node:fs/promises");
-  await rm(directory, { recursive: true, force: true });
+  await rm(directory, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
   ownedRuns.delete(resolve(directory));
 }
 
