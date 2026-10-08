@@ -42,7 +42,7 @@ if (process.argv.length > 3 || (mode !== undefined && !["--setup", "--workerd"].
   }
   const code = await new Promise((accept, reject) => {
     child.once("error", reject);
-    child.once("exit", (code, signal) => accept(signal ? 1 : code ?? 1));
+    child.once("close", (code, signal) => accept(signal ? 1 : code ?? 1));
   });
   process.removeListener("SIGINT", onInterrupt);
   process.removeListener("SIGTERM", onTerminate);

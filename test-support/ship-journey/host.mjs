@@ -19,7 +19,7 @@ const run = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const sandboxHost = join(root, "test-support", "sandbox-host");
 
-export async function prepareInstalledEmdashHost({ repoRoot = root } = {}) {
+export async function prepareInstalledEmdashHost({ repoRoot = root, onInterrupted = async () => {} } = {}) {
   const runDirectory = await createDisposableRun(join(tmpdir(), "ship-journey-host-"));
   const hostDirectory = join(runDirectory, "host");
   const host = { runDirectory, hostDirectory };
@@ -31,12 +31,15 @@ export async function prepareInstalledEmdashHost({ repoRoot = root } = {}) {
     process.removeListener("SIGTERM", onTerminate);
   })();
   host.cleanup = cleanup;
-  const interrupt = signal => {
-    cleanup().then(() => {
-      console.log(`host_cleanup=interrupted:${signal}`);
-      process.exit(signal === "SIGINT" ? 130 : 143);
-    }, () => process.exit(1));
-  };
+  let interruption;
+  const interrupt = signal => interruption ??= (async () => {
+    let failed = false;
+    try { await onInterrupted(signal, "running"); } catch { failed = true; }
+    try { await cleanup(); } catch { failed = true; }
+    try { await onInterrupted(signal, failed ? "failed" : "passed"); } catch { failed = true; }
+    if (!failed) console.log(`host_cleanup=interrupted:${signal}`);
+    process.exit(failed ? 1 : signal === "SIGINT" ? 130 : 143);
+  })();
   const onInterrupt = () => interrupt("SIGINT");
   const onTerminate = () => interrupt("SIGTERM");
   process.on("SIGINT", onInterrupt);

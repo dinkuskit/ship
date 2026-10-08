@@ -1,28 +1,28 @@
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { createRequire } from "node:module";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { comparePackedFileBytes } from "../../test-support/ship-journey/package-install.mjs";
 import { ORDER, ORDER_IDS, PACKAGE } from "../../test-support/ship-journey/journey-fixture.mjs";
 import { createFixturePdf } from "../../test-support/fixture-pdf.js";
 import { configureJourneyHost, prepareInstalledEmdashHost, startJourneyHost, stopJourneyHost } from "../../test-support/ship-journey/host.mjs";
 
+import { recordAttempt } from "../../test-support/ship-journey/attempt.mjs";
 const run = promisify(execFile);
 const enabled = process.env.SHIP_JOURNEY_WORKER === "1";
 test("installed Ship fixture through private EmDash HTTP and workerd", {
   skip: enabled ? false : "run with scripts/verify-ship-journey.mjs --workerd",
 }, async () => {
-  const host = await prepareInstalledEmdashHost();
-  const evidence = join(host.root, "runs/ship-journey-runs/20261008");
-  await mkdir(evidence, { recursive: true });
-  const receipt = { status: "running", synthetic: true, packageTarballSha256: host.packed.sha256, packageVersion: host.packed.version, installedPackageByteComparison: false };
-  const saveReceipt = () => writeFile(join(evidence, "installed-http-receipt.json"), JSON.stringify(receipt, null, 2) + "\n");
-  try {
+  const evidence = resolve(dirname(fileURLToPath(import.meta.url)), "../../runs/ship-journey-runs/20261008");
+  await recordAttempt({ directory: evidence, execute: async ({ receipt, save: saveReceipt, setCleanup, onInterrupted }) => {
+    const host = await prepareInstalledEmdashHost({ onInterrupted });
+    setCleanup(async () => { await stopJourneyHost(host); await host.cleanup(); });
+    Object.assign(receipt, { packageTarballSha256: host.packed.sha256, packageVersion: host.packed.version, installedPackageByteComparison: false });
     const compared = await comparePackedFileBytes({ packed: host.packed, installedDirectories: [host.installedDirectory] });
     receipt.installedPackageByteComparison = true;
     receipt.harnessHead = (await run("git", ["rev-parse", "HEAD"], { cwd: host.root })).stdout.trim();
@@ -194,17 +194,11 @@ with sqlite3.connect(sys.argv[1]) as db:
     assert.deepEqual((await call("label-pdf", { orderId: ORDER_IDS.large })).bytes, largePdf.bytes);
     console.log("private_pdf: exact_raw_bytes700000_and5242880; real_EmDash_chunk_limit; restart_cache; corrupt_missing_denied; print_request_only");
     console.log("browser_pdf: mediator_absent; ordinary_view_download_print_skipped; production_Commerce_CAS_Registry_unbound");
-    receipt.status = "passed";
     receipt.pdfBytes = [700000, 5242880];
     receipt.realInstalledEmdashCas = true;
     receipt.realProvider = false;
     receipt.browserPdfMediator = false;
     receipt.registry = false;
     await saveReceipt();
-  } catch (error) {
-    receipt.status = "failed"; await saveReceipt(); throw error;
-  } finally {
-    await stopJourneyHost(host);
-    await host.cleanup();
-  }
+  }});
 });
