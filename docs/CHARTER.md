@@ -31,8 +31,9 @@ reopened here.
 - Commerce owns canonical order and monetary totals. The shopper shipping
   charge and actual postage are distinct. Paid totals are immutable.
 - `label_created`, `dispatched`, and `delivered` are separate states.
-- This cycle authorizes only neutral charter, research, and contract
-  documents. No label kernel or fake APIs. The package remains private `0.0.0`.
+- The September documentation cycle authorized neutral charter, research and
+  contract documents. That historical limit is superseded for the explicitly
+  approved October 8 installed workflow slice below. The package remains private `0.0.0`.
 
 See [research](research/usps-feasibility-20260930.md), the
 [Commerce–Ship contract](contracts/commerce-ship-v1.md), and the
@@ -55,10 +56,22 @@ plugin — are superseded by the confirmed locks above. Commerce owns the
 checkout shipping charge. Ship owns optional automation, including the USPS
 label purchase and print capability required for coordinated Commerce v1.
 
-## Next focused grill
+## Approved October 8 workflow slice
 
-The next integration boundary remains separately gated. Do not connect a
-provider, create an account, or start live postage work from this settings
+Bobby authorized private installed Ship workflow and durable label operations,
+with independent provider and installed-proof owners. The slice implements
+injected trusted order/authority/storage/provider ports and explicit offline
+fixtures; it does not invent a Commerce handoff. Stacked PRs and review triggers
+are authorized; merge, deployment, Registry publication, account/access changes,
+credentials and real postage remain excluded. Historical proposed service,
+package and numeric limits remain proposals. The existing PB lab PM/PKG/8x11
+scope is retained solely for these tests.
+
+Actual Commerce lacks shipping destination, consent evidence, order revision and
+stable shop identity. Core also lacks a Block Kit authenticated label asset bridge.
+Those are external prerequisites. See [installed workflow contract](contracts/installed-ship-workflow.md).
+
+Do not connect a provider, create an account, or start live postage work from this
 slice. Ship stores one merchant-managed U.S. ship-from address per store;
 structural saving does not imply provider readiness.
 

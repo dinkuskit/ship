@@ -12,7 +12,9 @@
   ],
   "exports": {
     ".": "./src/plugin.js",
-    "./plugin": "./src/plugin.js"
+    "./plugin": "./src/plugin.js",
+    "./workflow": "./src/shipping-workflow.js",
+    "./installed": "./src/installed-workflow.js"
   },
   "scripts": {
     "test": "node --test",

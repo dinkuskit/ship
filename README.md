@@ -154,3 +154,12 @@ subpath is supported or exported. The installed sandbox entry is the current
 package contract.
 
 Part of [Dinkus](https://github.com/dinkuskit). MIT.
+
+## October 8 installed workflow candidate
+
+Additive `./workflow` and `./installed` exports support a host-owned private
+workflow with trusted paid-order/actor ports and durable CAS label operations.
+The default sandbox export still has no Commerce/provider connection. The
+[installed contract](docs/contracts/installed-ship-workflow.md) specifies route
+schemas, fixture boundaries and missing production authority/browser asset ports.
+No real postage or Registry mounting is proven by these exports.

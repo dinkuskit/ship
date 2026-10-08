@@ -4,11 +4,11 @@
   "current_focus": {
     "cadence": "sequential",
     "confirmed": true,
-    "confirmed_at": "2026-10-08T11:23:37+00:00",
-    "domain": "One merchant-managed U.S. ship-from address in installed Ship admin",
-    "started_at": "2026-10-08T11:23:37+00:00",
+    "confirmed_at": "2026-10-08T14:14:05+00:00",
+    "domain": "Installed paid-order Ship workflow and durable label operations",
+    "started_at": "2026-10-08T14:14:04+00:00",
     "status": "confirmed",
-    "summary": "Approved delegation from Bobby: implement one authenticated merchant-managed U.S. origin per store, preserve invalid input and privacy, verify installed persistence, denial, locale and responsive usability. Pitney Bowes uses merchant-owned merchant-funded postage accounts; extra fees preferably merchant-paid, subsidy amounts unapproved. No provider connection, credentials, network grants, quotes, purchases, Commerce integration, deployment, upstream edits or merge."
+    "summary": "Direct delegation confirms implementation and reviews for the bounded installed milestone; real Commerce consent/revision/shop authority, browser asset mediation and production mounting remain external gates. Existing PB lab scope is retained, not broader proposed services or formats."
   },
   "decisions": [
     {
@@ -1852,6 +1852,182 @@
       "superseded_by": null,
       "updated_at": "2026-10-08T11:34:33+00:00",
       "verification_ref": ".grilltrack/proof/ship-origin-settings-20261008.md"
+    },
+    {
+      "baseline_ref": "613474c0bd57a3c29cacfe250285901d6f198a42",
+      "candidate_refs": [],
+      "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+      "context_ref": "docs/contracts/installed-ship-workflow.md",
+      "created_at": "2026-10-08T14:14:04+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [],
+      "domain": "Installed paid-order Ship workflow and durable label operations",
+      "history": [
+        {
+          "at": "2026-10-08T14:14:04+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-08T14:14:05+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-08T14:25:36+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "implemented",
+          "implementation_ref": "git:668923a81a437b0ce4448a5babd41e8bc79899de",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-08T14:25:36+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "verified",
+          "implementation_ref": "git:668923a81a437b0ce4448a5babd41e8bc79899de",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "needs_reverification",
+          "verification_ref": "command:bin/verify-ship full at2e8fdd2;64pass0skip+pack"
+        },
+        {
+          "at": "2026-10-08T14:25:36+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "needs_reverification",
+          "implementation_ref": "git:668923a81a437b0ce4448a5babd41e8bc79899de",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
+          "review_result": "findings",
+          "review_source_identity": "git:2e8fdd2373a9d1aa4c32db78ece2c8a45b5e8f96",
+          "to": "implemented",
+          "verification_ref": "command:bin/verify-ship full at2e8fdd2;64pass0skip+pack"
+        },
+        {
+          "at": "2026-10-08T14:25:36+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "implemented",
+          "implementation_ref": "git:408ded41fd8b90929268ce4fe009e54fed982257",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "command:bin/verify-ship full at2e8fdd2;64pass0skip+pack"
+        },
+        {
+          "at": "2026-10-08T14:39:27+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "verified",
+          "implementation_ref": "git:408ded41fd8b90929268ce4fe009e54fed982257",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "needs_reverification",
+          "verification_ref": "file:.grilltrack/proof/installed-workflow-20261008.md"
+        },
+        {
+          "at": "2026-10-08T14:39:27+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "needs_reverification",
+          "implementation_ref": "git:408ded41fd8b90929268ce4fe009e54fed982257",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
+          "review_result": "findings",
+          "review_source_identity": "git:49d66fb989e733ce6984d1845ccdc8a23c7325e5",
+          "to": "implemented",
+          "verification_ref": "file:.grilltrack/proof/installed-workflow-20261008.md"
+        },
+        {
+          "at": "2026-10-08T14:39:27+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "implemented",
+          "implementation_ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "file:.grilltrack/proof/installed-workflow-20261008.md"
+        }
+      ],
+      "id": "installed-paid-workflow",
+      "implementation_ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
+      "question": "Which Ship implementation slice is now authorized?",
+      "rationale": "Direct Bobby delegation through coordinator 01a11b8c-22eb-7e93-b79f-9117c69af616; provider and proof owners separately reserved.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
+          "result": "findings",
+          "reviewed_at": "2026-10-08T14:25:36+00:00",
+          "source_identity": "git:2e8fdd2373a9d1aa4c32db78ece2c8a45b5e8f96"
+        },
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
+          "result": "findings",
+          "reviewed_at": "2026-10-08T14:39:27+00:00",
+          "source_identity": "git:49d66fb989e733ce6984d1845ccdc8a23c7325e5"
+        }
+      ],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-10-08T14:39:27+00:00",
+      "verification_ref": "file:.grilltrack/proof/installed-workflow-20261008.md"
     }
   ],
   "last_activation": {
@@ -1881,5 +2057,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-08T11:34:33+00:00"
+  "updated_at": "2026-10-08T14:39:27+00:00"
 }

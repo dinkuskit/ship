@@ -10,10 +10,12 @@
   "capabilities": [],
   "allowedHosts": [],
   "storage": {
-    "preferences": { "indexes": ["locale"] }
+    "preferences": { "indexes": ["locale"] },
+    "operations": { "indexes": [] }
   },
   "admin": {
     "pages": [
+      { "path": "/journey", "label": "Shipment review", "icon": "truck" },
       { "path": "/orders", "label": "Orders", "icon": "receipt" },
       { "path": "/settings", "label": "Ship settings", "icon": "settings" },
       { "path": "/order-detail", "label": "Order detail", "icon": "receipt" },
