@@ -1949,10 +1949,54 @@
           "review_source_identity": null,
           "to": "verified",
           "verification_ref": "command:bin/verify-ship full at2e8fdd2;64pass0skip+pack"
+        },
+        {
+          "at": "2026-10-08T14:39:27+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "verified",
+          "implementation_ref": "git:408ded41fd8b90929268ce4fe009e54fed982257",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "needs_reverification",
+          "verification_ref": "file:.grilltrack/proof/installed-workflow-20261008.md"
+        },
+        {
+          "at": "2026-10-08T14:39:27+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "needs_reverification",
+          "implementation_ref": "git:408ded41fd8b90929268ce4fe009e54fed982257",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
+          "review_result": "findings",
+          "review_source_identity": "git:49d66fb989e733ce6984d1845ccdc8a23c7325e5",
+          "to": "implemented",
+          "verification_ref": "file:.grilltrack/proof/installed-workflow-20261008.md"
+        },
+        {
+          "at": "2026-10-08T14:39:27+00:00",
+          "choice": "Implement private injected installed workflow, durable CAS purchase identity and local PDF persistence; exercise exact packaged code using explicitly synthetic trusted ports. Keep default unavailable without genuine host/Commerce authority.",
+          "from": "implemented",
+          "implementation_ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "file:.grilltrack/proof/installed-workflow-20261008.md"
         }
       ],
       "id": "installed-paid-workflow",
-      "implementation_ref": "git:408ded41fd8b90929268ce4fe009e54fed982257",
+      "implementation_ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
       "question": "Which Ship implementation slice is now authorized?",
       "rationale": "Direct Bobby delegation through coordinator 01a11b8c-22eb-7e93-b79f-9117c69af616; provider and proof owners separately reserved.",
       "repair_required": false,
@@ -1966,6 +2010,15 @@
           "result": "findings",
           "reviewed_at": "2026-10-08T14:25:36+00:00",
           "source_identity": "git:2e8fdd2373a9d1aa4c32db78ece2c8a45b5e8f96"
+        },
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": "file:.grilltrack/proof/installed-workflow-20261008.md",
+          "result": "findings",
+          "reviewed_at": "2026-10-08T14:39:27+00:00",
+          "source_identity": "git:49d66fb989e733ce6984d1845ccdc8a23c7325e5"
         }
       ],
       "review_ref": null,
@@ -1973,7 +2026,7 @@
       "review_source_identity": null,
       "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-08T14:25:36+00:00",
+      "updated_at": "2026-10-08T14:39:27+00:00",
       "verification_ref": "file:.grilltrack/proof/installed-workflow-20261008.md"
     }
   ],
@@ -2004,5 +2057,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-08T14:25:36+00:00"
+  "updated_at": "2026-10-08T14:39:27+00:00"
 }

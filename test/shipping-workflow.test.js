@@ -279,3 +279,24 @@ test('maximum PDF persists below each actual1MiB CAS JSON cap and verifies chunk
   await assert.rejects(restarted.pdf(auth, { orderId: 'order-1' }), e => e.code === 'pdf_invalid');
   assert.equal(f.calls.create, 1);
 });
+
+test('canonical Commerce order:UUID identity survives quote/buy/reload/PDF without rewriting', async () => {
+  const orderId = 'order:123e4567-e89b-42d3-a456-426614174000';
+  const f = workflow({ orderValue: { ...order, orderId } });
+  let observed;
+  f.orderPort.getPaidOrder = async request => { observed = request.orderId; return { ...order, orderId }; };
+  assert.equal((await f.instance.loadOrder(auth, { orderId })).orderId, orderId);
+  assert.equal(observed, orderId);
+  const quote = await f.instance.quote(auth, { orderId, packageValues });
+  await f.instance.buy(auth, { orderId, packageValues, quoteId: quote.quoteId, idempotencyKey: 'canonical', confirmation: { confirmed: true, service: 'PM', amount: 8.6, currency: 'USD' } });
+  const restarted = createShipWorkflow(f);
+  assert.equal((await restarted.inspect(auth, { orderId })).order.orderId, orderId);
+  assert.equal((await restarted.label(auth, { orderId })).shipmentId, 'shipment-1');
+  assert.equal((await restarted.pdf(auth, { orderId }))[0], 37);
+  assert.equal((await restarted.print(auth, { orderId })).status, 'print_requested');
+  assert.equal(f.calls.create, 1);
+  for (const invalid of ['order:', 'order:attempt:extra', 'other:attempt', 'order:../x', 'order:unsafe\u0000', 'order:' + 'a'.repeat(95)]) {
+    await assert.rejects(restarted.loadOrder(auth, { orderId: invalid }), e => e.code === 'validation');
+  }
+  await assert.rejects(restarted.loadOrder({ ...auth, actorId: 'actor:forged' }, { orderId }), e => e.code === 'auth_invalid');
+});

@@ -53,6 +53,15 @@ function id(value) {
   return text(value, MAX_ID) && /^[A-Za-z0-9._-]+$/.test(value) ? value : null;
 }
 
+// Commerce default producer: `order:${crypto.randomUUID()}` (41 chars).
+// Keep the local100-character request cap; do not invent a Commerce maximum or
+// broaden actor/shop IDs. Alternate server attempt generators have no published
+// maximum and must negotiate the port boundary before production mounting.
+function orderIdentity(value) {
+  if (!text(value, MAX_ID)) return null;
+  return id(value) || (/^order:[A-Za-z0-9._-]+$/.test(value) ? value : null);
+}
+
 function validateAuth(auth) {
   if (!auth || id(auth.shopId) === null || id(auth.actorId) === null || auth.canManage !== true) {
     fail("auth_invalid", 403);
@@ -249,7 +258,7 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
 
   async function loadOrder(authInput, input) {
     const auth = validateAuth(authInput);
-    const orderId = id(input?.orderId);
+    const orderId = orderIdentity(input?.orderId);
     if (!orderId) fail("validation");
     let result;
     try {
@@ -410,7 +419,7 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
 
   async function reconcile(authInput, input) {
     const auth = validateAuth(authInput);
-    const orderId = id(input?.orderId);
+    const orderId = orderIdentity(input?.orderId);
     if (!orderId) fail("validation");
     const current = await readState(auth, orderId);
     const operation = current?.value?.operation;
@@ -433,7 +442,7 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
 
   async function label(authInput, input) {
     const auth = validateAuth(authInput);
-    const orderId = id(input?.orderId);
+    const orderId = orderIdentity(input?.orderId);
     if (!orderId) fail("validation");
     const current = await readState(auth, orderId);
     if (current?.value?.label?.status !== "label_created") fail("not_found", 404);
@@ -442,7 +451,7 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
 
   async function pdf(authInput, input) {
     const auth = validateAuth(authInput);
-    const orderId = id(input?.orderId);
+    const orderId = orderIdentity(input?.orderId);
     if (!orderId) fail('validation');
     const current = await readState(auth, orderId);
     const labelRecord = current?.value?.label;
@@ -504,7 +513,7 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
 
   async function print(authInput, input) {
     const auth = validateAuth(authInput);
-    const orderId = id(input?.orderId);
+    const orderId = orderIdentity(input?.orderId);
     if (!orderId) fail("validation");
     const current = await readState(auth, orderId);
     if (current?.value?.label?.status !== "label_created") fail("not_found", 404);

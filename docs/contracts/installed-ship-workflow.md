@@ -35,7 +35,14 @@ SiteInfo URL is not tenant identity.
 `orderPort.getPaidOrder({shopId,orderId,actorId})` returns a trusted immutable
 snapshot with matching `shopId`, `orderId`, real monotonic `revision>=1`,
 `paymentStatus:'paid'`, `paidTotals:{amount,currency:'USD'}`, U.S. `destination`
-and `addressConsent:true`. **amount is an unsigned decimal minor-unit string**;
+and `addressConsent:true`. The canonical order ID is preserved exactly:
+Commerce's pinned checkout producer emits `order:${attemptId}`, with the default
+UUID attempt giving41 characters. Ship admits that bounded `order:` prefix and
+retains its existing100-character request cap without changing actor/shop ID
+validation. Commerce's alternate injected attempt generator has no explicit
+maximum;100 is a local technical cap, not a newly asserted Commerce contract.
+Larger or differently shaped future canonical IDs require a negotiated port.
+ **amount is an unsigned decimal minor-unit string**;
 no dollars conversion or processor-capture inference occurs. Canonical zero totals
 remain `'0'`; actual production order eligibility and consent semantics require
 owner decisions and evidence, not this fixture boolean. Current Commerce supplies

@@ -36,3 +36,26 @@ responsive proof by reserved owner. Partial new workflow Arabic labels are a
 localization limit; existing locale/settings remain delegated. Future private
 orphan chunk cleanup and CAS crash semantics remain documented. Canonical
 repaired-head review, CI and native review must pass before Bobby's merge gate.
+
+## Canonical identity compatibility correction
+
+Contract specialist found that reviewed49d66fb rejects Commerce `order:` IDs.
+Exact source e5a918969cf2804a7e6df40614b8057562ae7c91 checkout/orchestrate.ts
+emits `order:${attemptId}` at both zero/nonzero completed-order writes; default
+attempt is crypto.randomUUID() (36 chars), giving41-character order identity.
+Alternate injected attempt IDs only have a nonempty check, no declared maximum.
+Ship retains its local100-character technical cap, admits only `order:` plus
+the existing ASCII token alphabet, and preserves the complete identity in every
+workflow action. Actor/shop alphabets are unchanged. Future alternative IDs need
+a bounded host contract rather than a broad permissive validator.
+
+Meaningful canonical-ID journey regression fails on exact49d66fb, passes repaired
+source through trusted load, quote, buy, recreated state, label/PDF/print request;
+malformed prefixes/control/path/overlength and colon actor IDs deny. Full67/67
+passed,0skip plus pack. Current live native generation remains on old49d66fb;
+that receipt cannot clear the new source. New canonical and native qualification
+are required before the latest candidate merge gate.
+
+New compatibility source hashes:
+- `src/shipping-workflow.js` SHA256 `c47af76fb1bf3b91b5bcdb121337a11242496de1b52beb2efc99ac97a497653f`
+- `test/shipping-workflow.test.js` SHA256 `0476f600f2f2043ee31cf2f0daf923030f9a7ac8469bdeecc276e3cc803faad7`
