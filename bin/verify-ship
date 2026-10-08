@@ -1,0 +1,27 @@
+#!/usr/bin/env sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(dirname -- "$script_dir")
+cd "$repo_root"
+mode="${1:-quick}"
+
+case "$mode" in
+  quick)
+    npm test
+    ;;
+  full)
+    "$script_dir/verify-ship" quick
+    npm pack --dry-run --ignore-scripts
+    ;;
+  sandbox)
+    "$script_dir/verify-ship" full
+    npm run verify:sandbox
+    ;;
+  *)
+    echo "Usage: bin/verify-ship [quick|full|sandbox]" >&2
+    exit 64
+    ;;
+esac
+
+printf 'verify-ship: %s passed\n' "$mode"

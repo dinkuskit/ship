@@ -71,7 +71,10 @@ mutation endpoints fail closed. A future approved wrapper must provide
 `PB_SANDBOX_API_KEY`, `PB_SANDBOX_API_SECRET`, and `PB_SANDBOX_SHIPPER_ID`
 without exposing their values to this project.
 
-Run deterministic contract/state tests with `npm test`. They use fake transport
+Run the canonical local gate with `npm run verify:full` (or
+`npm run verify:quick` during edits). See
+[Ship verification](skills/ship-verification/SKILL.md) for modes and installed-host
+prerequisites. Run deterministic contract/state tests alone with `npm test`. They use fake transport
 only and are labelled fixture verification, not live API proof. The adapter
 factory accepts an injected adapter for a test-only harness; no fake fallback
 is used by the main server.
