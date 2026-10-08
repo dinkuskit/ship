@@ -1703,13 +1703,21 @@
       "rationale": "Approved settled direction; preserves the no-provider-call and no-spend boundary while replacing the prior vendor-unselected recommendation.",
       "repair_required": false,
       "review_classifications": [],
-      "review_history": [],
-      "review_ref": null,
-      "review_result": null,
-      "review_source_identity": null,
+      "review_history": [
+        {
+          "classifications": [],
+          "ref": ".grilltrack/proof/ship-origin-review-3aa19a6.md",
+          "result": "clean",
+          "reviewed_at": "2026-10-08T11:34:33+00:00",
+          "source_identity": "git:3aa19a6b100205ab39e2b1ba39d9cb198b367b87"
+        }
+      ],
+      "review_ref": ".grilltrack/proof/ship-origin-review-3aa19a6.md",
+      "review_result": "clean",
+      "review_source_identity": "git:3aa19a6b100205ab39e2b1ba39d9cb198b367b87",
       "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-08T11:30:09+00:00",
+      "updated_at": "2026-10-08T11:34:33+00:00",
       "verification_ref": ".grilltrack/proof/ship-origin-settings-20261008.md"
     },
     {
@@ -1828,13 +1836,21 @@
       "rationale": "Approved bounded settings slice; one origin keeps the store contract explicit without provider verification or account mutation.",
       "repair_required": false,
       "review_classifications": [],
-      "review_history": [],
-      "review_ref": null,
-      "review_result": null,
-      "review_source_identity": null,
+      "review_history": [
+        {
+          "classifications": [],
+          "ref": ".grilltrack/proof/ship-origin-review-3aa19a6.md",
+          "result": "clean",
+          "reviewed_at": "2026-10-08T11:34:33+00:00",
+          "source_identity": "git:3aa19a6b100205ab39e2b1ba39d9cb198b367b87"
+        }
+      ],
+      "review_ref": ".grilltrack/proof/ship-origin-review-3aa19a6.md",
+      "review_result": "clean",
+      "review_source_identity": "git:3aa19a6b100205ab39e2b1ba39d9cb198b367b87",
       "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-08T11:30:10+00:00",
+      "updated_at": "2026-10-08T11:34:33+00:00",
       "verification_ref": ".grilltrack/proof/ship-origin-settings-20261008.md"
     }
   ],
@@ -1865,5 +1881,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-08T11:30:10+00:00"
+  "updated_at": "2026-10-08T11:34:33+00:00"
 }
