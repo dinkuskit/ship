@@ -56,7 +56,7 @@ install-consent or a public listing. No provider request, real order, postage
 purchase, PDF, printing, merchant authentication or cross-plugin transport is
 added. Native asset/provider/workflow sources and Commerce/Inventory are
 unchanged. Merge, publication, deployment and provider activation remain human
-gates. Independent canonical re-review pending.
+gates. Independent canonical review completed as recorded below.
 
 
 ## Accepted review findings
@@ -74,3 +74,13 @@ found two P2 defects, both accepted and corrected:
    proof also passed again after the fix.
 
 No finding was rejected or deferred. No review finding changed product scope.
+
+
+## Canonical review
+
+Canonical Codex P0–P3 review of
+`b0af506b210a954e06f6d74044e3ad411795b376` returned **scoped-clean**:
+no actionable findings. The two earlier findings are fixed and verified.
+The reviewer assessed source and supplied proof; execution proof belongs to
+this task's recorded commands. A final review also covers this metadata update
+before the PR is marked ready. Native review and maintainer merge are separate.
