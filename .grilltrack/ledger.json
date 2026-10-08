@@ -2237,16 +2237,44 @@
           "review_source_identity": null,
           "to": "needs_reverification",
           "verification_ref": ".grilltrack/proof/registry-artifact-20261008.md"
+        },
+        {
+          "at": "2026-10-08T21:40:15+00:00",
+          "choice": "Use the official EmDash build and bundle path for existing origin settings and explicit fixture package review, retaining default unavailable order/provider/label state. Reuse the public DinkusKit publisher identity from Commerce; no publishing or account changes.",
+          "from": "needs_reverification",
+          "implementation_ref": "src/plugin.ts",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": ".grilltrack/proof/registry-artifact-20261008.md#accepted-review-findings",
+          "review_result": "findings",
+          "review_source_identity": "git:9ecba6e14f831c3b50238436a22cb8ec9ac7517b",
+          "to": "implemented",
+          "verification_ref": ".grilltrack/proof/registry-artifact-20261008.md"
+        },
+        {
+          "at": "2026-10-08T21:40:15+00:00",
+          "choice": "Use the official EmDash build and bundle path for existing origin settings and explicit fixture package review, retaining default unavailable order/provider/label state. Reuse the public DinkusKit publisher identity from Commerce; no publishing or account changes.",
+          "from": "implemented",
+          "implementation_ref": "git:b0af506b210a954e06f6d74044e3ad411795b376",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": ".grilltrack/proof/registry-artifact-20261008.md"
         }
       ],
       "id": "registry-artifact-existing-settings",
-      "implementation_ref": "src/plugin.ts",
+      "implementation_ref": "git:b0af506b210a954e06f6d74044e3ad411795b376",
       "question": "Which bounded Registry conversion is approved?",
       "rationale": "Owner explicitly accepted the read-only readiness recommendation and assigned implementation.",
-      "repair_required": true,
-      "review_classifications": [
-        "required_fix"
-      ],
+      "repair_required": false,
+      "review_classifications": [],
       "review_history": [
         {
           "classifications": [
@@ -2256,14 +2284,21 @@
           "result": "findings",
           "reviewed_at": "2026-10-08T21:39:12+00:00",
           "source_identity": "git:9ecba6e14f831c3b50238436a22cb8ec9ac7517b"
+        },
+        {
+          "classifications": [],
+          "ref": ".grilltrack/proof/registry-artifact-20261008.md#canonical-review",
+          "result": "clean",
+          "reviewed_at": "2026-10-08T21:40:15+00:00",
+          "source_identity": "git:b0af506b210a954e06f6d74044e3ad411795b376"
         }
       ],
-      "review_ref": ".grilltrack/proof/registry-artifact-20261008.md#accepted-review-findings",
-      "review_result": "findings",
-      "review_source_identity": "git:9ecba6e14f831c3b50238436a22cb8ec9ac7517b",
-      "status": "needs_reverification",
+      "review_ref": ".grilltrack/proof/registry-artifact-20261008.md#canonical-review",
+      "review_result": "clean",
+      "review_source_identity": "git:b0af506b210a954e06f6d74044e3ad411795b376",
+      "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-08T21:39:12+00:00",
+      "updated_at": "2026-10-08T21:40:15+00:00",
       "verification_ref": ".grilltrack/proof/registry-artifact-20261008.md"
     }
   ],
@@ -2294,5 +2329,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-08T21:39:12+00:00"
+  "updated_at": "2026-10-08T21:40:15+00:00"
 }
