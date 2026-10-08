@@ -29,6 +29,7 @@ async function handle(url, init = {}) {
     return json({ updated: true });
   }
   const controls = state.__controls ?? {};
+  if (path === "/controls" && method === "GET") return json(controls);
   if (path === '/provider/quote') return json({ service: 'PM', serviceLabel: 'Fixture USPS Priority Mail', currency: 'USD', amount: 8.6 });
   if (path === '/provider/create') {
     const { operationId } = JSON.parse(init.body);
