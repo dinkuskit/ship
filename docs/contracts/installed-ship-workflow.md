@@ -61,7 +61,7 @@ The factory adds `journey` POST JSON (`plugins:manage`, 16KiB body) with:
 Authority, paid totals, provider URL and order snapshot fields in the body are
 never authority. `load` returns a private persisted state projection and current
 trusted paid order. `pdf` prepares durable bytes and returns a byte count only.
-`label-pdf` POST `{orderId}` returns portable raw Uint8Array PDF, attachment
+`label-pdf` POST `{orderId}` returns portable raw `{kind:'bytes',value:Uint8Array}` PDF, attachment
 filename `shipping-label.pdf`, private/no-store and nosniff. No public route,
 general media storage or public status disclosure is added.
 
@@ -89,7 +89,11 @@ keys cannot bypass pending/unknown/known-label blocks. Fingerprints cover order
 revision, paid money, origin, recipient, package and service. Exact quote
 confirmation and expiry precede new dispatch. Completed same-key replay survives
 quote expiry. Unknown response and price mismatch remain blocked. PDF failure
-leaves known label identity; successfully persisted bytes survive module recreation.
+leaves known label identity; successfully persisted bytes survive module recreation. PDFs up to5MiB are
+written as512KiB private chunks, each below the host1MiB JSON CAS value cap,
+then atomically referenced by a digest-checked operation manifest. No partial
+manifest is published. Failed/unreferenced chunks may require later private
+cleanup; they never establish a usable label download.
 Label, PDF, print request and delivery states remain distinct.
 
 Unit tests use fictional addresses and fake provider ports. The reserved proof

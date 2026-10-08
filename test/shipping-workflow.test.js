@@ -249,3 +249,33 @@ test('durable PDF survives workflow recreation; invalid PDF never clears label',
   assert.equal(new TextDecoder().decode(await restarted.pdf(auth, { orderId: 'order-1' })), '%PDF-1.4 fixture');
   assert.equal(f.calls.create, 1);
 });
+
+test('reviewing changed package invalidates the prior quote before purchase', async () => {
+  const f = workflow();
+  const quote = await f.instance.quote(auth, { orderId: 'order-1', packageValues });
+  const changed = { ...packageValues, weightLb: '1' };
+  await f.instance.review(auth, { orderId: 'order-1', packageValues: changed });
+  await assert.rejects(f.instance.buy(auth, { orderId: 'order-1', packageValues: changed, quoteId: quote.quoteId, idempotencyKey: 'stale', confirmation: { confirmed: true, service: 'PM', currency: 'USD', amount: 8.6 } }), e => e.code === 'conflict');
+  assert.equal(f.calls.create, 0);
+  assert.equal((await f.instance.inspect(auth, { orderId: 'order-1' })).quote, null);
+});
+
+test('maximum PDF persists below each actual1MiB CAS JSON cap and verifies chunk digest on reload', async () => {
+  const f = workflow();
+  const cas = f.store.compareAndSet;
+  f.store.compareAndSet = async (key, revision, value) => {
+    assert.ok(new TextEncoder().encode(JSON.stringify(value)).length <= 1024 * 1024);
+    return cas(key, revision, value);
+  };
+  await reviewedBuy(f.instance);
+  const bytes = new Uint8Array(5 * 1024 * 1024); bytes.set(new TextEncoder().encode('%PDF-1.4'));
+  f.providerPort.fetchLabelPdf = async () => bytes;
+  assert.equal((await f.instance.pdf(auth, { orderId: 'order-1' })).length, bytes.length);
+  f.providerPort.fetchLabelPdf = async () => { throw Error('no refetch'); };
+  const restarted = createShipWorkflow(f);
+  assert.deepEqual(await restarted.pdf(auth, { orderId: 'order-1' }), bytes);
+  const key = [...f.current.keys()].find(key => key.startsWith('ship:pdf:'));
+  f.current.get(key).value.base64 = f.current.get(key).value.base64.replace('A', 'B');
+  await assert.rejects(restarted.pdf(auth, { orderId: 'order-1' }), e => e.code === 'pdf_invalid');
+  assert.equal(f.calls.create, 1);
+});

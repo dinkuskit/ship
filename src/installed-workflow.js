@@ -55,7 +55,7 @@ export function createShipPlugin({ workflowFactory, authorityPort } = {}) {
       return { __emdashPluginResponse: true, status: 200, headers: [
         ['content-type', 'application/pdf'], ['content-disposition', 'attachment; filename="shipping-label.pdf"'],
         ['cache-control', 'private, no-store'], ['x-content-type-options', 'nosniff'],
-      ], body: bytes };
+      ], body: { kind: 'bytes', value: bytes } };
     }),
     response: 'raw',
   };

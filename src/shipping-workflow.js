@@ -1,6 +1,7 @@
 const MAX_ID = 100;
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 const MAX_PDF_BYTES = 5 * 1024 * 1024;
+const PDF_CHUNK_BYTES = 512 * 1024;
 const KEY_RE = /^[A-Za-z0-9_-]{1,25}$/;
 const US_STATES = new Set([
   "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA", "HI",
@@ -182,13 +183,17 @@ function canonical(value) {
   return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
 }
 
-async function fingerprint(value) {
+async function digestBytes(value) {
   if (!globalThis.crypto?.subtle || typeof TextEncoder === "undefined") fail("unavailable", 503);
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonical(value)));
+  const digest = await crypto.subtle.digest("SHA-256", value);
   const bytes = new Uint8Array(digest);
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+async function fingerprint(value) {
+  return digestBytes(new TextEncoder().encode(canonical(value)));
 }
 
 function defaultId() {
@@ -300,6 +305,7 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
     const next = {
       ...(current?.value || {}),
       reviewed: { fingerprint: ctx.fingerprint, order: ctx.order, shipment: ctx.shipment, reviewedAt: clock() },
+      quote: current?.value?.quote?.fingerprint === ctx.fingerprint ? current.value.quote : null,
     };
     await writeState(ctx.auth, ctx.order.orderId, current, next);
     return clone({ status: "reviewed", order: ctx.order, shipment: ctx.shipment, fingerprint: ctx.fingerprint });
@@ -313,6 +319,7 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
     const amount = money(quoted?.amount);
     if (quoted?.service !== "PM" || quoted?.currency !== "USD" || !text(quoted.serviceLabel, 100)) fail("provider_failure", 502);
     const quoteRecord = {
+      fingerprint: ctx.fingerprint,
       quoteId: fixedKey(String(idFactory()).slice(0, 25)),
       service: "PM", serviceLabel: quoted.serviceLabel, currency: "USD", amount,
       expiresAt: clock() + QUOTE_TTL_MS,
@@ -353,7 +360,7 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
     const record = current?.value;
     const quoteRecord = record?.quote;
     if (!record?.reviewed || record.reviewed.fingerprint !== ctx.fingerprint || !quoteRecord ||
-        quoteRecord.quoteId !== input.quoteId) fail("conflict", 409);
+        quoteRecord.quoteId !== input.quoteId || quoteRecord.fingerprint !== ctx.fingerprint) fail("conflict", 409);
     validateConfirmation(input.confirmation, quoteRecord);
     if (record.operation) {
       if (record.operation.key === key && record.operation.fingerprint !== ctx.fingerprint) fail("conflict", 409);
@@ -436,17 +443,61 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
   async function pdf(authInput, input) {
     const auth = validateAuth(authInput);
     const orderId = id(input?.orderId);
-    if (!orderId) fail("validation");
+    if (!orderId) fail('validation');
     const current = await readState(auth, orderId);
     const labelRecord = current?.value?.label;
-    if (!labelRecord || labelRecord.status !== "label_created") fail("not_found", 404);
-    if (current.value.pdf?.base64) return decodeBytes(current.value.pdf.base64);
-    if (typeof providerPort.fetchLabelPdf !== "function" || !safePdfUrl(labelRecord.pdfUrl)) fail("pdf_unavailable", 503);
+    if (!labelRecord || labelRecord.status !== 'label_created') fail('not_found', 404);
+    const operationId = current.value.operation.id;
+    const prefix = digest => fingerprint({ shopId: auth.shopId, orderId, operationId, digest });
+    const manifest = current.value.pdf;
+    if (manifest) {
+      if (manifest.shipmentId !== labelRecord.shipmentId || !Number.isInteger(manifest.byteLength) ||
+          manifest.byteLength < 5 || manifest.byteLength > MAX_PDF_BYTES ||
+          manifest.chunkCount !== Math.ceil(manifest.byteLength / PDF_CHUNK_BYTES) ||
+          typeof manifest.digest !== 'string') fail('pdf_invalid', 502);
+      const keyPrefix = await prefix(manifest.digest);
+      const bytes = new Uint8Array(manifest.byteLength);
+      for (let index = 0; index < manifest.chunkCount; index++) {
+        let chunk;
+        try { chunk = (await store.getVersioned(`ship:pdf:v1:${keyPrefix}:${index}`))?.value; }
+        catch { fail('pdf_unavailable', 503); }
+        const expectedLength = Math.min(PDF_CHUNK_BYTES, bytes.length - index * PDF_CHUNK_BYTES);
+        if (!chunk || chunk.index !== index || chunk.shipmentId !== labelRecord.shipmentId ||
+            typeof chunk.base64 !== 'string' || chunk.base64.length > Math.ceil(PDF_CHUNK_BYTES / 3) * 4) fail('pdf_invalid', 502);
+        let part;
+        try { part = decodeBytes(chunk.base64); } catch { fail('pdf_invalid', 502); }
+        if (part.length !== expectedLength) fail('pdf_invalid', 502);
+        bytes.set(part, index * PDF_CHUNK_BYTES);
+      }
+      if (await digestBytes(bytes) !== manifest.digest) fail('pdf_invalid', 502);
+      return bytes;
+    }
+    if (typeof providerPort.fetchLabelPdf !== 'function' || !safePdfUrl(labelRecord.pdfUrl)) fail('pdf_unavailable', 503);
     let bytes;
-    try { bytes = asBytes(await providerPort.fetchLabelPdf(labelRecord.pdfUrl)); } catch { fail("pdf_unavailable", 502); }
+    try { bytes = asBytes(await providerPort.fetchLabelPdf(labelRecord.pdfUrl)); } catch { fail('pdf_unavailable', 502); }
     if (!bytes || bytes.byteLength > MAX_PDF_BYTES || bytes.length < 5 ||
-        String.fromCharCode(...bytes.subarray(0, 5)) !== "%PDF-") fail("pdf_invalid", 502);
-    const next = { ...current.value, pdf: { base64: encodeBytes(bytes), shipmentId: labelRecord.shipmentId, storedAt: clock() } };
+        String.fromCharCode(...bytes.subarray(0, 5)) !== '%PDF-') fail('pdf_invalid', 502);
+    bytes = new Uint8Array(bytes);
+    const digest = await digestBytes(bytes);
+    const keyPrefix = await prefix(digest);
+    const chunkCount = Math.ceil(bytes.length / PDF_CHUNK_BYTES);
+    for (let index = 0; index < chunkCount; index++) {
+      const key = `ship:pdf:v1:${keyPrefix}:${index}`;
+      const chunk = { index, shipmentId: labelRecord.shipmentId,
+        base64: encodeBytes(bytes.subarray(index * PDF_CHUNK_BYTES, (index + 1) * PDF_CHUNK_BYTES)) };
+      try {
+        const result = await store.compareAndSet(key, null, chunk);
+        if (!result?.applied) {
+          const existing = (await store.getVersioned(key))?.value;
+          if (!existing || existing.index !== index || existing.shipmentId !== chunk.shipmentId || existing.base64 !== chunk.base64) fail('pdf_invalid', 502);
+        }
+      } catch (error) {
+        if (error instanceof ShipWorkflowError) throw error;
+        fail('pdf_unavailable', 503);
+      }
+    }
+    const next = { ...current.value, pdf: { digest, chunkCount, byteLength: bytes.length,
+      shipmentId: labelRecord.shipmentId, storedAt: clock() } };
     await writeState(auth, orderId, current, next);
     return bytes;
   }

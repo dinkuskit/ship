@@ -20,7 +20,8 @@ test('host-only actor projection and private PDF wire preserve dispatch policy',
   assert.deepEqual(Object.keys(observed).sort(), ['ui', 'user']);
   const raw = await plugin.routes['label-pdf'].handler(routeCtx, {});
   assert.equal(raw.__emdashPluginResponse, true);
-  assert.ok(raw.body instanceof Uint8Array);
+  assert.equal(raw.body.kind, 'bytes');
+  assert.ok(raw.body.value instanceof Uint8Array);
   for (const name of ['admin', 'journey', 'label-pdf']) {
     assert.equal(plugin.routes[name].permission, 'plugins:manage');
     assert.equal(plugin.routes[name].public, undefined);
