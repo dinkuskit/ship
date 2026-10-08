@@ -20,8 +20,10 @@ if (process.argv.length > 3 || (mode !== undefined && !["--setup", "--workerd"].
     stdio: workerd ? ["ignore", "pipe", "pipe"] : "inherit",
     env: { ...process.env, SHIP_JOURNEY_HOST_PROOF: mode === "--setup" ? "1" : "0", SHIP_JOURNEY_WORKER: workerd ? "1" : "0" },
   });
+  let interruptionCode;
   const forwardSignal = signal => {
     if (child.exitCode !== null || child.signalCode !== null) return;
+    interruptionCode = signal === "SIGINT" ? 130 : 143;
     try {
       if (process.platform === "win32") child.kill(signal);
       else process.kill(-child.pid, signal);
@@ -47,7 +49,8 @@ if (process.argv.length > 3 || (mode !== undefined && !["--setup", "--workerd"].
     await mkdir(evidence, { recursive: true });
     await writeFile(resolve(evidence, "journey.log"), output.join(""));
   }
-  if (code !== 0) process.exitCode = code;
+  if (interruptionCode) process.exitCode = interruptionCode;
+  else if (code !== 0) process.exitCode = code;
   else {
     if (workerd) {
       console.log("FIXTURE_JOURNEY_GATE=passed:installed_emdash_workerd");
