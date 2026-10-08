@@ -28,7 +28,7 @@ test("local EmDash package seam has a private JSON route contract", async () => 
   assert.deepEqual(manifest.capabilities, []);
   assert.deepEqual(manifest.allowedHosts, []);
   assert.deepEqual(manifest.storage, { preferences: { indexes: ["locale"] }, operations: { indexes: [] } });
-  assert.equal(manifest.publisher, undefined);
+  assert.equal(manifest.publisher, "did:plc:ekk4pjmkh3k3ql2kfoex3qt4");
 
   for (const [name, route] of Object.entries(plugin.routes)) {
     assert.deepEqual(route.methods, ["POST"], name);

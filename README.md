@@ -137,9 +137,27 @@ provider readiness. Merchant-owned Pitney Bowes postage accounts are the
 settled account direction; merchant payment of provider fees is preferred,
 while subsidy amounts remain unapproved. English and Arabic copy use the
 host's attested locale and direction. Unmounted orders fail closed. Synthetic order examples
-require the explicit isolated test fixture selector. Publisher identity and
-security contact remain absent; signed Registry release and publication are
-separate gates.
+require the explicit isolated test fixture selector. The manifest pins the
+approved public publisher DID and security URL; signed Registry release and
+publication remain separate gates.
+
+The official Registry authoring entry is `src/plugin.ts`. Build and bundle it
+with the pinned CLI, without contacting Registry services:
+
+```sh
+PATH=/opt/homebrew/Cellar/node@24/24.16.0/bin:$PATH npm run build
+PATH=/opt/homebrew/Cellar/node@24/24.16.0/bin:$PATH npm run verify:registry
+```
+
+The verifier uses the published `bundlePlugin` API, reports tarball bytes and
+SHA-256, enforces the 131072-byte backend, 262144-byte total, and 20-file caps,
+and loads the generated manifest/backend through EmDash’s Registry-source
+cold-start path in a fresh disposable host. It checks settings, origin and
+fixture persistence, language behavior, denied access and a host restart.
+The local post-install state is seeded for this unsigned fixture; signatures,
+Registry listing/install consent and publication are not covered. Artifacts
+and receipts are retained in the reported ignored `runs/registry-artifact-*`
+directory. `npm run verify:bundle` runs just the offline bundle checks.
 
 `npm test` checks route contracts and deterministic fixtures. To prepare a
 config-managed sandbox host from a fresh packed package:

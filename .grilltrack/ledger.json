@@ -4,11 +4,11 @@
   "current_focus": {
     "cadence": "sequential",
     "confirmed": true,
-    "confirmed_at": "2026-10-08T17:45:13+00:00",
-    "domain": "Authorized native browser access to stored Ship labels",
-    "started_at": "2026-10-08T17:45:13+00:00",
+    "confirmed_at": "2026-10-08T21:24:12+00:00",
+    "domain": "Official Registry artifact for existing Ship settings",
+    "started_at": "2026-10-08T21:24:11+00:00",
     "status": "confirmed",
-    "summary": "Previously authorized native browser adapter and exact candidate are approved for packaging with independent installed and visible fixture proof. Runtime source remains unchanged; real provider, production Commerce, physical printing, Registry and deployment are excluded. Human merge authority remains separate."
+    "summary": "Proceed with the owner-assigned official Registry conversion, preserving current origin/settings and fixture validation behavior, proving official bundle and installed runtime; no Commerce/Inventory changes, real provider, public label path, publish, deploy or merge."
   },
   "decisions": [
     {
@@ -2167,6 +2167,139 @@
       "superseded_by": null,
       "updated_at": "2026-10-08T18:26:34+00:00",
       "verification_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md"
+    },
+    {
+      "baseline_ref": "git:0bafd8cfa3d9cb1e4d09cb32ba46d48bf8b0dd35",
+      "candidate_refs": [],
+      "choice": "Use the official EmDash build and bundle path for existing origin settings and explicit fixture package review, retaining default unavailable order/provider/label state. Reuse the public DinkusKit publisher identity from Commerce; no publishing or account changes.",
+      "context_ref": null,
+      "created_at": "2026-10-08T21:24:12+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [
+        "pb-registry-scaffold-001",
+        "merchant-ship-from-origin-20261008"
+      ],
+      "domain": "Official Registry artifact for existing Ship settings",
+      "history": [
+        {
+          "at": "2026-10-08T21:24:12+00:00",
+          "choice": "Use the official EmDash build and bundle path for existing origin settings and explicit fixture package review, retaining default unavailable order/provider/label state. Reuse the public DinkusKit publisher identity from Commerce; no publishing or account changes.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-08T21:36:22+00:00",
+          "choice": "Use the official EmDash build and bundle path for existing origin settings and explicit fixture package review, retaining default unavailable order/provider/label state. Reuse the public DinkusKit publisher identity from Commerce; no publishing or account changes.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-08T21:36:22+00:00",
+          "choice": "Use the official EmDash build and bundle path for existing origin settings and explicit fixture package review, retaining default unavailable order/provider/label state. Reuse the public DinkusKit publisher identity from Commerce; no publishing or account changes.",
+          "from": "implemented",
+          "implementation_ref": "src/plugin.ts",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-08T21:39:12+00:00",
+          "choice": "Use the official EmDash build and bundle path for existing origin settings and explicit fixture package review, retaining default unavailable order/provider/label state. Reuse the public DinkusKit publisher identity from Commerce; no publishing or account changes.",
+          "from": "verified",
+          "implementation_ref": "src/plugin.ts",
+          "note": "adjudicated review requires a fix",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "needs_reverification",
+          "verification_ref": ".grilltrack/proof/registry-artifact-20261008.md"
+        },
+        {
+          "at": "2026-10-08T21:40:15+00:00",
+          "choice": "Use the official EmDash build and bundle path for existing origin settings and explicit fixture package review, retaining default unavailable order/provider/label state. Reuse the public DinkusKit publisher identity from Commerce; no publishing or account changes.",
+          "from": "needs_reverification",
+          "implementation_ref": "src/plugin.ts",
+          "note": "bounded implementation recorded",
+          "repair_required": true,
+          "review_classifications": [
+            "required_fix"
+          ],
+          "review_ref": ".grilltrack/proof/registry-artifact-20261008.md#accepted-review-findings",
+          "review_result": "findings",
+          "review_source_identity": "git:9ecba6e14f831c3b50238436a22cb8ec9ac7517b",
+          "to": "implemented",
+          "verification_ref": ".grilltrack/proof/registry-artifact-20261008.md"
+        },
+        {
+          "at": "2026-10-08T21:40:15+00:00",
+          "choice": "Use the official EmDash build and bundle path for existing origin settings and explicit fixture package review, retaining default unavailable order/provider/label state. Reuse the public DinkusKit publisher identity from Commerce; no publishing or account changes.",
+          "from": "implemented",
+          "implementation_ref": "git:b0af506b210a954e06f6d74044e3ad411795b376",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": ".grilltrack/proof/registry-artifact-20261008.md"
+        }
+      ],
+      "id": "registry-artifact-existing-settings",
+      "implementation_ref": "git:b0af506b210a954e06f6d74044e3ad411795b376",
+      "question": "Which bounded Registry conversion is approved?",
+      "rationale": "Owner explicitly accepted the read-only readiness recommendation and assigned implementation.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [
+        {
+          "classifications": [
+            "required_fix"
+          ],
+          "ref": ".grilltrack/proof/registry-artifact-20261008.md#accepted-review-findings",
+          "result": "findings",
+          "reviewed_at": "2026-10-08T21:39:12+00:00",
+          "source_identity": "git:9ecba6e14f831c3b50238436a22cb8ec9ac7517b"
+        },
+        {
+          "classifications": [],
+          "ref": ".grilltrack/proof/registry-artifact-20261008.md#canonical-review",
+          "result": "clean",
+          "reviewed_at": "2026-10-08T21:40:15+00:00",
+          "source_identity": "git:b0af506b210a954e06f6d74044e3ad411795b376"
+        }
+      ],
+      "review_ref": ".grilltrack/proof/registry-artifact-20261008.md#canonical-review",
+      "review_result": "clean",
+      "review_source_identity": "git:b0af506b210a954e06f6d74044e3ad411795b376",
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-10-08T21:40:15+00:00",
+      "verification_ref": ".grilltrack/proof/registry-artifact-20261008.md"
     }
   ],
   "last_activation": {
@@ -2196,5 +2329,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-08T18:26:34+00:00"
+  "updated_at": "2026-10-08T21:40:15+00:00"
 }
