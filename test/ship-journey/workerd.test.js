@@ -37,9 +37,11 @@ test("installed Ship fixture through private EmDash HTTP and workerd", {
     receipt.hostManifest = join(evidence, "fixture-host-config.mjs");
     const hostConfig = await readFile(join(host.hostDirectory, "astro.config.mjs"));
     await writeFile(receipt.hostManifest, hostConfig);
+    receipt.disposableHostDirectory = host.hostDirectory;
     receipt.hostManifestSha256 = createHash("sha256").update(hostConfig).digest("hex");
     await saveReceipt();
     await startJourneyHost(host);
+    receipt.hostBase = host.base; receipt.hostPid = host.child.pid; await saveReceipt();
     const bypass = await fetch(`${host.base}/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin`, { redirect: "manual" });
     const cookie = bypass.headers.get("set-cookie")?.split(";")[0];
     assert.ok(cookie, "disposable host did not issue its local session");

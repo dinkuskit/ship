@@ -21,8 +21,27 @@ const sandboxHost = join(root, "test-support", "sandbox-host");
 
 export async function prepareInstalledEmdashHost({ repoRoot = root } = {}) {
   const runDirectory = await createDisposableRun(join(tmpdir(), "ship-journey-host-"));
+  const hostDirectory = join(runDirectory, "host");
+  const host = { runDirectory, hostDirectory };
+  let cleanupPromise;
+  const cleanup = () => cleanupPromise ??= (async () => {
+    await stopJourneyHost(host);
+    await cleanupDisposableRun(runDirectory);
+    process.removeListener("SIGINT", onInterrupt);
+    process.removeListener("SIGTERM", onTerminate);
+  })();
+  host.cleanup = cleanup;
+  const interrupt = signal => {
+    cleanup().then(() => {
+      console.log(`host_cleanup=interrupted:${signal}`);
+      process.exit(signal === "SIGINT" ? 130 : 143);
+    }, () => process.exit(1));
+  };
+  const onInterrupt = () => interrupt("SIGINT");
+  const onTerminate = () => interrupt("SIGTERM");
+  process.on("SIGINT", onInterrupt);
+  process.on("SIGTERM", onTerminate);
   try {
-    const hostDirectory = join(runDirectory, "host");
     await mkdir(join(hostDirectory, ".emdash", "uploads"), { recursive: true });
     await copyFile(join(sandboxHost, "package.json"), join(hostDirectory, "package.json"));
     await copyFile(join(sandboxHost, "astro.config.mjs"), join(hostDirectory, "astro.config.mjs"));
@@ -42,14 +61,10 @@ export async function prepareInstalledEmdashHost({ repoRoot = root } = {}) {
       join(hostDirectory, "node_modules", "emdash", "dist", "cli", "index.mjs"),
       "init", "--database", ".emdash/proof.sqlite",
     ], { cwd: hostDirectory, maxBuffer: 10 * 1024 * 1024 });
-    return {
-      ...installed,
-      runDirectory,
-      hostDirectory,
-      cleanup: () => cleanupDisposableRun(runDirectory),
-    };
+    Object.assign(host, installed, { runDirectory, hostDirectory, cleanup });
+    return host;
   } catch (error) {
-    await cleanupDisposableRun(runDirectory);
+    await cleanup();
     throw error;
   }
 }

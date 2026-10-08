@@ -16,10 +16,21 @@ if (process.argv.length > 3 || (mode !== undefined && !["--setup", "--workerd"].
   const child = spawn(process.execPath, ["--test", workerd
     ? "test/ship-journey/workerd.test.js"
     : "test/ship-journey/installed-package.test.js"], {
-    cwd: root,
+    cwd: root, detached: process.platform !== "win32",
     stdio: workerd ? ["ignore", "pipe", "pipe"] : "inherit",
     env: { ...process.env, SHIP_JOURNEY_HOST_PROOF: mode === "--setup" ? "1" : "0", SHIP_JOURNEY_WORKER: workerd ? "1" : "0" },
   });
+  const forwardSignal = signal => {
+    if (child.exitCode !== null || child.signalCode !== null) return;
+    try {
+      if (process.platform === "win32") child.kill(signal);
+      else process.kill(-child.pid, signal);
+    } catch (error) { if (error.code !== "ESRCH") throw error; }
+  };
+  const onInterrupt = () => forwardSignal("SIGINT");
+  const onTerminate = () => forwardSignal("SIGTERM");
+  process.on("SIGINT", onInterrupt);
+  process.on("SIGTERM", onTerminate);
   const output = [];
   if (workerd) {
     child.stdout.on("data", chunk => { process.stdout.write(chunk); output.push(String(chunk)); });
@@ -29,6 +40,8 @@ if (process.argv.length > 3 || (mode !== undefined && !["--setup", "--workerd"].
     child.once("error", reject);
     child.once("exit", (code, signal) => accept(signal ? 1 : code ?? 1));
   });
+  process.removeListener("SIGINT", onInterrupt);
+  process.removeListener("SIGTERM", onTerminate);
   if (workerd) {
     const evidence = resolve(root, "runs/ship-journey-runs/20261008");
     await mkdir(evidence, { recursive: true });
