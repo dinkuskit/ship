@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { join } from "node:path";
@@ -17,11 +18,27 @@ test("installed Ship fixture through private EmDash HTTP and workerd", {
   skip: enabled ? false : "run with scripts/verify-ship-journey.mjs --workerd",
 }, async () => {
   const host = await prepareInstalledEmdashHost();
+  const evidence = join(host.root, "runs/ship-journey-runs/20261008");
+  await mkdir(evidence, { recursive: true });
+  const receipt = { status: "running", synthetic: true, packageTarballSha256: host.packed.sha256, packageVersion: host.packed.version, installedPackageByteComparison: false };
+  const saveReceipt = () => writeFile(join(evidence, "installed-http-receipt.json"), JSON.stringify(receipt, null, 2) + "\n");
   try {
-    await comparePackedFileBytes({ packed: host.packed, installedDirectories: [host.installedDirectory] });
+    const compared = await comparePackedFileBytes({ packed: host.packed, installedDirectories: [host.installedDirectory] });
+    receipt.installedPackageByteComparison = true;
+    receipt.harnessHead = (await run("git", ["rev-parse", "HEAD"], { cwd: host.root })).stdout.trim();
+    receipt.workflowDependency = (await run("git", ["rev-parse", "HEAD^"], { cwd: host.root })).stdout.trim();
+    const inventory = await Promise.all(compared.files.map(async path => ({ path, sha256: createHash("sha256").update(await readFile(join(host.installedDirectory, path))).digest("hex") })));
+    receipt.fileInventorySha256 = createHash("sha256").update(JSON.stringify(inventory)).digest("hex");
+    await writeFile(join(evidence, "packed-file-inventory.json"), JSON.stringify(inventory, null, 2) + "\n");
+    await saveReceipt();
     const { createShipPlugin } = await import(pathToFileURL(createRequire(join(host.hostDirectory, "package.json")).resolve("@dinkuskit/ship/installed")));
     await assert.rejects(createShipPlugin().routes.journey.handler({ user: { id: "synthetic" }, input: { action: "load", orderId: ORDER.orderId } }, {}), /dependencies are unavailable/);
     await configureJourneyHost(host);
+    receipt.hostManifest = join(evidence, "fixture-host-config.mjs");
+    const hostConfig = await readFile(join(host.hostDirectory, "astro.config.mjs"));
+    await writeFile(receipt.hostManifest, hostConfig);
+    receipt.hostManifestSha256 = createHash("sha256").update(hostConfig).digest("hex");
+    await saveReceipt();
     await startJourneyHost(host);
     const bypass = await fetch(`${host.base}/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin`, { redirect: "manual" });
     const cookie = bypass.headers.get("set-cookie")?.split(";")[0];
@@ -174,6 +191,15 @@ with sqlite3.connect(sys.argv[1]) as db:
     assert.deepEqual((await call("label-pdf", { orderId: ORDER_IDS.large })).bytes, largePdf.bytes);
     console.log("private_pdf: exact_raw_bytes700000_and5242880; real_EmDash_chunk_limit; restart_cache; corrupt_missing_denied; print_request_only");
     console.log("browser_pdf: mediator_absent; ordinary_view_download_print_skipped; production_Commerce_CAS_Registry_unbound");
+    receipt.status = "passed";
+    receipt.pdfBytes = [700000, 5242880];
+    receipt.realInstalledEmdashCas = true;
+    receipt.realProvider = false;
+    receipt.browserPdfMediator = false;
+    receipt.registry = false;
+    await saveReceipt();
+  } catch (error) {
+    receipt.status = "failed"; await saveReceipt(); throw error;
   } finally {
     await stopJourneyHost(host);
     await host.cleanup();
