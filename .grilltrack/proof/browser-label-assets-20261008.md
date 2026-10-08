@@ -23,7 +23,7 @@ Reproduction: `node --test test/host-label-assets.test.js`; `SHIP_BROWSER_HOST_P
 
 The in-app browser reported loaded but rendered a blank PDF frame, so it does not support the visible-view claim; Chrome supplies that evidence. A separate stale-operation navigation in Chrome was blocked with `ERR_BLOCKED_BY_CLIENT`. No protection was bypassed, and that browser state is not attributed to the server. The denial is independently established by installed HTTP testing.
 
-There is no print-dialog, physical-print, delivery, live-provider, paid production Commerce integration, deployment or Registry-installability claim. Production order provenance, authority and mounting remain external gates. No confirmed runtime defect or harness repair was needed during independent proof. Reviews are pending and advisory; merge requires human authorization.
+There is no print-dialog, physical-print, delivery, live-provider, paid production Commerce integration, deployment or Registry-installability claim. Production order provenance, authority and mounting remain external gates. No confirmed runtime defect or harness repair was needed during independent proof. Reviews are advisory; final PR tuple qualification is retained separately and merge requires human authorization.
 
 ## Selected source fingerprints
 
@@ -37,3 +37,7 @@ There is no print-dialog, physical-print, delivery, live-provider, paid producti
 - `test-support/ship-journey/runner.mjs`: `7c501a73579d77fab2a4a3287545c1f29099d970335bf8a305046e3d4eebb4cb`
 - `test/host-label-assets.test.js`: `62846bd1d886705b9de655a4ff73319f83f08ebd1090c7b06584c3db7b4af9d8`
 - `test/ship-browser/installed.test.js`: `6df6f050221532dbdb95df64d1d3f3d14069bd6b97b0bf618e955282b27bb3d7`
+
+## Source review
+
+Independent canonical Codex P0-P3 review completed scoped-clean for `git:4ca4bcc8fbffd611b41e83144d135a73bd4dd526`: no actionable findings or required runtime fixes. Standards and source intent were reviewed, including host authority, stored-only operation binding and fixture/print-attempt exclusions. This was static review; raw local artifacts and unchanged workflow internals were not executed by that reviewer. Independent runtime/browser proof above supplies separate evidence. Final source and native publication receipts are qualified against the final PR tuple before the human merge gate.
