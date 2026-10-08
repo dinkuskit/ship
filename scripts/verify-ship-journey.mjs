@@ -13,7 +13,7 @@ if (process.argv.length > 3 || (mode !== undefined && !["--setup", "--workerd"].
 } else {
   // The explicit setup mode MUST run the host install/init acceptance test.
   const workerd = mode === "--workerd";
-  const child = spawn(process.execPath, ["--test", workerd
+  const child = spawn(process.execPath, ["--test", "--experimental-test-isolation=none", workerd
     ? "test/ship-journey/workerd.test.js"
     : "test/ship-journey/installed-package.test.js"], {
     cwd: root, detached: process.platform !== "win32",
