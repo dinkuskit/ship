@@ -1,10 +1,10 @@
 {
   "$schema": "./node_modules/@emdash-cms/plugin-cli/schemas/emdash-plugin.schema.json",
   "slug": "ship",
-  // Publisher identity is intentionally omitted until a separately approved
-  // Registry account exists. This local package is not publishable.
+  "publisher": "did:plc:ekk4pjmkh3k3ql2kfoex3qt4",
   "license": "MIT",
   "author": { "name": "DinkusKit" },
+  "securityContacts": [{ "url": "https://github.com/dinkuskit/ship/security" }],
   "name": "DinkusKit Ship",
   "description": "Ship settings and an unavailable-order state for a private local EmDash sandbox. Provider actions remain disabled.",
   "capabilities": [],
@@ -15,11 +15,11 @@
   },
   "admin": {
     "pages": [
-      { "path": "/journey", "label": "Shipment review", "icon": "truck" },
       { "path": "/orders", "label": "Orders", "icon": "receipt" },
-      { "path": "/settings", "label": "Ship settings", "icon": "settings" },
       { "path": "/order-detail", "label": "Order detail", "icon": "receipt" },
-      { "path": "/shipping", "label": "Shipping", "icon": "truck" }
+      { "path": "/shipping", "label": "Shipping", "icon": "truck" },
+      { "path": "/settings", "label": "Ship settings", "icon": "settings" },
+      { "path": "/proof-fixture", "label": "Synthetic package proof", "icon": "flask" }
     ]
   }
 }

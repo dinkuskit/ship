@@ -17,8 +17,29 @@ bin/verify-ship full
 `quick` (the default) runs all Node tests: private package routes, Block Kit
 settings persistence, attested locale/RTL, isolated order fixtures, package
 validation, operation idempotency and unknown outcomes, loopback HTTP guards,
-and sandbox transport/PDF restrictions. `full` adds a package dry-run showing
-the distributable file list. A dry-run is not installed sandbox execution.
+and sandbox transport/PDF restrictions. `full` adds a package dry-run and the official offline bundle check.
+A dry-run or bundle check is not installed sandbox execution.
+
+## Official Registry artifact
+
+Use Homebrew Node 24 for the official rolldown toolchain:
+
+```sh
+PATH=/opt/homebrew/Cellar/node@24/24.16.0/bin:$PATH npm run build
+PATH=/opt/homebrew/Cellar/node@24/24.16.0/bin:$PATH npm run verify:registry
+```
+
+`verify:registry` calls the published `bundlePlugin` API, records the emitted
+tarball byte count and SHA-256, and rejects the official caps of 131072 bytes
+per backend file, 262144 bytes total, and 20 files. It checks the generated
+manifest/backend in a disposable local `registry/<id>/<version>` storage
+prefix, loads it through EmDash’s Registry-source cold start, and runs the
+shared behavior checks including denial and restart persistence. No npm Ship
+entry is installed in that host. The seeded local state is explicitly unsigned
+and does not prove Registry signatures, install consent or publication.
+`npm run verify:bundle` performs only offline artifact checks. The emitted
+artifact, file inventory and host receipt are retained under the reported
+ignored run directory.
 
 Both modes resolve the repository from the script path. Success exits 0 and
 prints `verify-ship: <mode> passed`; unsupported modes exit 64. Child failures

@@ -13,6 +13,7 @@ case "$mode" in
   full)
     "$script_dir/verify-ship" quick
     npm pack --dry-run --ignore-scripts
+    npm run verify:bundle
     ;;
   sandbox)
     "$script_dir/verify-ship" full

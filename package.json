@@ -19,12 +19,20 @@
   },
   "scripts": {
     "test": "node --test",
+    "build": "emdash-plugin build",
+    "verify:registry": "node scripts/verify-registry-artifact.mjs",
+    "verify:bundle": "node scripts/verify-registry-artifact.mjs --bundle-only",
     "dev": "node src/server.js",
     "fixture:proof": "PORT=4328 node test-support/fixture-server.js",
     "verify:sandbox": "node scripts/verify-sandbox-package.mjs",
     "prepare:sandbox": "node scripts/prepare-sandbox-host.mjs",
     "verify:quick": "bin/verify-ship quick",
     "verify:full": "bin/verify-ship full"
+  },
+  "devDependencies": {
+    "@emdash-cms/plugin-cli": "0.13.3",
+    "@emdash-cms/plugin-types": "0.6.0",
+    "typescript": "6.0.3"
   },
   "license": "MIT",
   "repository": {
