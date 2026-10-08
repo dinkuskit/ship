@@ -187,7 +187,8 @@ with sqlite3.connect(sys.argv[1]) as db:
     const largePdf = await call("label-pdf", { orderId: ORDER_IDS.large });
     assert.equal(largePdf.response.status, 200);
     assert.equal(largePdf.bytes.length, 5 * 1024 * 1024);
-    assert.deepEqual(largePdf.bytes.subarray(0, createFixturePdf().length), createFixturePdf());
+    const largeExpected = Buffer.alloc(5 * 1024 * 1024, 32); createFixturePdf().copy(largeExpected);
+    assert.deepEqual(largePdf.bytes, largeExpected);
     assert.deepEqual((await call("label-pdf", { orderId: ORDER_IDS.large })).bytes, largePdf.bytes);
     console.log("private_pdf: exact_raw_bytes700000_and5242880; real_EmDash_chunk_limit; restart_cache; corrupt_missing_denied; print_request_only");
     console.log("browser_pdf: mediator_absent; ordinary_view_download_print_skipped; production_Commerce_CAS_Registry_unbound");
