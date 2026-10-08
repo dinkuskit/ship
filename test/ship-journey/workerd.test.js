@@ -26,7 +26,7 @@ test("installed Ship fixture through private EmDash HTTP and workerd", {
     const compared = await comparePackedFileBytes({ packed: host.packed, installedDirectories: [host.installedDirectory] });
     receipt.installedPackageByteComparison = true;
     receipt.harnessHead = (await run("git", ["rev-parse", "HEAD"], { cwd: host.root })).stdout.trim();
-    receipt.workflowDependency = (await run("git", ["rev-parse", "HEAD^"], { cwd: host.root })).stdout.trim();
+    receipt.workflowDependency = (await run("git", ["log", "-1", "--format=%H", "--", "src/shipping-workflow.js", "src/installed-workflow.js", "src/plugin.js", "src/pb-sandbox.js"], { cwd: host.root })).stdout.trim();
     const inventory = await Promise.all(compared.files.map(async path => ({ path, sha256: createHash("sha256").update(await readFile(join(host.installedDirectory, path))).digest("hex") })));
     receipt.fileInventorySha256 = createHash("sha256").update(JSON.stringify(inventory)).digest("hex");
     await writeFile(join(evidence, "packed-file-inventory.json"), JSON.stringify(inventory, null, 2) + "\n");
