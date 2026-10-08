@@ -46,25 +46,30 @@ if (process.argv.length > 3 || (mode !== undefined && !["--setup", "--workerd"].
   });
   process.removeListener("SIGINT", onInterrupt);
   process.removeListener("SIGTERM", onTerminate);
-  if (workerd) {
-    const evidence = resolve(root, "runs/ship-journey-runs/20261008");
-    await mkdir(evidence, { recursive: true });
-    await writeFile(resolve(evidence, "journey.log"), output.join(""));
-  }
+  const report = message => {
+    console.log(message);
+    if (workerd) output.push(`${message}\n`);
+  };
   if (interruptionCode) process.exitCode = interruptionCode;
   else if (code !== 0) process.exitCode = code;
   else {
     if (workerd) {
-      console.log("FIXTURE_JOURNEY_GATE=passed:installed_emdash_workerd");
-      console.log("JOURNEY_GATE=blocked:production_ports_and_browser_mediator_unbound");
-      console.log("provider=fixture_only;network=intercepted_offline;registry=not_claimed");
-      console.log("ui=admin_route_diagnostics_only;browser_mediator=absent;physical_print_or_delivery=not_claimed");
-      process.exit(0);
-    }
+      report("FIXTURE_JOURNEY_GATE=passed:installed_emdash_workerd");
+      report("JOURNEY_GATE=blocked:production_ports_and_browser_mediator_unbound");
+      report("provider=fixture_only;network=intercepted_offline;registry=not_claimed");
+      report("ui=admin_route_diagnostics_only;browser_mediator=absent;physical_print_or_delivery=not_claimed");
+      process.exitCode = 0;
+    } else {
     console.log(`SETUP_GATE=${mode === "--setup" ? "passed:host_installed_and_initialized" : "passed:package_only"}`);
     console.log("JOURNEY_GATE=blocked");
     console.log("dependency=Ship workflow/installed factory exports and tested private journey routes");
     console.log("journey_coverage=not_run;provider_traffic=none;registry_install=not_claimed");
     process.exitCode = mode === "--setup" ? 0 : 2;
+    }
+  }
+  if (workerd) {
+    const evidence = resolve(root, "runs/ship-journey-runs/20261008");
+    await mkdir(evidence, { recursive: true });
+    await writeFile(resolve(evidence, "journey.log"), output.join(""));
   }
 }
