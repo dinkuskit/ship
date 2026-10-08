@@ -5,7 +5,7 @@ import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { createSandboxAdapter, isSafePdfUrl, SANDBOX_API_ORIGIN, SANDBOX_OAUTH_ORIGIN } from "../src/pb-sandbox.js";
+import { createSandboxAdapter, isSafePdfUrl, LABEL_HOST, SANDBOX_API_ORIGIN, SANDBOX_OAUTH_ORIGIN } from "../src/pb-sandbox.js";
 import { FileStateStore, SandboxTask } from "../src/state.js";
 import { createApp } from "../src/server.js";
 import { createFixturePdf, fixturePdfTextLines } from "../test-support/fixture-pdf.js";
@@ -168,6 +168,75 @@ test("production redirects, arbitrary label hosts, and wrong document bodies are
   assert.equal(isSafePdfUrl(labelUrl), true);
   const malformed = createSandboxAdapter({ credentials, fetchImpl: async () => new Response("not-json") });
   await assert.rejects(malformed.quote(shipment), (e) => e.code === "provider_malformed" && !e.message.includes("not-json"));
+});
+
+test("reprint lookup is GET-only, validates identity, and accepts official omitted document fields", async () => {
+  const requests = [];
+  const adapter = createSandboxAdapter({
+    credentials,
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (url.endsWith("/oauth/token")) return new Response(JSON.stringify({ access_token: "token", tokenType: "Bearer", expiresIn: 600 }));
+      return new Response(JSON.stringify({
+        shipmentId: "known/reprint",
+        rates: [{ carrier: "USPS", serviceId: "PM", parcelType: "PKG", totalCarrierCharge: 8.6, currencyCode: "USD" }],
+        documents: [{ contentType: "URL", fileFormat: "PDF", contents: labelUrl }],
+      }));
+    },
+  });
+  assert.deepEqual(await adapter.retrieveLabel("known/reprint"), { shipmentId: "known/reprint", pdfUrl: labelUrl, price: 8.6 });
+  assert.equal(requests[1].options.method, "GET");
+  assert.equal(requests[1].url, `${SANDBOX_API_ORIGIN}/shippingservices/v1/shipments/known%2Freprint?carrier=USPS`);
+  assert.equal(requests[1].options.body, undefined);
+});
+
+test("label PDF fetch uses the fixed host and bounded PDF validation", async () => {
+  let request;
+  const adapter = createSandboxAdapter({ credentials, fetchImpl: async (url, options) => {
+    request = { url, options };
+    return new Response(Uint8Array.from([37, 80, 68, 70, 45, 49, 46, 55]), { headers: { "content-type": "application/pdf" } });
+  } });
+  const bytes = await adapter.fetchLabelPdf(`https://${LABEL_HOST}/usps/123/outbound/label/abc.pdf`);
+  assert.deepEqual([...bytes], [37, 80, 68, 70, 45, 49, 46, 55]);
+  assert.equal(request.options.redirect, "error");
+  assert.equal(request.options.headers.Authorization, undefined);
+  await assert.rejects(adapter.fetchLabelPdf("https://example.test/label.pdf", async () => new Response()), (e) => e.code === "validation");
+});
+
+test("reconcile is limited to recent qualified reasons and preserves uncertain outcomes", async () => {
+  let now = 1_700_000_000_000;
+  const requests = [];
+  const adapter = createSandboxAdapter({
+    credentials,
+    clock: () => now,
+    fetchImpl: async (url, options) => {
+      requests.push({ url, options });
+      if (url.endsWith("/oauth/token")) return new Response(JSON.stringify({ access_token: "token", tokenType: "Bearer", expiresIn: 600 }));
+      return new Response(JSON.stringify({ shipmentId: "s-1", totalCarrierCharge: 8.6, currency: "USD", documents: [{ contentType: "URL", fileFormat: "PDF", contents: labelUrl }] }));
+    },
+  });
+  assert.deepEqual(await adapter.reconcileLabel("tx_1", { reason: "http_500", createdAt: now - 1_000 }), { shipmentId: "s-1", pdfUrl: labelUrl, price: 8.6 });
+  assert.equal(requests[1].options.method, "GET");
+  assert.match(requests[1].url, /originalTransactionId=tx_1&carrier=USPS$/);
+  await assert.rejects(adapter.reconcileLabel("tx", { reason: "not_found", createdAt: now }), (e) => e.code === "validation");
+  await assert.rejects(adapter.reconcileLabel("tx", { reason: "no_response", createdAt: now - 86_400_001 }), (e) => e.code === "validation");
+});
+
+test("createLabel classifies pre-dispatch, post-dispatch, and provider failures", async () => {
+  const network = createSandboxAdapter({ credentials, fetchImpl: async (url) => {
+    if (url.endsWith("/oauth/token")) return new Response(JSON.stringify({ access_token: "token", tokenType: "Bearer", expiresIn: 600 }));
+    throw new TypeError("offline");
+  } });
+  await assert.rejects(network.createLabel(shipment, "tx"), (e) => e.purchaseOutcome === "unknown" && e.recoveryReason === "no_response");
+
+  const serverError = createSandboxAdapter({ credentials, fetchImpl: async (url) => {
+    if (url.endsWith("/oauth/token")) return new Response(JSON.stringify({ access_token: "token", tokenType: "Bearer", expiresIn: 600 }));
+    return new Response(JSON.stringify({ errors: [{ errorCode: "fixture-500", errorDescription: "opaque" }] }), { status: 500 });
+  } });
+  await assert.rejects(serverError.createLabel(shipment, "tx"), (e) => e.purchaseOutcome === "unknown" && e.recoveryReason === "http_500" && !e.message.includes("opaque"));
+
+  const invalid = createSandboxAdapter({ credentials, fetchImpl: async () => new Response(JSON.stringify({ access_token: "bad", tokenType: "", expiresIn: 0 })) });
+  await assert.rejects(invalid.quote(shipment), (e) => e.purchaseOutcome === "not_started");
 });
 
 test("state ownership requires close and persists callback failures", async () => {
