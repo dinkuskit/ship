@@ -231,7 +231,7 @@ test("createLabel classifies pre-dispatch, post-dispatch, and provider failures"
 
   const serverError = createSandboxAdapter({ credentials, fetchImpl: async (url) => {
     if (url.endsWith("/oauth/token")) return new Response(JSON.stringify({ access_token: "token", tokenType: "Bearer", expiresIn: 600 }));
-    return new Response(JSON.stringify({ error: "opaque" }), { status: 500 });
+    return new Response(JSON.stringify({ errors: [{ errorCode: "fixture-500", errorDescription: "opaque" }] }), { status: 500 });
   } });
   await assert.rejects(serverError.createLabel(shipment, "tx"), (e) => e.purchaseOutcome === "unknown" && e.recoveryReason === "http_500" && !e.message.includes("opaque"));
 

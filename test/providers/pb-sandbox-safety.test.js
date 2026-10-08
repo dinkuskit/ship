@@ -11,7 +11,7 @@ function adapterWith(response, overrides={}) { return createSandboxAdapter({cred
 test('all post-dispatch HTTP errors remain unknown without automatic reissue',async()=>{
  for(const status of [400,401,403,409,429,500,502]){
   let creates=0;
-  const adapter=adapterWith(()=>{creates++;return new Response(JSON.stringify({error:'fake-private-provider-payload'}),{status});});
+  const adapter=adapterWith(()=>{creates++;return new Response(JSON.stringify({errors:[{errorCode:'fixture-error',errorDescription:'fake-private-provider-payload'}]}),{status});});
   await assert.rejects(adapter.createLabel(shipment,'op'),e=>e.purchaseOutcome==='unknown' && (status!==500 || e.recoveryReason==='http_500') && !JSON.stringify(e).includes('fake-private-provider-payload'));
   assert.equal(creates,1);
  }
@@ -67,4 +67,11 @@ test('recovery errors never produce a label or dispatch another shipment POST',a
  const adapter=adapterWith((url,options)=>{requests.push({url,options});return new Response(JSON.stringify({errorCode:'1090001',message:'fake-private-not-found'}),{status:404});},{clock:()=>100000});
  await assert.rejects(adapter.reconcileLabel('op',{reason:'no_response',createdAt:99000}),e=>e.code==='provider_failure'&&!e.message.includes('fake-private'));
  assert.equal(requests.length,1);assert.equal(requests[0].options.method,'GET');
+});
+test('500 recovery excludes throttling, opaque, and malformed responses',async()=>{
+ for(const body of [JSON.stringify({errors:[{errorCode:'PB-APIM-ERR-1006',errorDescription:'fake-private'}]}),JSON.stringify({error:'opaque'}),'bad JSON']){
+  await assert.rejects(adapterWith(()=>new Response(body,{status:500})).createLabel(shipment,'op'),e=>e.purchaseOutcome==='unknown'&&e.recoveryReason===undefined);
+ }
+ const adapter=adapterWith((_url,options)=>{assert.equal(options.headers['X-PB-UnifiedErrorStructure'],'true');return new Response(JSON.stringify({errors:[{errorCode:'fixture-500',errorDescription:'fake-private'}]}),{status:500});});
+ await assert.rejects(adapter.createLabel(shipment,'op'),e=>e.purchaseOutcome==='unknown'&&e.recoveryReason==='http_500'&&!JSON.stringify(e).includes('fake-private'));
 });

@@ -90,9 +90,16 @@ async function readBody(response, operation) {
     });
   }
   if (!response.ok) {
+    // Only a recognizable standard error response can qualify a 500 lookup.
+    // Throttling follows different PB troubleshooting steps; opaque errors stay
+    // unknown without a recovery reason. No error payload escapes the adapter.
+    const qualified500 = response.status === 500 && Array.isArray(body?.errors) &&
+      body.errors.length > 0 && body.errors.every((error) =>
+        typeof error?.errorCode === "string" && error.errorCode.length > 0 &&
+        error.errorCode !== "PB-APIM-ERR-1006");
     throw new PublicShipError(
       response.status === 401 || response.status === 403 ? "provider_auth" : "provider_failure",
-      `${operation} could not be completed`, 502, { providerStatus: response.status },
+      `${operation} could not be completed`, 502, { providerStatus: response.status, ...(qualified500 ? { recoveryReason: "http_500" } : {}) },
     );
   }
   return body;
@@ -376,6 +383,7 @@ export function createSandboxAdapter({
             Authorization: `Bearer ${bearer}`,
             "Content-Type": "application/json",
             "X-PB-TransactionId": transactionId,
+            "X-PB-UnifiedErrorStructure": "true",
           },
           body: payload,
           redirect: "error",
@@ -389,7 +397,7 @@ export function createSandboxAdapter({
       } catch (error) {
         // PB cautions against resubmitting failed creates without checking the
         // original label. An HTTP error alone never proves a safe second buy.
-        if (error instanceof PublicShipError && error.providerStatus === 500) {
+        if (error instanceof PublicShipError && error.recoveryReason === "http_500") {
           throw withOutcome(error, "unknown", "http_500");
         }
         throw withOutcome(error, "unknown");
