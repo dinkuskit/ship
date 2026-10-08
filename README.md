@@ -1,8 +1,8 @@
 # DinkusKit Ship
 
 Optional Registry-enabled shipping automation for DinkusKit. The package name
-is reserved as `@dinkuskit/ship`. The manifest stays private at `0.0.0`. There
-is no label kernel, provider adapter, or published plugin yet.
+is reserved as `@dinkuskit/ship`. The manifest stays private at `0.0.0`. The local package contains an injected label workflow and a bounded PB adapter
+experiment; it has no published plugin or production provider binding.
 
 ## Status
 
@@ -161,5 +161,13 @@ Additive `./workflow` and `./installed` exports support a host-owned private
 workflow with trusted paid-order/actor ports and durable CAS label operations.
 The default sandbox export still has no Commerce/provider connection. The
 [installed contract](docs/contracts/installed-ship-workflow.md) specifies route
-schemas, fixture boundaries and missing production authority/browser asset ports.
-No real postage or Registry mounting is proven by these exports.
+schemas, fixture boundaries and missing production authority. The optional
+`./host-label-assets` export provides `createHostLabelAssets` and
+`createLabelLinks` for an explicitly configured, authenticated native Astro
+mount. It exposes only operation-bound stored PDF view/download and an explicit
+browser print attempt; it cannot buy, reconcile or fetch missing provider bytes.
+Installing the default sandbox entry does not mount this native route.
+Independent local fixture proof covers Chrome rendering, exact stored-byte
+download and the print-attempt status; no print dialog or physical printing is
+confirmed. No real postage, production Commerce integration, deployment or
+Registry mounting is proven by these exports.

@@ -14,7 +14,7 @@ The candidate was produced by the existing runtime implementation owner. The ind
 - Ordinary Chrome browser: fixture dev session, no global request headers or browser protection changes. View label clicked and synthetic one-page PDF visibly rendered. Download label clicked and its actual download event yielded 700000 bytes with SHA256 `bdbd0f8c677d3875e5f5927a1e770cba97c60638dd4710d7dcf4732b000623ed`, identical to the stored PDF.
 - Print attempt explicitly clicked. Subsequent accessibility state and screenshot show the rendered PDF and the status that a print attempt was sent to the browser. No print dialog was captured; physical printing and delivery are not confirmed.
 - Provider counters stayed at one create, one PDF fetch and zero reconciles across all browser actions.
-- Candidate tarball SHA256: `7790acdfcf480e6b37becf1059571fb1d74334c775963998226de8bab1241f01`.
+- Initial browser-proof tarball SHA256: `7790acdfcf480e6b37becf1059571fb1d74334c775963998226de8bab1241f01`.
 - Only owned tabs and disposable host were cleaned. Host directory was absent and host unreachable after awaited cleanup. No runtime-owner processes were touched.
 
 Reproduction: `node --test test/host-label-assets.test.js`; `SHIP_BROWSER_HOST_PROOF=1 node test/ship-browser/installed.test.js`; run `node test-support/ship-browser/preview.mjs` with open stdin for the manual browser flow. Use an ordinary supported Node executable. The preview produces only synthetic artifacts. Raw logs, screenshots, download and counter receipts are retained in the ignored local `runs/ship-browser-runs/20261008/` packet.
@@ -41,3 +41,9 @@ There is no print-dialog, physical-print, delivery, live-provider, paid producti
 ## Source review
 
 Independent canonical Codex P0-P3 review completed scoped-clean for `git:4ca4bcc8fbffd611b41e83144d135a73bd4dd526`: no actionable findings or required runtime fixes. Standards and source intent were reviewed, including host authority, stored-only operation binding and fixture/print-attempt exclusions. This was static review; raw local artifacts and unchanged workflow internals were not executed by that reviewer. Independent runtime/browser proof above supplies separate evidence. Final source and native publication receipts are qualified against the final PR tuple before the human merge gate.
+
+## Native documentation finding and repair
+
+Native review of `git:604c117ff41c582fbc9359f00c4197ba4d5ef38c` published one actionable P2: the installed-workflow contract still said browser label access was unavailable. Accepted as `required_fix`; its related merge-risk and next-step checklist entries describe the same documentation gap. No runtime or security finding was reported. The contract now documents the optional native mount, actual host policy checks, link binding, stored-only dispatch, response behavior and fixture limits. README status is aligned.
+
+All ten selected source fingerprints above remain unchanged. After the documentation repair, full verification again passed 80 tests with three explicit opt-in skips and package dry run; the explicit installed browser-host test again passed 1/1. The refreshed documentation-package SHA256 is `fce1950870e7b80f82166d8a1eb6f5b3c36481ce9a518b3ac7a508d95375567f`; stored PDF bytes and digest are unchanged. README is included in the package, which explains the tarball identity change. Visible browser evidence belongs to the initial package and the identical runtime source; the refreshed package received fresh installed HTTP testing, not a repeated visible click run. Final canonical and native re-review remain required before qualification.

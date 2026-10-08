@@ -9,7 +9,11 @@ provider actions. No request or environment flag enables the workflow.
 ## Supported injection seam
 
 `@dinkuskit/ship/workflow` exports `createShipWorkflow` and `ShipWorkflowError`.
-`@dinkuskit/ship/installed` exports `createShipPlugin({workflowFactory,authorityPort})`.
+`@dinkuskit/ship/installed` exports
+`createShipPlugin({workflowFactory,authorityPort,browserAssetPort})`.
+`browserAssetPort` is optional and has a host-owned `links` function.
+`@dinkuskit/ship/host-label-assets` exports `createHostLabelAssets` and
+`createLabelLinks` for an explicitly configured native host mount.
 These are package code exports, not a claim that Registry mediates these ports.
 
 The host builds `workflowFactory(ctx)` using host-owned provider and order ports,
@@ -82,12 +86,53 @@ Existing settings/locale behavior remains delegated to the root admin. The new
 workflow retains host locale/direction; labels have partial Arabic translations.
 Complete workflow localization is a remaining limit.
 
-**Browser asset prerequisite:** EmDash private routes require X-EmDash-Request,
-including GET. Block Kit href links cannot set it. Core needs a header-bearing
-asset action or authenticated same-origin read-only label mediator bound to
-installation/tenant/actor/order/operation. Ordinary browser view/download/print
-is unavailable until that shipped host port exists. Tests injecting global
-headers do not fulfill this gate. Retrieval must never implicitly buy/reconcile.
+## Optional authenticated browser label mount
+
+EmDash private plugin routes require `X-EmDash-Request`, including GET. Block Kit
+href links cannot set it. The optional `./host-label-assets` export supplies a
+native host adapter; installing the sandbox plugin alone does not mount it and
+no global request header or plugin CSRF exemption is introduced.
+
+The host owns a fixed native Astro route under `/_emdash/api`, with prerendering
+disabled, so EmDash authenticates its actual `locals` before the adapter runs.
+The mount exports the `GET` returned by `createHostLabelAssets({pluginId,path,
+hasPermission,hasScope})`. `pluginId` selects the fixed installed plugin;
+`path` is the fixed same-origin native route (default
+`/_emdash/api/ship-label-assets`). The policy helpers must be the host's public
+`@emdash-cms/auth` exports. Do not substitute browser fields, fixture actors or
+permissive policy helpers for actual authenticated locals.
+
+The adapter checks user identity, `plugins:manage`, admin scope for token
+credentials, enabled installation, and private `label-stored` route metadata
+before using the low-level trusted dispatch API. Session authentication has its
+ordinary full host scope. The underlying dispatch API does not establish these
+policies itself. Missing host runtime, disabled installation or mismatched
+permission/method/body/raw-response metadata fails closed.
+
+Bind the installed factory's `browserAssetPort.links` to the adapter's `links`,
+or to the function returned by `createLabelLinks({path})` for the same fixed
+mount. The packaged admin page then exposes View label, Download label and Open
+print controls only for a created label with stored PDF bytes. Missing binding
+keeps browser access unavailable; these exports are not a Registry port binding.
+
+The native GET accepts exactly `orderId`, `operationId` and `intent`, where
+intent is `view`, `download` or `preview`. Browser input never selects an
+installation, tenant or actor. It dispatches the private `label-stored` POST
+with exactly `{orderId,operationId}` after host policy checks. That private
+route reauthorizes through the existing authority/order ports, requires stored
+PDF status, checks operation identity before and after a read-only workflow
+reads digest-checked chunks, and cannot obtain missing bytes from a provider.
+Wrong tenant/order/operation, absent bytes and invalid PDF data are unavailable.
+Browser retrieval never buys postage, reconciles a purchase, or records a print
+request; existing `journey-print` remains a separate state-changing action.
+
+`view` returns a private HTML control page with a same-origin CSP, explicit View
+and Print attempt buttons, and a Download link. View loads the stored PDF only
+on a click. Print attempt explicitly calls the browser print control; success
+of that call does not establish a print dialog, physical printing or delivery.
+`preview` returns inline PDF bytes and `download` an attachment named
+`shipping-label.pdf`. Responses are private/no-store, nosniff and no-referrer;
+PDFs are bounded to 5MiB. No public media copy or public label route is added.
 
 ## Durable operation and proof limits
 
@@ -103,11 +148,19 @@ manifest is published. Failed/unreferenced chunks may require later private
 cleanup; they never establish a usable label download.
 Label, PDF, print request and delivery states remain distinct.
 
-Unit tests use fictional addresses and fake provider ports. The reserved proof
-owner mounts this exact packed code in an explicitly synthetic host entry with
-fixture CAS, proving default absent-port denial separately. That is not production
-Commerce, production CAS, provider funding, Registry mounting or browser print
-readiness. Full installed journey and responsive browser proof remain pending
-owner evidence. The single manifest storage assertion in provider-owned
-`test/pb-sandbox.test.js` was admitted to this slice by the coordinator; provider
-implementation files remain unchanged.
+Unit tests use fictional addresses and fake provider ports. Independent proof
+installed the packed code in disposable EmDash 1.2.0 with actual workerd and
+SQLite CAS, while order/provider/authority inputs remained explicitly synthetic.
+The installed browser-host test proves actual locals/session/RBAC and
+operation/tenant denials, exact stored bytes, private response headers and no
+additional provider fetch/create/reconcile. Ordinary Chrome rendered the
+synthetic PDF, downloaded identical bytes and exercised the explicit Print
+attempt button. No print dialog was captured. The in-app browser's blank frame
+and Chrome's blocked stale-operation navigation are excluded from visible
+success; HTTP denials have separate installed test evidence.
+
+See [browser asset proof](../../.grilltrack/proof/browser-label-assets-20261008.md)
+for source fingerprints, commands, counters and fidelity limits. This does not
+prove production Commerce/authority/mounting, real provider behavior, physical
+printing/delivery or Registry installation. The default absent-port denial
+remains separately tested. Provider implementation files are unchanged.
