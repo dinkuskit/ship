@@ -1,11 +1,25 @@
 # Vendor, account, and funding decision brief
 
-Dated 2026-09-30. **A recommendation is not a selection.** No label kernel
-until vendor, account, and funding are decided. Sources:
+Dated 2026-09-30; settled direction recorded 2026-10-08. The earlier
+recommendation below is preserved as history and is superseded for the next
+bounded integration decision. Sources:
 [research](../research/usps-feasibility-20260930.md),
 [CITATIONS.md](../CITATIONS.md).
 
-## Recommendation (investigate first)
+## Settled direction for the next integration boundary
+
+Pitney Bowes is the selected provider direction. Postage accounts are
+merchant-owned and merchant-funded; DinkusKit does not
+hold a platform wallet or silently rebill postage. Merchant payment of extra
+provider fees is preferred. No subsidy amount, fee schedule, account creation,
+provider connection, or postage purchase is approved by this document.
+
+Ship stores one merchant-managed U.S. ship-from address per store. The local
+settings slice validates country, state code, ZIP structure, required address
+fields, and bounded input only. Saving the origin does not verify provider
+readiness.
+
+## Historical recommendation (superseded for this boundary)
 
 **Investigate Shippo Platform eligibility first**, with **gray-label OAuth
 (merchant-owned Shippo billing)** preferred if Shippo will grant it, and

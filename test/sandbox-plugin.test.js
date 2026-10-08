@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import plugin from "../src/plugin.js";
+import { validateOrigin } from "../src/plugin.js";
 import { projectSyntheticQuoteRequest } from "../src/package-validation.js";
 
 function storage() {
@@ -55,7 +56,110 @@ test("admin action persists through the supported storage surface", async () => 
 
   assert.equal(result.blocks.some((block) => block.type === "form"), true);
   assert.equal(result.blocks.some((block) => block.text === "Provider dashboard links"), false);
-  assert.equal(result.blocks.find((block) => block.type === "form").fields[0].initial_value, false);
+  assert.equal(result.blocks.find((block) => block.type === "form" && block.submit.action_id === "save-preferences")
+    .fields[0].initial_value, false);
+});
+
+test("merchant ship-from address saves separately and reloads from plugin storage", async () => {
+  const context = ctx();
+  const values = {
+    name: "Fictional Merchant",
+    company: "Example Goods",
+    addressLine1: "42 Fictional Way",
+    addressLine2: "Suite 7",
+    city: "Anytown",
+    state: "CA",
+    postalCode: "90210",
+    country: "US",
+  };
+  const saved = await route({
+    input: { type: "form_submit", action_id: "save-origin", values },
+    ui: { locale: "en", direction: "ltr" },
+  }, context);
+  assert.equal(saved.toast.message, "Ship-from address saved locally.");
+  const reloaded = await route({
+    input: { type: "page_load", page: "/settings" },
+    ui: { locale: "en", direction: "ltr" },
+  }, context);
+  const form = reloaded.blocks.find((block) => block.type === "form" && block.submit.action_id === "save-origin");
+  assert.equal(form.fields.find((field) => field.action_id === "country").initial_value, "US");
+  assert.equal(form.fields.find((field) => field.action_id === "postalCode").initial_value, "90210");
+  const editedValues = { ...values, addressLine2: "", city: "Example City", state: "ny", postalCode: "10001-1234" };
+  await route({ input: { type: "form_submit", action_id: "save-origin", values: editedValues } }, context);
+  await route({ input: { type: "form_submit", action_id: "save-preferences", values: { showDashboardLinks: false } } }, context);
+  assert.deepEqual(await context.storage.preferences.get("origin"), { ...editedValues, state: "NY" });
+  const status = await plugin.routes.status.handler({}, context);
+  assert.equal(status.preferences.showDashboardLinks, false);
+  assert.doesNotMatch(JSON.stringify(status), /Fictional Merchant|Fictional Way|10001|origin/);
+});
+
+test("invalid ship-from address preserves saved origin and preferences", async () => {
+  const context = ctx();
+  await route({
+    input: {
+      type: "form_submit", action_id: "save-origin",
+      values: {
+        name: "Fictional Merchant", company: "", addressLine1: "42 Fictional Way",
+        addressLine2: "", city: "Anytown", state: "CA", postalCode: "90210", country: "US",
+      },
+    },
+  }, context);
+  await route({
+    input: { type: "form_submit", action_id: "save-preferences", values: { showDashboardLinks: false } },
+  }, context);
+  const invalid = await route({
+    input: {
+      type: "form_submit", action_id: "save-origin",
+      values: {
+        name: "", company: "", addressLine1: "Not an address", addressLine2: "",
+        city: "Anytown", state: "California", postalCode: "90210-INVALID", country: "CA",
+      },
+    },
+  }, context);
+  assert.equal(invalid.toast.message, "Enter a valid U.S. ship-from address.");
+  const settings = await route({ input: { type: "page_load", page: "/settings" } }, context);
+  const originFormResult = settings.blocks.find((block) => block.type === "form" && block.submit.action_id === "save-origin");
+  assert.equal(originFormResult.fields.find((field) => field.action_id === "addressLine1").initial_value, "42 Fictional Way");
+  assert.equal(settings.blocks.find((block) => block.type === "form" && block.submit.action_id === "save-preferences")
+    .fields[0].initial_value, false);
+});
+
+test("ship-from validation is bounded and structurally U.S.-specific", () => {
+  assert.equal(validateOrigin({
+    name: "Merchant", addressLine1: "42 Fictional Way", city: "Anytown",
+    state: "ca", postalCode: "90210", country: "US",
+  }).origin.state, "CA");
+  assert.equal(validateOrigin({
+    name: "Merchant", addressLine1: "42 Fictional Way", city: "Anytown",
+    state: "CA", postalCode: "90210", country: "CA",
+  }).ok, false);
+  assert.equal(validateOrigin({
+    name: "Merchant", addressLine1: "x".repeat(101), city: "Anytown",
+    state: "CA", postalCode: "90210", country: "US",
+  }).ok, false);
+});
+
+test("invalid optional origin fields cannot silently replace a saved address", async () => {
+  const values = {
+    name: "Example Merchant", company: "Example Goods", addressLine1: "42 Fictional Way",
+    addressLine2: "", city: "Example City", state: "NY", postalCode: "10001-1234", country: "US",
+  };
+  const context = ctx();
+  await route({ input: { type: "form_submit", action_id: "save-origin", values } }, context);
+  for (const update of [
+    { name: "x".repeat(101) }, { company: "x".repeat(101) }, { name: 123 },
+    { company: {} }, { addressLine2: [] }, { city: "Example\nCity" },
+    { addressLine1: "\u0000" }, { state: "ZZ" }, { postalCode: "1234" },
+    { name: "", company: "" },
+  ]) {
+    const invalid = await route({ input: { type: "form_submit", action_id: "save-origin", values: { ...values, ...update } } }, context);
+    assert.equal(invalid.toast.type, "error");
+    assert.deepEqual(await context.storage.preferences.get("origin"), values);
+  }
+  const companyOnly = validateOrigin({ ...values, name: undefined, addressLine2: undefined, state: "pr" });
+  assert.equal(companyOnly.ok, true);
+  assert.equal(companyOnly.origin.state, "PR");
+  assert.equal(companyOnly.origin.name, "");
 });
 
 test("host-attested Arabic RTL is translated without guessing direction", async () => {

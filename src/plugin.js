@@ -17,6 +17,25 @@ const SYNTHETIC_PAID_TOTAL = Object.freeze({
   status: "paid",
 });
 
+const MAX_ORIGIN_FIELD_LENGTH = 100;
+// U.S. states, DC, territories and military postal regions. Structural only.
+// USPS Publication 28 Appendix B: https://pe.usps.com/text/pub28/28apb.htm
+const US_ORIGIN_REGIONS = new Set((
+  "AL AK AZ AR CA CO CT DE DC FL GA HI ID IL IN IA KS KY LA ME MD MA MI MN MS MO " +
+  "MT NE NV NH NJ NM NY NC ND OH OK OR PA RI SC SD TN TX UT VT VA WA WV WI WY " +
+  "AS GU MP PR VI AA AE AP"
+).split(" "));
+const DEFAULT_ORIGIN = Object.freeze({
+  name: "",
+  company: "",
+  addressLine1: "",
+  addressLine2: "",
+  city: "",
+  state: "",
+  postalCode: "",
+  country: "US",
+});
+
 function invalid(code, message) {
   return Object.freeze({ ok: false, code, message });
 }
@@ -96,6 +115,10 @@ const COPY = {
     label: "Make a postage label", back: "Back to Orders", shipping: "Shipping",
     review: "Review postage label", save: "Save Ship settings",
     dashboard: "Show provider dashboard links", saved: "Ship settings saved locally.",
+    origin: "Ship-from address", originDescription: "Merchant-managed U.S. address used for future postage setup. Saving it does not verify provider readiness.",
+    saveOrigin: "Save ship-from address", originSaved: "Ship-from address saved locally.", originInvalid: "Enter a valid U.S. ship-from address.",
+    name: "Name (or company)", company: "Company (or name)", addressLine1: "Address line 1", addressLine2: "Address line 2 (optional)",
+    city: "City", state: "State code", postalCode: "ZIP code", country: "Country (US only)",
     notConnected: "Not connected", provider: "Disabled · no provider account bound",
     funding: "Merchant funds own postage · not configured", inventory: "Not linked · not required",
     unavailable: "Provider is disabled; no rate lookup, purchase, retry, PDF, or print action is available.",
@@ -137,6 +160,10 @@ const COPY = {
     label: "إنشاء ملصق شحن", back: "العودة إلى الطلبات", shipping: "الشحن",
     review: "مراجعة ملصق الشحن", save: "حفظ إعدادات الشحن",
     dashboard: "إظهار روابط لوحة مزود الخدمة", saved: "تم حفظ إعدادات الشحن محليًا.",
+    origin: "عنوان الشحن من", originDescription: "عنوان أمريكي يديره التاجر لاستخدامه في إعداد رسوم الشحن مستقبلًا. حفظه لا يتحقق من جاهزية المزود.",
+    saveOrigin: "حفظ عنوان الشحن من", originSaved: "تم حفظ عنوان الشحن من محليًا.", originInvalid: "أدخل عنوان شحن أمريكي صالحًا.",
+    name: "الاسم (أو الشركة)", company: "الشركة (أو الاسم)", addressLine1: "سطر العنوان 1", addressLine2: "سطر العنوان 2 (اختياري)",
+    city: "المدينة", state: "رمز الولاية", postalCode: "الرمز البريدي", country: "الدولة (US فقط)",
     notConnected: "غير متصل", provider: "معطل · لا يوجد حساب مزود مرتبط",
     funding: "التاجر يمول رسوم الشحن الخاصة به · غير مهيأ", inventory: "غير مرتبط · غير مطلوب",
     unavailable: "المزود معطل؛ لا يتوفر بحث عن الأسعار أو شراء أو إعادة محاولة أو ملف PDF أو طباعة.",
@@ -204,6 +231,47 @@ async function preferences(ctx) {
     : { showDashboardLinks: true };
 }
 
+async function origin(ctx) {
+  const value = await ctx.storage.preferences.get("origin");
+  return value && typeof value === "object" ? {
+    ...DEFAULT_ORIGIN,
+    ...Object.fromEntries(Object.keys(DEFAULT_ORIGIN).map((key) => [
+      key, typeof value[key] === "string" ? value[key] : DEFAULT_ORIGIN[key],
+    ])),
+    country: "US",
+  } : { ...DEFAULT_ORIGIN };
+}
+
+function boundedOriginText(value, optional = false) {
+  if (value === undefined && optional) return "";
+  if (typeof value !== "string" || value.length > MAX_ORIGIN_FIELD_LENGTH ||
+      /[\u0000-\u001f\u007f\u2028\u2029]/.test(value)) return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 || optional ? trimmed : null;
+}
+
+function validateOrigin(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input) || input.country !== "US") {
+    return invalid("invalid_origin", "Enter a valid U.S. ship-from address.");
+  }
+  const name = boundedOriginText(input.name, true);
+  const company = boundedOriginText(input.company, true);
+  const addressLine1 = boundedOriginText(input.addressLine1);
+  const addressLine2 = boundedOriginText(input.addressLine2, true);
+  const city = boundedOriginText(input.city);
+  const state = boundedOriginText(input.state)?.toUpperCase();
+  const postalCode = boundedOriginText(input.postalCode);
+  if (name === null || company === null || (!name && !company) || !addressLine1 ||
+      addressLine2 === null || !city || !US_ORIGIN_REGIONS.has(state) ||
+      !postalCode || !/^\d{5}(?:-\d{4})?$/.test(postalCode)) {
+    return invalid("invalid_origin", "Enter a valid U.S. ship-from address.");
+  }
+  return Object.freeze({
+    ok: true,
+    origin: Object.freeze({ name, company, addressLine1, addressLine2, city, state, postalCode, country: "US" }),
+  });
+}
+
 const DEFAULT_PACKAGE = Object.freeze({ weightLb: "2", lengthIn: "10", widthIn: "8", heightIn: "4" });
 
 function packageForm(t, values, submitLabel = t.updatePackage) {
@@ -219,7 +287,24 @@ function packageForm(t, values, submitLabel = t.updatePackage) {
   };
 }
 
-function pageResponse(page, ui, t, saved, toast, fixture = false, packageValues = DEFAULT_PACKAGE, packageResult = null) {
+function originForm(t, values) {
+  return {
+    type: "form",
+    fields: [
+      { type: "text_input", action_id: "name", label: t.name, initial_value: values.name },
+      { type: "text_input", action_id: "company", label: t.company, initial_value: values.company },
+      { type: "text_input", action_id: "addressLine1", label: t.addressLine1, initial_value: values.addressLine1 },
+      { type: "text_input", action_id: "addressLine2", label: t.addressLine2, initial_value: values.addressLine2 },
+      { type: "text_input", action_id: "city", label: t.city, initial_value: values.city },
+      { type: "text_input", action_id: "state", label: t.state, initial_value: values.state },
+      { type: "text_input", action_id: "postalCode", label: t.postalCode, initial_value: values.postalCode },
+      { type: "text_input", action_id: "country", label: t.country, initial_value: "US" },
+    ],
+    submit: { label: t.saveOrigin, action_id: "save-origin" },
+  };
+}
+
+function pageResponse(page, ui, t, saved, savedOrigin, toast, fixture = false, packageValues = DEFAULT_PACKAGE, packageResult = null) {
   const fixtureOrder = t.fixtureOrder;
   if (page === "settings") {
     const blocks = [
@@ -231,6 +316,9 @@ function pageResponse(page, ui, t, saved, toast, fixture = false, packageValues 
         field(t.postageFunding, t.funding),
         field(t.inventoryLabel, t.inventory),
       ] },
+      { type: "header", text: t.origin },
+      { type: "context", text: t.originDescription },
+      originForm(t, savedOrigin),
       { type: "form", fields: [{
         type: "toggle", action_id: "showDashboardLinks", label: t.dashboard,
         description: t.displayOnlyLinks,
@@ -303,6 +391,7 @@ async function admin(routeCtx, ctx) {
   const t = copy(ui.locale);
   const input = routeCtx?.input ?? {};
   let saved = await preferences(ctx);
+  let savedOrigin = await origin(ctx);
 
   if (input.type === "form_submit" && input.action_id === "save-preferences") {
     saved = {
@@ -312,8 +401,22 @@ async function admin(routeCtx, ctx) {
     await ctx.storage.preferences.put("admin", {
       ...saved, locale: ui.locale, direction: ui.direction,
     });
-    return pageResponse("settings", ui, t, saved, {
+    return pageResponse("settings", ui, t, saved, savedOrigin, {
       type: "success", message: t.saved,
+    });
+  }
+
+  if (input.type === "form_submit" && input.action_id === "save-origin") {
+    const result = validateOrigin(input.values);
+    if (result.ok) {
+      savedOrigin = result.origin;
+      await ctx.storage.preferences.put("origin", savedOrigin);
+      return pageResponse("settings", ui, t, saved, savedOrigin, {
+        type: "success", message: t.originSaved,
+      });
+    }
+    return pageResponse("settings", ui, t, saved, savedOrigin, {
+      type: "error", message: t.originInvalid,
     });
   }
 
@@ -331,25 +434,25 @@ async function admin(routeCtx, ctx) {
       package: packageValues,
     });
     if (packageResult.ok) await ctx.storage.preferences.put("synthetic-package", packageValues);
-    return pageResponse("shipping", ui, t, saved, undefined, true, packageValues, packageResult);
+    return pageResponse("shipping", ui, t, saved, savedOrigin, undefined, true, packageValues, packageResult);
   }
   if (input.type === "block_action" && input.action_id === "open-settings") {
-    return pageResponse("settings", ui, t, saved, undefined, isolatedFixture);
+    return pageResponse("settings", ui, t, saved, savedOrigin, undefined, isolatedFixture);
   }
   if (input.type === "block_action" && isolatedFixture) {
     if (input.action_id === "open-order") {
-      return pageResponse("order-detail", ui, t, saved);
+      return pageResponse("order-detail", ui, t, saved, savedOrigin);
     }
-    if (input.action_id === "make-postage-label") return pageResponse("shipping", ui, t, saved, undefined, true, packageValues);
-    if (input.action_id === "back-orders") return pageResponse("orders", ui, t, saved, undefined, true);
-    if (input.action_id === "back-order-detail") return pageResponse("order-detail", ui, t, saved);
+    if (input.action_id === "make-postage-label") return pageResponse("shipping", ui, t, saved, savedOrigin, undefined, true, packageValues);
+    if (input.action_id === "back-orders") return pageResponse("orders", ui, t, saved, savedOrigin, undefined, true);
+    if (input.action_id === "back-order-detail") return pageResponse("order-detail", ui, t, saved, savedOrigin);
   }
 
   const page = input.page === "/settings" ? "settings"
     : isolatedFixture && input.page === "/shipping" ? "shipping"
     : isolatedFixture && input.page === "/order-detail" ? "order-detail"
     : "orders";
-  return pageResponse(page, ui, t, saved, undefined, isolatedFixture, packageValues);
+  return pageResponse(page, ui, t, saved, savedOrigin, undefined, isolatedFixture, packageValues);
 }
 
 const plugin = {
@@ -365,4 +468,5 @@ const plugin = {
 };
 
 export { admin };
+export { validateOrigin };
 export default plugin;

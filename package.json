@@ -1,7 +1,7 @@
 {
   "name": "@dinkuskit/ship",
   "version": "0.0.0",
-  "description": "Optional DinkusKit shipping automation. USPS label purchase and print required for coordinated Commerce v1; vendor unselected.",
+  "description": "Optional DinkusKit shipping automation. Merchant-owned Pitney Bowes postage accounts; provider actions remain disabled.",
   "type": "module",
   "private": true,
   "files": [
