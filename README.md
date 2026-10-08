@@ -18,6 +18,25 @@ provider actions remain disabled. This is not a signed Registry release.
 - [Public citations](docs/CITATIONS.md)
 - GrillTrack ledger: [`.grilltrack/ledger.json`](.grilltrack/ledger.json)
 
+## Install type
+
+DinkusKit plugins ship as EmDash Registry plugins: sandboxed and installed
+from the plugin Registry, which is how most EmDash sites add plugins. The
+Registry build is the supported product, and features are designed, tested and
+documented for it first. A native entry (code a site registers in its own
+configuration or Astro routes) is a developer and test setup only. It may not
+offer features the Registry build lacks, except temporary gaps listed here with
+the work that closes them. The project owner set this rule on 2026-10-08.
+
+Ship's installable plugin is the sandboxed package described by
+`emdash-plugin.jsonc`. `src/native/` holds a local UI proof that the package
+does not use. Native-only gaps:
+
+- The `./workflow`, `./installed` and `./host-label-assets` exports need a
+  host-owned integration and an authenticated native Astro mount for stored
+  label view, download and print. A Registry path for these is not designed
+  yet, and label printing does not reach Registry installs until it exists.
+
 ## Confirmed shape
 
 Commerce owns merchant-configured free or flat-rate checkout shipping charges
