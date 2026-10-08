@@ -13,7 +13,9 @@ if (process.argv.length > 3 || (mode !== undefined && !["--setup", "--workerd"].
 } else {
   // The explicit setup mode MUST run the host install/init acceptance test.
   const workerd = mode === "--workerd";
-  const child = spawn(process.execPath, ["--test", "--experimental-test-isolation=none", workerd
+  // Run this single node:test file directly. The Node --test CLI installs
+  // cancellation handlers that preempt awaited disposable-host teardown.
+  const child = spawn(process.execPath, [workerd
     ? "test/ship-journey/workerd.test.js"
     : "test/ship-journey/installed-package.test.js"], {
     cwd: root, detached: process.platform !== "win32",
