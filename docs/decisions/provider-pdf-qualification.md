@@ -67,11 +67,13 @@ below. This code is qualification machinery, not a private-link security claim.
   `target=_blank` and `rel=noopener noreferrer`; after synthetic expiry, it
   showed the unavailable message and zero label links. The inert URL was never
   opened. This is synthetic browser rendering proof only.
-- Signed Registry installation and ordinary sign-in remain unexecuted. Existing
-  helpers seed install state; no signed release for this candidate was published.
-  EmDash's documented ordinary sign-in requires a passkey or configured provider;
-  the local fixture uses dev-bypass instead. No device credential, account or
-  external email change is authorized here. See
+- The initial proof did not execute Registry installation or ordinary sign-in.
+  The [local follow-up](../../.grilltrack/proof/local-registry-auth-20261009.md)
+  now verifies the real Registry verification/consent/install flow and a normal
+  session created through virtual WebAuthn on unmodified published EmDash 1.2.0.
+  It uses local authoritative-record fixtures, not live PDS authority or public
+  publication, and does not prove cryptographic publisher provenance. No
+  physical credential or production account is used. See
   [installation](https://docs.emdashcms.com/plugins/installing/) and
   [authentication](https://docs.emdashcms.com/guides/authentication/).
 
