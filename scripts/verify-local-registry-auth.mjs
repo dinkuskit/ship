@@ -324,7 +324,7 @@ try {
   assert.equal(denied.status(), 401);
   await cdp.send("WebAuthn.removeVirtualAuthenticator", { authenticatorId });
   await browser.close();
-  assert.equal(blockedRequests.filter(x => x.host.includes("pitneybowes")).length, 0);
+  assert.deepEqual(blockedRequests, [], "No external browser request may be attempted");
   receipt.result = "passed";
 } catch (error) {
   receipt.result = "failed";
