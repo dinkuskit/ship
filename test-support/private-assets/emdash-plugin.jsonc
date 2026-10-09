@@ -1,0 +1,18 @@
+{
+  "$schema": "../../node_modules/@emdash-cms/plugin-cli/schemas/emdash-plugin.schema.json",
+  "slug": "private-asset-qualification",
+  "publisher": "did:plc:ekk4pjmkh3k3ql2kfoex3qt4",
+  "license": "MIT",
+  "author": { "name": "DinkusKit qualification fixture" },
+  "securityContacts": [{ "url": "https://github.com/emdash-cms/emdash/security" }],
+  "name": "Private asset qualification fixture",
+  "description": "Disposable evidence fixture for EmDash private raw PDF transport.",
+  "capabilities": [],
+  "allowedHosts": [],
+  "storage": { "preferences": { "indexes": [] } },
+  "admin": {
+    "pages": [
+      { "path": "/proof", "label": "Private asset proof", "icon": "file" }
+    ]
+  }
+}
