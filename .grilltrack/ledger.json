@@ -2452,14 +2452,21 @@
           "result": "clean",
           "reviewed_at": "2026-10-09T02:46:13+00:00",
           "source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf"
+        },
+        {
+          "classifications": [],
+          "ref": "file:.grilltrack/proof/provider-pdf-qualification-20261009.md",
+          "result": "clean",
+          "reviewed_at": "2026-10-09T17:28:29+00:00",
+          "source_identity": "git:bd6a9e8911325a44a93b7c269d1cbfd1a54de3d8"
         }
       ],
-      "review_ref": null,
-      "review_result": null,
-      "review_source_identity": null,
+      "review_ref": "file:.grilltrack/proof/provider-pdf-qualification-20261009.md",
+      "review_result": "clean",
+      "review_source_identity": "git:bd6a9e8911325a44a93b7c269d1cbfd1a54de3d8",
       "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-09T17:28:22+00:00",
+      "updated_at": "2026-10-09T17:28:29+00:00",
       "verification_ref": "file:.grilltrack/proof/provider-pdf-qualification-20261009.md"
     }
   ],
@@ -2488,5 +2495,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-09T17:28:26+00:00"
+  "updated_at": "2026-10-09T17:28:29+00:00"
 }
