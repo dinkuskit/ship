@@ -13,8 +13,9 @@ code or seeded `_plugin_state` is used.
 
 - Node v22.23.3; EmDash 1.2.0; sandbox-workerd 0.9.3;
   workerd 1.20261001.1; plugin CLI 0.13.3; Playwright 1.64.0.
-- Artifact: 3500 bytes, SHA-256 `0553c4cdfa60530685b32f11eeaf8dd4cecf882973727856f7d2ed3cf5961496`.
+- Artifact: 3500 bytes, SHA-256 `126295a40ece1eb28f96ebf591dae1ca39deb89ce3308457f05cd2efb6999449`.
 - Chromium virtual WebAuthn creates a passkey through the ordinary setup wizard,
+  explicitly logs out (or confirms no session exists), verifies **401** before login,
   then logs in through the ordinary passkey screen. The normal first-login
   welcome dialog is dismissed. No dev-bypass session is used.
 - Registry UI verification: **200**. Capability consent followed by install:
@@ -29,7 +30,7 @@ code or seeded `_plugin_state` is used.
 - `npm test`: **86 passed**, **3 existing opt-in skips**. Syntax and diff checks pass.
 
 The ignored run contains the machine-readable receipt and screenshots at
-`runs/local-registry-auth-runs/run-CrveAf/`. Parent inspected visible and expired
+`runs/local-registry-auth-runs/run-MIhLT1/`. Parent inspected visible and expired
 screenshots. Earlier failed receipts are retained as debugging history; they
 are not qualification passes. ACP supplied the first harness candidate; the
 parent corrected fixture multihash and profile metadata, host Registry config,
@@ -58,3 +59,13 @@ returned one P2 finding, accepted: a blocked non-PB external request could still
 produce a passing receipt. The runner now requires the complete blocked-request
 list to be empty. The normal install/auth flow passes with zero blocked requests.
 The follow-up review must cover this correction before closeout.
+
+## Review cycle 2 adjudication
+
+Comprehensive exact-tuple review at `e3675cf2f5d22ab31bb3461c58982a3f2512c278`
+returned one P2 finding, accepted: ordinary login was conditional on the setup
+redirect. The runner now explicitly logs out after setup, verifies the private
+admin endpoint returns **401**, and always signs in with the virtual passkey
+before qualification. The successful run records `beforeFreshLogin: 401`,
+`adminPlugins: 200`, `verify: 200`, `install: 201`, and `afterLogout: 401`.
+No review findings were rejected. A refreshed exact-source review is required.

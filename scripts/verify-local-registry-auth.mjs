@@ -249,10 +249,18 @@ try {
   await page.screenshot({ path: join(packet, "passkey-created.png"), fullPage: true });
   receipt.screenshots.push("passkey-created.png");
   await page.getByRole("button", { name: "Open the dashboard" }).click();
-  await page.waitForTimeout(1000);
-  if (page.url().includes("/_emdash/admin/login")) {
-    await page.getByRole("button", { name: /passkey/i }).first().click();
-  }
+  // A setup-created session must not stand in for ordinary passkey login.
+  const setupLogout = await page.request.post(`${base}/_emdash/api/auth/logout`, {
+    headers: { "X-EmDash-Request": "1", Origin: base },
+  });
+  receipt.statuses.setupLogout = setupLogout.status();
+  assert.ok([200, 204, 401].includes(setupLogout.status()));
+  const beforeLogin = await page.request.get(`${base}/_emdash/api/admin/plugins`);
+  receipt.statuses.beforeFreshLogin = beforeLogin.status();
+  assert.equal(beforeLogin.status(), 401);
+  await page.goto(`${base}/_emdash/admin/login?redirect=%2F_emdash%2Fadmin`);
+  await page.getByRole("button", { name: /passkey/i }).first().click();
+  receipt.authentication = "fresh-passkey-login-after-explicit-logout";
   await page.waitForURL(/\/_emdash\/admin\/?$/);
   await page.getByRole("button", { name: "Get Started", exact: true }).click({ timeout: 30000 });
   await page.screenshot({ path: join(packet, "setup-passkey.png"), fullPage: true });
