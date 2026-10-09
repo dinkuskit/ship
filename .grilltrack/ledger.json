@@ -7,7 +7,7 @@
     "confirmed_at": "2026-10-09T01:22:19+00:00",
     "domain": "Registry-only private PDF qualification",
     "started_at": "2026-10-09T01:22:19+00:00",
-    "status": "confirmed",
+    "status": "inspected",
     "summary": "Bobby-approved requirements and coordinator acknowledgment authorize focused Ship proposal/issue draft and minimal supported EmDash qualification fixture, independent verification and reviewed PR; upstream publication/design acceptance and production actions remain gated."
   },
   "decisions": [
@@ -2361,13 +2361,21 @@
       "rationale": "",
       "repair_required": false,
       "review_classifications": [],
-      "review_history": [],
-      "review_ref": null,
-      "review_result": null,
-      "review_source_identity": null,
+      "review_history": [
+        {
+          "classifications": [],
+          "ref": "file:.grilltrack/proof/private-asset-review-20261008.md",
+          "result": "clean",
+          "reviewed_at": "2026-10-09T02:46:13+00:00",
+          "source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf"
+        }
+      ],
+      "review_ref": "file:.grilltrack/proof/private-asset-review-20261008.md",
+      "review_result": "clean",
+      "review_source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf",
       "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-09T01:44:09+00:00",
+      "updated_at": "2026-10-09T02:46:13+00:00",
       "verification_ref": "file:.grilltrack/proof/private-asset-qualification-20261008.md"
     }
   ],
@@ -2378,12 +2386,10 @@
   "last_pause": null,
   "pause": null,
   "recommendation": {
-    "alternatives": [
-      "Close this local slice and defer live/provider/consumer/taste proof"
-    ],
-    "reason": "Merchant funds own postage; this milestone proves only the private package seam and fixture workflow. Registry, release, install, actual Commerce hook, PB availability, consumer, and taste remain explicit gates.",
-    "recommended": "Registry runner/release/install plus actual Commerce hook proof, after separately authorized host and identity gates",
-    "recorded_at": "2026-10-01T16:28:19+00:00"
+    "alternatives": [],
+    "reason": "Actual public-interface private transport is proven; Block Kit authenticated browser handoff remains absent. Signed Registry/browser acceptance and separate trusted Ship bindings are required before consumer integration. Issue draft is prepared, publication separately gated.",
+    "recommended": "EmDash core/admin owner design qualification of a host-resolved private PDF handoff; agree supported API form and passive viewer isolation/lifetime/filename policy before platform implementation.",
+    "recorded_at": "2026-10-09T02:46:13+00:00"
   },
   "reconciliation": {
     "plan_id": "ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
@@ -2398,5 +2404,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-09T01:44:09+00:00"
+  "updated_at": "2026-10-09T02:46:13+00:00"
 }
