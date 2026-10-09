@@ -5,6 +5,16 @@ records a capability gap and proposed acceptance criteria; it does not approve
 an API, authentication policy, implementation, publication, or production use.
 Ship's default Registry entry and unavailable label behavior remain unchanged.
 
+## Approved consumer requirements
+
+Ship MUST be a Registry plugin, with no merchant-installed native companion or
+host code. Initial label UX is private PDF view, exact-byte download, and an
+explicit browser Print action only. One-click printing is deferred for future
+research. A print attempt never establishes physical output. Repeated view or
+download must not buy postage, fetch missing provider bytes, reconcile, or
+mutate print-request state. These locks are recorded via GrillTrack; platform
+API and security design remain unapproved.
+
 ## Problem and existing support
 
 Ship needs an authenticated browser path to view and download a stored private
@@ -48,7 +58,7 @@ The Registry entry in [`src/plugin.ts`](../../src/plugin.ts) wraps the default
 [`src/plugin.js`](../../src/plugin.js); it does not bind the installed workflow's
 host ports or mount the native adapter. The existing GrillTrack decision
 `browser-stored-label-assets` covers that optional adapter, not the proposed
-platform capability. This proposal changes no recorded product decision.
+platform capability. The new `registry-private-pdf-qualification` decision records the approved Registry-only initial UX; it does not approve an upstream API. The earlier native adapter remains supporting evidence only.
 
 A public raw route, public media copy, bearer credential in a URL, or a separate
 native companion would not satisfy this private Registry-only requirement.
@@ -58,7 +68,7 @@ A new adapter duplicating Ship's current native implementation would not close i
 
 EmDash core and admin/Block Kit could provide one declarative **private asset
 action**. A sandbox plugin would identify a private raw route, bounded input,
-and a view, download, or print-preview intent. These are conceptual semantics,
+and a view or download intent. Printing is an explicit browser action on the loaded PDF; one-click printing is deferred. These are conceptual semantics,
 not proposed stable field names or an approved API shape.
 
 The host would resolve the current installed plugin and call its private route
@@ -79,6 +89,47 @@ this proposal does not select Blob URLs, new public GET routes, access tokens,
 or a server-side artifact cache. Later requests must reauthorize. A downloaded
 file cannot be revoked after delivery, so revocation tests concern later server
 retrieval rather than already-delivered bytes.
+
+### Concrete responsibility split for review
+
+The following is the smallest reviewable contract boundary, not a locked API:
+
+- **Plugin:** declares a private raw route, validates the bounded asset
+  selector, authorizes its domain object and operation on every read, returns
+  `Uint8Array` bytes plus the intended media type and filename, and reports
+  ordinary domain failures without private bytes or object metadata. It does
+  not mint browser credentials, expose a public copy, or record view/download/
+  print state.
+- **Core dispatcher:** performs session or token authentication, the declared
+  permission and admin-scope checks, CSRF protection for cookie requests,
+  method/body limits, raw-body validation, header filtering, private/no-store
+  caching, `nosniff`, passive-document CSP, and response validation.
+  The dispatcher must not infer the plugin's tenant, order, operation, or
+  authorization.
+- **Admin/Block Kit host:** invokes the private route with the existing
+  authenticated request mechanism, keeps the route and plugin installation
+  host-resolved, and renders a passive view/download control. A normal
+  external link is insufficient because browser navigation cannot supply
+  `X-EmDash-Request: 1`. The host must not accept an arbitrary fetch URL or
+  plugin script.
+
+Expected failure semantics should remain non-disclosing: unauthenticated
+requests return the existing authentication denial; cookie requests without
+the required request header return the existing CSRF denial; insufficient
+permission or token scope returns the existing authorization denial; missing,
+disabled, cross-plugin, wrong-tenant/object, stale-operation, or revoked
+authorization returns an unavailable/error state without bytes. Every new
+retrieval reauthenticates and rechecks the operation. A view or download does
+not buy postage, refetch a provider label, reconcile, or mutate print state.
+Once bytes have been delivered, server-side revocation cannot recall that copy;
+the lifetime guarantee applies to subsequent retrievals and to any temporary
+viewer resource the host creates.
+
+The stable action field names, viewer mechanism, temporary byte lifetime,
+viewer CSP, filename policy, and whether the host uses a same-origin mediated
+request or another reviewed transport are **upstream-owned design decisions**.
+Ship should consume a versioned result only after core/admin security review;
+it should not reserve names or implement a parallel native bridge.
 
 ## Minimum acceptance criteria
 
@@ -138,3 +189,42 @@ The next action is an **EmDash core + admin/Block Kit maintainer design review**
 of a generic private asset handoff, referencing #3190 and #1314. API acceptance
 and security review belong upstream; Ship is a prospective consumer. This Ship
 document does not post an upstream issue or authorize platform implementation.
+The reviewable issue draft is in
+[`docs/decisions/upstream-private-assets-issue-draft.md`](upstream-private-assets-issue-draft.md).
+
+## Qualification evidence boundary
+
+[`scripts/verify-private-assets.mjs`](../../scripts/verify-private-assets.mjs)
+bundles a dedicated fixture with the official plugin CLI, installs it into the
+pinned EmDash 1.2.0 sandbox host, and exercises the actual private dispatcher:
+authenticated raw PDF bytes match the fixture exactly; missing
+`X-EmDash-Request` and missing session are denied; the response carries the
+runtime security headers; and requesting the normal Block Kit external link target reproduces
+a 403 for an HTTP request matching ordinary link navigation (cookie, no CSRF header). This is an HTTP reproduction, not observed browser navigation. The fixture has no Ship route or provider
+dependency.
+
+This is observed supported runtime evidence, not a signed Registry install.
+The runner seeds local post-install state and therefore does not prove Registry
+signatures, publication, consent, or install acceptance. Browser rendering,
+download acceptance, and physical/observed printing are intentionally
+unexecuted in this package. The existing
+[`verify-registry-artifact.mjs`](../../scripts/verify-registry-artifact.mjs)
+has the same post-install limitation and must not be described as a real
+signed Registry installation.
+
+
+## Selected next bounded slice and owner gate
+
+Next: **EmDash core/admin design qualification of a host-owned private PDF
+handoff**, starting from this reproduction. The proposed first boundary is a
+host-resolved current-plugin/private-route selector plus bounded input and
+view/download intent, preserving existing auth and CSRF. A passive viewer owns
+an explicit browser Print control. No automatic print intent is required.
+Upstream must decide the supported API form, viewer isolation/CSP, resource
+lifetime and filename policy before implementation. This package is the
+reviewable input to that decision; publication is separately gated.
+
+After upstream accepts a design and provides a versioned implementation, run
+the real Registry-install/browser matrix above before a Ship consumer PR.
+Keep the separate trusted domain and storage/provider bindings blocked until
+supported. There is no approved consumer shim to implement in the meantime.

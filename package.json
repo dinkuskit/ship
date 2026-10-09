@@ -22,6 +22,7 @@
     "build": "emdash-plugin build",
     "verify:registry": "node scripts/verify-registry-artifact.mjs",
     "verify:bundle": "node scripts/verify-registry-artifact.mjs --bundle-only",
+    "verify:private-assets": "node scripts/verify-private-assets.mjs",
     "dev": "node src/server.js",
     "fixture:proof": "PORT=4328 node test-support/fixture-server.js",
     "verify:sandbox": "node scripts/verify-sandbox-package.mjs",
