@@ -29,3 +29,38 @@ test('host-only actor projection and private PDF wire preserve dispatch policy',
   }
   assert.equal(plugin.routes['label-pdf'].response, 'raw');
 });
+
+test('trusted provider PDF mode derives one link from the authorized stored label only', async () => {
+  const pdfUrl = 'https://stg-labels-cls.gcs.pitneybowes.com/usps/fixture/outbound/label/fixture.pdf';
+  let labels = 0;
+  const workflow = {
+    inspect: async () => ({ order: { orderId: 'order-1', paidTotals: { amount: '100', currency: 'USD' }, destination: { name: 'Recipient', addressLine1: '1 Main', city: 'Austin', state: 'TX', postalCode: '78701' } }, labelStatus: 'label_created', pdfStatus: 'not_stored' }),
+    label: async (auth, input) => {
+      assert.deepEqual(auth, { shopId: 'shop-1', actorId: 'actor-1', canManage: true });
+      assert.equal(input.orderId, 'order-1');
+      labels += 1;
+      return { status: 'label_created', operationId: 'operation-1', createdAt: 1000, pdfUrl };
+    },
+  };
+  const plugin = createShipPlugin({
+    authorityPort: { authorize: async () => ({ shopId: 'shop-1', actorId: 'actor-1', canManage: true }) },
+    workflowFactory: async () => workflow,
+    providerPdfLink: {
+      mode: 'trusted',
+      port: {
+        links: async ({ operation }) => ({
+          view: { type: 'link', label: 'View label', target: { kind: 'external', url: operation.pdfUrl } },
+        }),
+      },
+    },
+  });
+  const response = await plugin.routes.admin.handler({
+    user: { id: 'actor-1' },
+    input: { page: '/journey', values: { orderId: 'order-1' } },
+  }, {});
+  assert.deepEqual(response.blocks.find(block => block.type === "actions"), {
+    type: 'actions',
+    elements: [{ type: 'link', label: 'View label', target: { kind: 'external', url: pdfUrl } }],
+  });
+  assert.equal(labels, 1);
+});

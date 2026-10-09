@@ -169,9 +169,30 @@ with sqlite3.connect(sys.argv[1]) as db:
     assert.equal(success(await journey("load")).deliveryStatus, "not_reported");
     const admin = success(await call("admin", { page: "/journey", type: "page_load", values: { orderId: ORDER.orderId } }));
     assert.match(JSON.stringify(admin), /Synthetic installed proof/);
-    assert.match(JSON.stringify(admin), /Label created/);
+    assert.match(JSON.stringify(admin), /label_created/);
     assert.match(JSON.stringify(admin), /print_requested/);
-    assert.match(JSON.stringify(admin), /authenticated host asset mediator/);
+    assert.match(JSON.stringify(admin), /provider-hosted PDF/);
+    const beforeLinkRead = await record(ORDER.orderId);
+    const beforeLinkCounters = await state();
+    const repeatedAdmin = success(await call("admin", { page: "/journey", type: "page_load", values: { orderId: ORDER.orderId, pdfUrl: "https://example.test/forged.pdf" } }));
+    assert.equal(JSON.stringify(repeatedAdmin).includes("example.test"), false);
+    assert.deepEqual(await record(ORDER.orderId), beforeLinkRead);
+    assert.deepEqual(await state(), beforeLinkCounters);
+    const providerLink = admin.blocks.find(block => block.type === "actions" &&
+      block.elements?.some(element => element.target?.url?.includes("stg-labels-cls.gcs.pitneybowes.com")));
+    assert.equal(providerLink?.elements?.[0]?.target?.url,
+      "https://stg-labels-cls.gcs.pitneybowes.com/usps/fixture/outbound/label/fixture.pdf");
+    assert.notEqual((await call("admin", { page: "/journey", type: "page_load", values: { orderId: "wrong-order" } })).response.status, 200);
+    const missingAdminHeader = await call("admin", { page: "/journey", type: "page_load", values: { orderId: ORDER.orderId } },
+      { "content-type": "application/json", Cookie: cookie });
+    assert.equal(missingAdminHeader.response.status, 403);
+    const missingAdminSession = await call("admin", { page: "/journey", type: "page_load", values: { orderId: ORDER.orderId } },
+      { "content-type": "application/json", "X-EmDash-Request": "1" });
+    assert.equal(missingAdminSession.response.status, 401);
+    success(await call("fixture", { action: "expire-provider-link", orderId: ORDER.orderId }));
+    const expiredAdmin = success(await call("admin", { page: "/journey", type: "page_load", values: { orderId: ORDER.orderId } }));
+    assert.equal(JSON.stringify(expiredAdmin).includes("stg-labels-cls.gcs.pitneybowes.com"), false);
+    assert.match(JSON.stringify(expiredAdmin), /Provider PDF unavailable or expired/);
     await stopJourneyHost(host);
     await startJourneyHost(host);
     assert.deepEqual((await call("label-pdf", { orderId: ORDER.orderId })).bytes, pdf.bytes);

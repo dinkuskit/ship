@@ -1,3 +1,5 @@
+import { PROVIDER_PDF_TTL_MS } from "./provider-pdf-link.js";
+
 const MAX_ID = 100;
 const QUOTE_TTL_MS = 15 * 60 * 1000;
 const MAX_PDF_BYTES = 5 * 1024 * 1024;
@@ -411,7 +413,11 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
       await writeState(ctx.auth, ctx.order.orderId, claimed, unknown);
       fail("purchase_unknown", 409);
     }
-    const result = { status: "label_created", operationId, shipmentId: label.shipmentId, pdfUrl: label.pdfUrl, amount: quoteRecord.amount, currency: "USD" };
+    const result = {
+      status: "label_created", operationId, shipmentId: label.shipmentId, pdfUrl: label.pdfUrl,
+      createdAt: operation.createdAt, pdfExpiresAt: operation.createdAt + PROVIDER_PDF_TTL_MS,
+      amount: quoteRecord.amount, currency: "USD",
+    };
     const completed = { ...claimed.value, operation: { ...operation, status: "label_created", result }, label: { ...result } };
     await writeState(ctx.auth, ctx.order.orderId, claimed, completed);
     return clone(result);
@@ -434,7 +440,12 @@ export function createShipWorkflow({ store, orderPort, providerPort, clock = () 
     if (!recovered || !safeIdentity(recovered.shipmentId) || !safePdfUrl(recovered.pdfUrl) || !matchesMoney(recovered.price, operation.amount)) {
       return clone({ status: "purchase_unknown", operationId: operation.id });
     }
-    const result = { status: "label_created", operationId: operation.id, shipmentId: recovered.shipmentId, pdfUrl: recovered.pdfUrl, amount: operation.amount, currency: "USD" };
+    const result = {
+      status: "label_created", operationId: operation.id, shipmentId: recovered.shipmentId,
+      pdfUrl: recovered.pdfUrl, createdAt: operation.createdAt,
+      pdfExpiresAt: operation.createdAt + PROVIDER_PDF_TTL_MS,
+      amount: operation.amount, currency: "USD",
+    };
     const done = { ...claimed.value, operation: { ...claimed.value.operation, status: "label_created", result }, label: result };
     await writeState(auth, orderId, claimed, done);
     return clone(result);

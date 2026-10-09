@@ -10,6 +10,9 @@ import { bundlePlugin } from "@emdash-cms/plugin-cli";
 
 import { fixturePdf } from "../test-support/private-assets/src/pdf.js";
 const run = promisify(execFile);
+const providerMode = process.argv.includes("--provider-link");
+const serve = process.argv.includes("--serve");
+if (process.argv.slice(2).some(arg => !["--provider-link", "--serve"].includes(arg)) || (serve && !providerMode)) throw new Error("Usage: verify-private-assets.mjs [--provider-link [--serve]]");
 const root = resolve(import.meta.dirname, "..");
 const fixture = join(root, "test-support/private-assets");
 const runRoot = join(root, "runs/private-asset-qualification-runs");
@@ -150,6 +153,36 @@ try {
     ?.elements?.find(element => element.type === "link");
   assert.equal(link?.target?.url, `${base}/_emdash/api/plugins/${pluginId}/private-pdf`);
 
+  if (providerMode) {
+    const post = async (suffix, input, headers = auth) => {
+      const result = await http(route(suffix), { method: "POST", headers: { ...headers, "Content-Type": "application/json" }, body: JSON.stringify(input) });
+      return { status: result.status, body: await result.text() };
+    };
+    assert.equal((await post("seed-provider-proof", {})).status, 200);
+    const pageInput = { page: "/provider-proof", type: "page_load" };
+    const page = await post("admin", pageInput);
+    assert.equal(page.status, 200);
+    const target = JSON.parse(page.body).data.blocks.find(block => block.type === "actions")?.elements[0]?.target;
+    assert.deepEqual(target, { kind: "external", url: "https://stg-labels-cls.gcs.pitneybowes.com/usps/fixture/outbound/label/fixture.pdf" });
+    assert.equal((await post("admin", pageInput, {})).status, 401);
+    assert.equal((await post("admin", pageInput, { Cookie: cookie })).status, 403);
+    const wrong = await post("admin", { ...pageInput, values: { orderId: "wrong-order", url: "https://example.test" } });
+    assert.equal(wrong.body.includes("stg-labels"), false);
+    assert.equal((await post("admin", pageInput)).body, page.body, "read changed fixture state");
+    await post("seed-provider-proof", { expired: true });
+    const expired = await post("admin", pageInput);
+    assert.equal(expired.body.includes("stg-labels"), false);
+    assert.match(expired.body, /unavailable or expired/);
+    await post("seed-provider-proof", {});
+    await writeFile(join(packet, "provider-link.json"), JSON.stringify({
+      cliArtifactSha256: artifact.sha256, linkTarget: "exact synthetic PB-shaped URL",
+      unsignedRegistrySourceRuntime: "passed", missingSession: 401, missingCsrf: 403,
+      wrongOrder: "no link", expired: "no link", repeatRead: "unchanged",
+      signedInstall: false, normalSignin: false, livePb: false, browserAcceptance: false,
+    }, null, 2));
+    console.log("provider_link_registry_source_runtime=passed;signed_install=false;live_pb=false");
+  }
+
   const expected = fixturePdf();
   await writeFile(join(packet, "expected.pdf"), expected);
   const request = { headers: auth, signal: AbortSignal.timeout(15000) };
@@ -203,6 +236,13 @@ try {
   await writeFile(state, `Runtime probe complete; byte transport: ${result.authenticatedRawTransport}. Registry install and browser acceptance NOT EXECUTED.\n`);
   await writeFile(proof, `Official bundle + seeded post-install EmDash 1.2.0/workerd runtime. Dev-bypass synthetic session only. Expected ${expected.length} bytes; received ${pdf.length}. CSRF/session denials and security headers asserted. See receipt.json. No browser, signed Registry install, provider, or physical printing proof.\n`);
   console.log(JSON.stringify(result));
+  if (serve) {
+    console.log(`PROVIDER_PREVIEW=${base}/_emdash/api/setup/dev-bypass?redirect=/_emdash/admin/plugins/${pluginId}/provider-proof`);
+    console.log("Type any line to stop this owned preview.");
+    process.stdin.resume();
+    await new Promise(resolve => process.stdin.once("data", resolve));
+    process.stdin.pause();
+  }
 
 } catch (error) {
   await writeFile(state, "FAILED: runtime probe did not qualify; see failure.json.\n");

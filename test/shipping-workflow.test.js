@@ -300,3 +300,31 @@ test('canonical Commerce order:UUID identity survives quote/buy/reload/PDF witho
   }
   await assert.rejects(restarted.loadOrder({ ...auth, actorId: 'actor:forged' }, { orderId }), e => e.code === 'auth_invalid');
 });
+
+test('provider completion and recovery keep the original request expiry anchor', async () => {
+  for (const recovery of [false, true]) {
+    let now = 1000;
+    const value = fixture({ provider: {
+      async createLabel() {
+        now = 2000;
+        if (recovery) throw Object.assign(new Error(), { recoveryReason: 'no_response' });
+        return { shipmentId: 'shipment', pdfUrl, price: 8.6 };
+      },
+      async reconcileLabel() {
+        now = 4000;
+        return { shipmentId: 'shipment', pdfUrl, price: 8.6 };
+      },
+    } });
+    const instance = createShipWorkflow({ ...value, clock: () => now });
+    if (recovery) {
+      await assert.rejects(reviewedBuy(instance), error => error.code === 'purchase_unknown');
+      now = 3000;
+      await instance.reconcile(auth, { orderId: 'order-1' });
+    } else await reviewedBuy(instance);
+    const label = await instance.label(auth, { orderId: 'order-1' });
+    assert.equal(label.createdAt, 1000);
+    assert.equal(label.pdfExpiresAt, 1000 + 24 * 60 * 60 * 1000);
+    now = 5000;
+    assert.deepEqual(await instance.label(auth, { orderId: 'order-1' }), label);
+  }
+});

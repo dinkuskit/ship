@@ -43,14 +43,14 @@ async function handle(url, init = {}) {
       if (controls.create === 'malformed') return json({ malformed: true });
       return json({ error }, controls.create === 'http_400' ? 400 : 500);
     }
-    return json({ shipmentId: `fixture-${operationId}`, pdfUrl: `${origin}/provider/label.pdf`, price: 8.6 });
+    return json({ shipmentId: `fixture-${operationId}`, pdfUrl: "https://stg-labels-cls.gcs.pitneybowes.com/usps/fixture/outbound/label/fixture.pdf", price: 8.6 });
   }
   if (path === '/provider/reconcile') {
     const { operationId, reason, createdAt } = JSON.parse(init.body);
     state.__reconciles ??= [];
     state.__reconciles.push({ operationId, reason, createdAt });
     await saveState(state);
-    return json({ shipmentId: `fixture-${operationId}`, pdfUrl: `${origin}/provider/label.pdf`, price: 8.6 });
+    return json({ shipmentId: `fixture-${operationId}`, pdfUrl: "https://stg-labels-cls.gcs.pitneybowes.com/usps/fixture/outbound/label/fixture.pdf", price: 8.6 });
   }
   if (path === '/provider/label.pdf') {
     state.__pdfFetches = (state.__pdfFetches ?? 0) + 1;
