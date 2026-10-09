@@ -10,7 +10,7 @@ const inputField = (action_id, label, value = '') => ({ type: 'text_input', acti
 
 // Host-owned injection only. This factory does not establish HTTP authorization:
 // mount exclusively behind EmDash's authenticated private dispatch/RBAC/CSRF.
-export function createShipPlugin({ workflowFactory, authorityPort, browserAssetPort } = {}) {
+export function createShipPlugin({ workflowFactory, authorityPort, browserAssetPort, providerPdfLink } = {}) {
   async function authorized(routeCtx, ctx) {
     if (!routeCtx?.user || !authorityPort?.authorize || typeof workflowFactory !== 'function') unavailable();
     let auth;
@@ -36,6 +36,23 @@ export function createShipPlugin({ workflowFactory, authorityPort, browserAssetP
       idempotencyKey: values?.idempotencyKey,
     };
     return workflow[action === 'load' ? 'inspect' : action](auth, request);
+  }
+
+  // This is intentionally opt-in. The host must explicitly mark the injected
+  // port trusted; the caller supplies only an order selector and the workflow
+  // supplies the authorized stored label operation.
+  async function trustedProviderLinks(providerPdfLink, bound, orderId) {
+    if (providerPdfLink?.mode !== "trusted" ||
+        typeof providerPdfLink.port?.links !== "function") return null;
+    try {
+      return await providerPdfLink.port.links({
+        operation: await bound.workflow.label(bound.auth, { orderId }),
+        auth: bound.auth,
+        orderId,
+      });
+    } catch {
+      return null;
+    }
   }
 
   const journey = route(async (routeCtx, ctx) => {
@@ -159,13 +176,22 @@ export function createShipPlugin({ workflowFactory, authorityPort, browserAssetP
       blocks.push({ type: 'form', fields: [inputField('orderId', 'Order', v.orderId)], submit: { label: 'Store private PDF', action_id: 'journey-pdf' } });
       blocks.push({ type: 'form', fields: [inputField('orderId', 'Order', v.orderId)], submit: { label: 'Record print request', action_id: 'journey-print' } });
     }
-    if (state.labelStatus === 'label_created' && state.pdfStatus === 'stored' && typeof browserAssetPort?.links === 'function') {
+    if (state.labelStatus === 'label_created') {
       const bound = await authorized(routeCtx, ctx);
-      const label = await bound.workflow.label(bound.auth, { orderId: v.orderId });
-      const links = await browserAssetPort.links({ orderId: v.orderId, operationId: label.operationId, requestUrl: routeCtx.request?.url });
-      if (links) blocks.push({ type: 'actions', elements: [links.view, links.download, links.print] });
+      const providerLinks = await trustedProviderLinks(providerPdfLink, bound, v.orderId);
+      if (providerLinks?.view) {
+        blocks.push({ type: 'actions', elements: [providerLinks.view] });
+        blocks.push({ type: 'context', text: 'Opens a provider-hosted PDF. Access can expire or become unavailable. Use the browser to save or print; printing does not update fulfillment.' });
+      } else if (providerPdfLink?.mode === 'trusted') {
+        blocks.push({ type: 'context', text: 'Provider PDF unavailable or expired.' });
+      }
+      if (state.pdfStatus === 'stored' && typeof browserAssetPort?.links === 'function') {
+        const label = await bound.workflow.label(bound.auth, { orderId: v.orderId });
+        const links = await browserAssetPort.links({ orderId: v.orderId, operationId: label.operationId, requestUrl: routeCtx.request?.url });
+        if (links) blocks.push({ type: 'actions', elements: [links.view, links.download, links.print] });
+      }
     }
-    if (state.labelStatus === 'label_created') blocks.push({ type: 'context', text: 'Label created. Private PDF download is available through the host API; browser view/download/print requires an authenticated host asset mediator. Print requests do not confirm physical printing or delivery.' });
+    if (state.labelStatus === 'label_created' && providerPdfLink?.mode !== 'trusted') blocks.push({ type: 'context', text: 'Label created. Private PDF download is available through the host API; browser view/download/print requires an authenticated host asset mediator. Print requests do not confirm physical printing or delivery.' });
     return { blocks, ...(toast ? { toast } : {}) };
   }
   return {

@@ -54,6 +54,14 @@ export async function prepareInstalledEmdashHost({ repoRoot = root, onInterrupte
     await run("npm", [
       "install", "--ignore-scripts", "--include=optional", "--no-audit", "--no-fund",
     ], { cwd: hostDirectory, maxBuffer: 20 * 1024 * 1024 });
+    // npm ci/install may omit the host's WASI optional packages on macOS.
+    // Install the pinned WASI bindings explicitly while keeping scripts off.
+    await run("npm", [
+      "install", "--force", "--ignore-scripts", "--no-save", "--no-audit", "--no-fund",
+      "@rolldown/binding-wasm32-wasi@1.0.0-rc.3",
+      "@bruits/satteri-wasm32-wasi@0.10.5",
+      "@astrojs/compiler-binding-wasm32-wasi@0.4.1",
+    ], { cwd: hostDirectory, maxBuffer: 20 * 1024 * 1024 });
     const installed = await installPackedPackage({
       repoRoot,
       runDirectory,
@@ -120,7 +128,10 @@ export async function startJourneyHost(host) {
   const bin = typeof manifest.bin === "string" ? manifest.bin : manifest.bin.astro;
   const child = spawn(process.execPath, [join(host.hostDirectory, "node_modules/astro", bin), "dev"], {
     cwd: host.hostDirectory, detached: true, stdio: ["ignore", "pipe", "pipe"],
-    env: { ...process.env, PORT: String(port), ASTRO_DEV_BACKGROUND: "0", SHIP_JOURNEY_FIXTURE_FILE: host.fixtureFile },
+    env: {
+      ...process.env, PORT: String(port), ASTRO_DEV_BACKGROUND: "0",
+      NAPI_RS_FORCE_WASI: "true", SHIP_JOURNEY_FIXTURE_FILE: host.fixtureFile,
+    },
   });
   host.child = child;
   host.base = `http://127.0.0.1:${port}`;

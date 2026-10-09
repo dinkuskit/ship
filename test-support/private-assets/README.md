@@ -17,3 +17,11 @@ The fixture is excluded from the production Ship package.
 
 See the [upstream issue draft](../../docs/decisions/upstream-private-assets-issue-draft.md)
 and [qualification proof](../../.grilltrack/proof/private-asset-qualification-20261008.md).
+
+The optional `--provider-link` mode also bundles Ship's sandbox-pure provider
+link helper, seeds a synthetic stored operation through a fixture-only private
+route, and verifies its Block Kit response, authorization denials and expiry.
+`--provider-link --serve` holds the owned local host for browser inspection;
+enter a line to stop it. The PB-shaped URL is deliberately inert and must not be
+used as live provider evidence. This fixture never binds real Commerce or Ship
+provider authority. It remains unsigned seeded install state with dev-bypass.

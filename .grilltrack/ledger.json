@@ -4,11 +4,11 @@
   "current_focus": {
     "cadence": "sequential",
     "confirmed": true,
-    "confirmed_at": "2026-10-09T01:22:19+00:00",
+    "confirmed_at": "2026-10-09T17:19:10+00:00",
     "domain": "Registry-only private PDF qualification",
-    "started_at": "2026-10-09T01:22:19+00:00",
+    "started_at": "2026-10-09T17:19:10+00:00",
     "status": "inspected",
-    "summary": "Bobby-approved requirements and coordinator acknowledgment authorize focused Ship proposal/issue draft and minimal supported EmDash qualification fixture, independent verification and reviewed PR; upstream publication/design acceptance and production actions remain gated."
+    "summary": "Bobby authorizes provider-link qualification first and reviewed Ship PR with bounded source/tests/runtime work; backup design only at original PB expiry. No live purchase, secrets, deploy, publishing or account changes. Existing trusted Commerce bindings remain unresolved."
   },
   "decisions": [
     {
@@ -2304,7 +2304,7 @@
     {
       "baseline_ref": null,
       "candidate_refs": [],
-      "choice": "Ship MUST remain a Registry plugin with no merchant-installed native companion or host code. Initial UX is private PDF view, exact-byte download and explicit browser Print only. One-click printing is deferred. Viewing/downloading never buys postage, fetches missing provider bytes, reconciles, or mutates print-request state; print attempts never imply physical output. Prepare upstream-ready design and supported-interface reproduction; no stable new API or platform implementation is approved.",
+      "choice": "Qualify provider PDF links first through authenticated Registry Block Kit for authorized stored label operations. Preserve original PB creation plus 24h absolute expiry. No client URL, credentials, rebuy or print/dispatch mutation. One-click printing deferred. Backup DESIGN ONLY: signed-in dinkuskit.com download reauthorizes organization/store/object with same absolute PB expiry; not deletion/revocation guarantee. No production privacy, launch, live purchase or platform API approval.",
       "context_ref": null,
       "created_at": "2026-10-09T01:22:19+00:00",
       "deferred_reason": null,
@@ -2353,10 +2353,94 @@
           "review_source_identity": null,
           "to": "verified",
           "verification_ref": null
+        },
+        {
+          "at": "2026-10-09T17:18:55+00:00",
+          "choice": "Ship MUST remain a Registry plugin with no merchant-installed native companion or host code. Initial UX is private PDF view, exact-byte download and explicit browser Print only. One-click printing is deferred. Viewing/downloading never buys postage, fetches missing provider bytes, reconciles, or mutates print-request state; print attempts never imply physical output. Prepare upstream-ready design and supported-interface reproduction; no stable new API or platform implementation is approved.",
+          "from": "verified",
+          "implementation_ref": "file:docs/decisions/registry-private-label-assets-proposal.md",
+          "note": "Bobby authorizes provider-link qualification first; hosted dinkuskit.com backup design has same absolute expiry as original PB label. Reopen only prior no-external-label-link assumption, not production privacy or launch approval.",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": "file:.grilltrack/proof/private-asset-review-20261008.md",
+          "review_result": "clean",
+          "review_source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf",
+          "to": "reopened",
+          "verification_ref": "file:.grilltrack/proof/private-asset-qualification-20261008.md"
+        },
+        {
+          "at": "2026-10-09T17:18:59+00:00",
+          "choice": "Ship MUST remain a Registry plugin with no merchant-installed native companion or host code. Initial UX is private PDF view, exact-byte download and explicit browser Print only. One-click printing is deferred. Viewing/downloading never buys postage, fetches missing provider bytes, reconciles, or mutates print-request state; print attempts never imply physical output. Prepare upstream-ready design and supported-interface reproduction; no stable new API or platform implementation is approved.",
+          "from": "reopened",
+          "implementation_ref": "file:docs/decisions/registry-private-label-assets-proposal.md",
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": "file:.grilltrack/proof/private-asset-review-20261008.md",
+          "review_result": "clean",
+          "review_source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf",
+          "to": "locked",
+          "verification_ref": "file:.grilltrack/proof/private-asset-qualification-20261008.md"
+        },
+        {
+          "at": "2026-10-09T17:19:10+00:00",
+          "choice": "Ship MUST remain a Registry plugin with no merchant-installed native companion or host code. Initial UX is private PDF view, exact-byte download and explicit browser Print only. One-click printing is deferred. Viewing/downloading never buys postage, fetches missing provider bytes, reconciles, or mutates print-request state; print attempts never imply physical output. Prepare upstream-ready design and supported-interface reproduction; no stable new API or platform implementation is approved.",
+          "from": "locked",
+          "implementation_ref": "file:docs/decisions/registry-private-label-assets-proposal.md",
+          "note": "Apply explicitly approved provider-first scoped choice while preserving prior history.",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": "file:.grilltrack/proof/private-asset-review-20261008.md",
+          "review_result": "clean",
+          "review_source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf",
+          "to": "reopened",
+          "verification_ref": "file:.grilltrack/proof/private-asset-qualification-20261008.md"
+        },
+        {
+          "at": "2026-10-09T17:19:10+00:00",
+          "choice": "Ship MUST remain a Registry plugin with no merchant-installed native companion or host code. Initial UX is private PDF view, exact-byte download and explicit browser Print only. One-click printing is deferred. Viewing/downloading never buys postage, fetches missing provider bytes, reconciles, or mutates print-request state; print attempts never imply physical output. Prepare upstream-ready design and supported-interface reproduction; no stable new API or platform implementation is approved.",
+          "from": "reopened",
+          "implementation_ref": "file:docs/decisions/registry-private-label-assets-proposal.md",
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": "file:.grilltrack/proof/private-asset-review-20261008.md",
+          "review_result": "clean",
+          "review_source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf",
+          "to": "locked",
+          "verification_ref": "file:.grilltrack/proof/private-asset-qualification-20261008.md"
+        },
+        {
+          "at": "2026-10-09T17:28:22+00:00",
+          "choice": "Qualify provider PDF links first through authenticated Registry Block Kit for authorized stored label operations. Preserve original PB creation plus 24h absolute expiry. No client URL, credentials, rebuy or print/dispatch mutation. One-click printing deferred. Backup DESIGN ONLY: signed-in dinkuskit.com download reauthorizes organization/store/object with same absolute PB expiry; not deletion/revocation guarantee. No production privacy, launch, live purchase or platform API approval.",
+          "from": "locked",
+          "implementation_ref": "file:docs/decisions/registry-private-label-assets-proposal.md",
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": "file:.grilltrack/proof/private-asset-review-20261008.md",
+          "review_result": "clean",
+          "review_source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf",
+          "to": "implemented",
+          "verification_ref": "file:.grilltrack/proof/private-asset-qualification-20261008.md"
+        },
+        {
+          "at": "2026-10-09T17:28:22+00:00",
+          "choice": "Qualify provider PDF links first through authenticated Registry Block Kit for authorized stored label operations. Preserve original PB creation plus 24h absolute expiry. No client URL, credentials, rebuy or print/dispatch mutation. One-click printing deferred. Backup DESIGN ONLY: signed-in dinkuskit.com download reauthorizes organization/store/object with same absolute PB expiry; not deletion/revocation guarantee. No production privacy, launch, live purchase or platform API approval.",
+          "from": "implemented",
+          "implementation_ref": "file:docs/decisions/provider-pdf-qualification.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": "file:.grilltrack/proof/private-asset-qualification-20261008.md"
         }
       ],
       "id": "registry-private-pdf-qualification",
-      "implementation_ref": "file:docs/decisions/registry-private-label-assets-proposal.md",
+      "implementation_ref": "file:docs/decisions/provider-pdf-qualification.md",
       "question": "What initial label browser UX and platform qualification are approved?",
       "rationale": "",
       "repair_required": false,
@@ -2368,28 +2452,35 @@
           "result": "clean",
           "reviewed_at": "2026-10-09T02:46:13+00:00",
           "source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf"
+        },
+        {
+          "classifications": [],
+          "ref": "file:.grilltrack/proof/provider-pdf-qualification-20261009.md",
+          "result": "clean",
+          "reviewed_at": "2026-10-09T17:28:29+00:00",
+          "source_identity": "git:bd6a9e8911325a44a93b7c269d1cbfd1a54de3d8"
         }
       ],
-      "review_ref": "file:.grilltrack/proof/private-asset-review-20261008.md",
+      "review_ref": "file:.grilltrack/proof/provider-pdf-qualification-20261009.md",
       "review_result": "clean",
-      "review_source_identity": "git:6fb6f6ec4bb4f0d2a5abd814da4dc88c0f75aabf",
+      "review_source_identity": "git:bd6a9e8911325a44a93b7c269d1cbfd1a54de3d8",
       "status": "verified",
       "superseded_by": null,
-      "updated_at": "2026-10-09T02:46:13+00:00",
-      "verification_ref": "file:.grilltrack/proof/private-asset-qualification-20261008.md"
+      "updated_at": "2026-10-09T17:28:29+00:00",
+      "verification_ref": "file:.grilltrack/proof/provider-pdf-qualification-20261009.md"
     }
   ],
   "last_activation": {
-    "at": "2026-10-08T11:23:11+00:00",
+    "at": "2026-10-09T17:19:10+00:00",
     "mechanism": "implicit"
   },
   "last_pause": null,
   "pause": null,
   "recommendation": {
     "alternatives": [],
-    "reason": "Actual public-interface private transport is proven; Block Kit authenticated browser handoff remains absent. Signed Registry/browser acceptance and separate trusted Ship bindings are required before consumer integration. Issue draft is prepared, publication separately gated.",
-    "recommended": "EmDash core/admin owner design qualification of a host-resolved private PDF handoff; agree supported API form and passive viewer isolation/lifetime/filename policy before platform implementation.",
-    "recorded_at": "2026-10-09T02:46:13+00:00"
+    "reason": "The local link path passed both runtime layers and synthetic browser rendering. No current approved PB receipt exists, so actual provider access is unqualified rather than failed; hosted backup stays design only.",
+    "recommended": "Validate one approved current PB sandbox label through browser access, exact-byte download, redirect/privacy checks and original expiry; then scope the trusted Registry consumer binding.",
+    "recorded_at": "2026-10-09T17:28:26+00:00"
   },
   "reconciliation": {
     "plan_id": "ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
@@ -2404,5 +2495,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-09T02:46:13+00:00"
+  "updated_at": "2026-10-09T17:28:29+00:00"
 }

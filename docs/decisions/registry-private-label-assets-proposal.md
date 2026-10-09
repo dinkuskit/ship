@@ -1,5 +1,12 @@
 # Proposal: Registry-only private label assets
 
+October 9 scoped update: Bobby authorized qualifying the existing PB external
+PDF-link path first. The prior exclusion of provider links is reopened only for
+that qualification, not a production privacy or launch approval. See the
+[provider-link qualification](provider-pdf-qualification.md). The private-byte
+platform proposal below remains historical supporting work; it is not a
+prerequisite for an external link and has not been accepted upstream.
+
 Status: **unapproved platform proposal**, researched 2026-10-08. This document
 records a capability gap and proposed acceptance criteria; it does not approve
 an API, authentication policy, implementation, publication, or production use.

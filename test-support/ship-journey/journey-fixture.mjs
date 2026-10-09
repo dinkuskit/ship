@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const ORIGIN = "https://1.1.1.1";
+const PROVIDER_PDF_URL = "https://stg-labels-cls.gcs.pitneybowes.com/usps/fixture/outbound/label/fixture.pdf";
 const ORDER_IDS = Object.fromEntries(["order", "zero", "unknown", "ineligible", "stale", "corrupt", "missing", "large", "opaque", "malformed"].map((name, index) => [name, `order:00000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`]));
 const ORDER = {
   shopId: "fixture-shop", orderId: ORDER_IDS.order, revision: 7, paymentStatus: "paid",
@@ -22,6 +23,7 @@ export function journeyEntrySource() {
   return `
 import { createShipPlugin } from "@dinkuskit/ship/installed";
 const origin = ${JSON.stringify(ORIGIN)};
+const providerPdfUrl = ${JSON.stringify(PROVIDER_PDF_URL)};
 const order = ${JSON.stringify(ORDER)};
 const orderIds = ${JSON.stringify(ORDER_IDS)};
 const shipFrom = ${JSON.stringify(SHIP_FROM)};
@@ -60,11 +62,11 @@ function ports(ctx) {
       return base.json(ctx, "/provider/create", { method: "POST", body: JSON.stringify({ shipment, operationId }) });
     },
     async fetchLabelPdf(url) {
-      if (url !== origin + "/provider/label.pdf") throw new Error("unapproved fixture URL");
+      if (url !== origin + "/provider/label.pdf" && url !== providerPdfUrl) throw new Error("unapproved fixture URL");
       return base.bytes(ctx, "/provider/label.pdf");
     },
     async reconcileLabel(operationId, input) {
-      return base.json(ctx, "/provider/reconcile", { method: "POST", body: JSON.stringify({ operationId, ...input }) });
+    return base.json(ctx, "/provider/reconcile", { method: "POST", body: JSON.stringify({ operationId, ...input }) });
     },
   };
 }
@@ -80,11 +82,36 @@ const plugin = createShipPlugin({
     const { createShipWorkflow } = await import("@dinkuskit/ship/workflow");
     return createShipWorkflow({ store: storeFor(ctx), orderPort: ports(ctx), providerPort: ports(ctx) });
   },
+  providerPdfLink: {
+    mode: "trusted",
+    port: {
+      async links({ operation }) {
+        const { createProviderPdfLinks } = await import("@dinkuskit/ship/provider-pdf-link");
+        return createProviderPdfLinks({ operation });
+      },
+    },
+  },
 });
 plugin.routes.fixture = {
   permission: "plugins:manage", methods: ["POST"], request: { body: "json", maxBytes: 16384 },
   async handler({ input }, ctx) {
     if (input.action === "controls") return base.json(ctx, "/controls", { method: "PUT", body: JSON.stringify(input.controls ?? {}) });
+    if (input.action === "expire-provider-link") {
+      const key = \`ship:v1:\${order.shopId}:\${input.orderId || order.orderId}\`;
+      const current = await ctx.storage.operations.getVersioned(key);
+      if (!current?.value?.label || !current.value.operation) return { expired: false };
+      const value = {
+        ...current.value,
+        label: { ...current.value.label, createdAt: 1, pdfExpiresAt: 1 + 24 * 60 * 60 * 1000 },
+        operation: {
+          ...current.value.operation,
+          createdAt: 1,
+          result: { ...current.value.operation.result, createdAt: 1, pdfExpiresAt: 1 + 24 * 60 * 60 * 1000 },
+        },
+      };
+      await ctx.storage.operations.compareAndSet(key, current.revision, value);
+      return { expired: true };
+    }
     if (input.action === "oversize") {
       await ctx.storage.operations.compareAndSet("fixture-limit-probe", null, { value: "x".repeat(1100000) });
       return { unexpectedlyAccepted: true };

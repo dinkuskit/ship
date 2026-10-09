@@ -12,7 +12,8 @@
   "storage": { "preferences": { "indexes": [] } },
   "admin": {
     "pages": [
-      { "path": "/proof", "label": "Private asset proof", "icon": "file" }
+      { "path": "/proof", "label": "Private asset proof", "icon": "file" },
+      { "path": "/provider-proof", "label": "Provider PDF proof", "icon": "file" }
     ]
   }
 }

@@ -15,7 +15,8 @@
     "./plugin": "./src/plugin.js",
     "./workflow": "./src/shipping-workflow.js",
     "./installed": "./src/installed-workflow.js",
-    "./host-label-assets": "./src/host-label-assets.js"
+    "./host-label-assets": "./src/host-label-assets.js",
+    "./provider-pdf-link": "./src/provider-pdf-link.js"
   },
   "scripts": {
     "test": "node --test",
@@ -23,6 +24,9 @@
     "verify:registry": "node scripts/verify-registry-artifact.mjs",
     "verify:bundle": "node scripts/verify-registry-artifact.mjs --bundle-only",
     "verify:private-assets": "node scripts/verify-private-assets.mjs",
+    "verify:provider-pdf-link": "node scripts/verify-provider-pdf-link.mjs",
+    "verify:provider-pdf-link:registry": "node scripts/verify-private-assets.mjs --provider-link",
+    "verify:provider-pdf-link:runtime": "node scripts/verify-ship-journey.mjs --workerd",
     "dev": "node src/server.js",
     "fixture:proof": "PORT=4328 node test-support/fixture-server.js",
     "verify:sandbox": "node scripts/verify-sandbox-package.mjs",
