@@ -14,6 +14,9 @@
   "vars": {
     "ACCOUNT_ISSUER": "",
     "ACCOUNT_AUDIENCE": "",
-    "ACCOUNT_JWKS_URL": ""
+    "ACCOUNT_JWKS_URL": "",
+    "ACCOUNT_SIGNIN_URL": "",
+    "ACCOUNT_TOKEN_URL": ""
   }
+  // Secret, set with `wrangler secret put`: SHIP_SESSION_SECRET (32+ random characters).
 }

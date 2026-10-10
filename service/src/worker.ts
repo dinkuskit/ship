@@ -1,5 +1,6 @@
 import { createAuthenticator, type ShipScope } from "./auth.js";
 import { ServiceError, toOutcome, type Outcome } from "./errors.js";
+import { handlePage } from "./owner.js";
 import type { StoreShipping } from "./store.js";
 
 export { StoreShipping } from "./store.js";
@@ -74,6 +75,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
   if (url.pathname === "/" && request.method === "GET") {
     return new Response(`${SERVICE_LINE}\n`, { headers: { "content-type": "text/plain; charset=utf-8", ...NO_STORE } });
   }
+  if (url.pathname.startsWith("/stores/") || url.pathname.startsWith("/auth/")) return handlePage(request, env);
   try {
     const matches = ROUTES.filter(route => route.path === url.pathname);
     if (matches.length === 0) throw new ServiceError(404, "NOT_FOUND", "not found");
