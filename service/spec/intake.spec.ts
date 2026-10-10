@@ -61,7 +61,7 @@ test("an unconfigured service refuses every Commerce call", async () => {
 });
 
 test("Commerce's example order is kept under the pass's store, with only the fields Ship uses", async () => {
-  const sent = order({ phone: "555-0100", total: { currency: "USD", minor: "2500" } });
+  const sent = order({ phone: "not kept", total: { currency: "USD", minor: "2500" } });
   (sent.shipTo as Record<string, unknown>).company = "Ignored Co";
   expect(await call("POST", "/v1/orders", sent)).toEqual({ status: 200, json: { orderId: "order:abc", version: 1 } });
   const kept = await store().getOrder("order:abc");
@@ -119,8 +119,8 @@ test("orders Ship can never label are 422, so Commerce waits for the order to ch
 
 test("labels are listed oldest first until Commerce acknowledges them, and repeats acknowledge cleanly", async () => {
   expect(await call("GET", "/v1/labels")).toEqual({ status: 200, json: [] });
-  const first = await store().recordLabel({ orderId: "order:abc", version: 1, carrier: "USPS", tracking: "9400111899223344556677" });
-  const second = await store().recordLabel({ orderId: "order:def", version: 2, carrier: "USPS", tracking: "9400111899223344556688" });
+  const first = await store().recordLabel({ orderId: "order:abc", version: 1, carrier: "USPS", tracking: "EXAMPLE-TRACKING-1" });
+  const second = await store().recordLabel({ orderId: "order:def", version: 2, carrier: "USPS", tracking: "EXAMPLE-TRACKING-2" });
   expect((await call("GET", "/v1/labels")).json).toEqual([first, second]);
   expect(await call("POST", "/v1/labels/ack", { eventId: first.eventId })).toEqual({ status: 200, json: { eventId: first.eventId } });
   expect((await call("POST", "/v1/labels/ack", { eventId: first.eventId })).status).toBe(200);
