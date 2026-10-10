@@ -32,7 +32,7 @@ Other failures:
 
 - `401` for a missing or invalid pass;
 - `403` for a pass without `ship:orders` or a usable `site_id`;
-- `413` for a body over 64 KiB;
+- `413` for a body over 256 KiB;
 - `503` until the three `ACCOUNT_*` settings are set.
 
 ### What Ship keeps from an order

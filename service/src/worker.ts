@@ -5,7 +5,8 @@ import type { StoreShipping } from "./store.js";
 export { StoreShipping } from "./store.js";
 
 export const SERVICE_LINE = "DinkusKit Ship service";
-export const MAX_BODY_BYTES = 64 * 1024;
+// Commerce's largest possible order (100 lines of long multi-byte names) is about 66 KiB.
+export const MAX_BODY_BYTES = 256 * 1024;
 
 type Handler = (store: DurableObjectStub<StoreShipping>, body: unknown) => Promise<Outcome>;
 interface Route { method: string; path: string; scope: ShipScope; handle: Handler }

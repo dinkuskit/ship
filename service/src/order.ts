@@ -77,7 +77,7 @@ function shipTo(value: unknown): ShipTo {
     ...(line2 ? { line2 } : {}),
     city: text(address.city, "shipTo.city", 200),
     ...(region ? { region } : {}),
-    postalCode: text(address.postalCode, "shipTo.postalCode", 20),
+    postalCode: text(address.postalCode, "shipTo.postalCode", 200),
     country: "US",
   };
 }

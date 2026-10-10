@@ -95,6 +95,16 @@ test("a newer version replaces the order, an older retry changes nothing, a repe
   expect(await store().getOrder("order:abc")).toMatchObject({ version: 3, status: "completed", completed: { carrier: "USPS", tracking: "9400" } });
 });
 
+test("Commerce's largest orders fit, and a long ZIP code is kept for the label page to flag", async () => {
+  const name = "長".repeat(160);
+  const lines = Array.from({ length: 100 }, (_, index) => ({ catalogItemId: `item_${index}_${"i".repeat(180)}`, name, quantity: 1, weightOz: 1 }));
+  const shipTo = { name: "名".repeat(200), line1: "番".repeat(200), city: "市".repeat(200), region: "州".repeat(200), postalCode: "1".repeat(200), country: "US" };
+  const sent = order({ lines, shipTo });
+  expect(new TextEncoder().encode(JSON.stringify(sent)).byteLength).toBeGreaterThan(64 * 1024);
+  expect((await call("POST", "/v1/orders", sent)).status).toBe(200);
+  expect((await store().getOrder("order:abc"))?.shipTo.postalCode).toHaveLength(200);
+});
+
 test("orders Ship can never label are 422, so Commerce waits for the order to change", async () => {
   const cases: [Record<string, unknown>, string][] = [
     [order({ shipTo: { ...order().shipTo, country: "CA" } }), "NOT_SERVED"],
@@ -154,5 +164,5 @@ test("requests Commerce never makes are refused before any store is touched", as
   expect((await call("GET", "/v1/orders")).status).toBe(405);
   expect((await call("GET", "/v1/nothing")).status).toBe(404);
   expect((await call("POST", "/v1/orders", "{not json")).status).toBe(400);
-  expect((await call("POST", "/v1/orders", JSON.stringify({ pad: "x".repeat(70 * 1024) }))).status).toBe(413);
+  expect((await call("POST", "/v1/orders", JSON.stringify({ pad: "x".repeat(300 * 1024) }))).status).toBe(413);
 });
