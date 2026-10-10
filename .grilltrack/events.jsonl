@@ -112,3 +112,5 @@
 {"action": "decision_implemented", "at": "2026-10-10T23:27:21+00:00", "data": {"decision_id": "ship-hosted-service-001"}, "event_id": "234676de-4235-4785-afb6-c893f4437183"}
 {"action": "decision_implemented", "at": "2026-10-10T23:27:21+00:00", "data": {"decision_id": "ship-order-intake-001"}, "event_id": "589760c0-43c5-4615-b71d-24d710b05bd9"}
 {"action": "decision_verified", "at": "2026-10-10T23:27:21+00:00", "data": {"decision_id": "ship-order-intake-001"}, "event_id": "c20bb06b-2a1b-4983-9ba2-c769951d5332"}
+{"action": "decision_proposed", "at": "2026-10-10T23:29:05+00:00", "data": {"decision_id": "ship-pb-account-001"}, "event_id": "874eb573-9e5c-41c1-8786-5aaf4efc9598"}
+{"action": "decision_locked", "at": "2026-10-10T23:29:05+00:00", "data": {"decision_id": "ship-pb-account-001"}, "event_id": "68bae5f8-7450-4409-991f-1eff89f28ff5"}
