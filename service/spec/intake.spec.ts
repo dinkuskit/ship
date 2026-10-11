@@ -169,3 +169,13 @@ test("requests Commerce never makes are refused before any store is touched", as
   expect((await call("POST", "/v1/orders", "{not json")).status).toBe(400);
   expect((await call("POST", "/v1/orders", JSON.stringify({ pad: "x".repeat(300 * 1024) }))).status).toBe(413);
 });
+
+test("the store's Site title is kept for the shipped email, and a bad one never stops the order", async () => {
+  expect((await call("POST", "/v1/orders", order({ storeName: "Demo Site Title" }))).status).toBe(200);
+  expect((await store().getOrder("order:abc"))?.storeName).toBe("Demo Site Title");
+  for (const [version, storeName] of [[2, 42], [3, "line\nbreak"], [4, "x".repeat(201)], [5, "   "], [6, "line\u2028separator"]] as const) {
+    expect((await call("POST", "/v1/orders", order({ version, storeName }))).status).toBe(200);
+    expect((await store().getOrder("order:abc"))?.storeName).toBeUndefined();
+  }
+  expect((await store().getSettings()).storeName).toBe("Demo Site Title");
+});

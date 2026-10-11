@@ -30,6 +30,8 @@ export interface ShipOrder {
   test: boolean;
   shipTo: ShipTo;
   email: string | null;
+  /** The store's EmDash Site title, used as the shipped email's sender name. */
+  storeName?: string;
   completed: { at: string; carrier?: string; tracking?: string } | null;
   lines: OrderLine[];
 }
@@ -137,6 +139,9 @@ export function parseShipOrder(value: unknown): ShipOrder {
   const status = body.status;
   const email = body.email === null || body.email === undefined ? null : text(body.email, "email", 254);
   if (email !== null && !/^[^\s@]+@[^\s@]+$/.test(email)) invalid("email", "must be an email address");
+  // Only the email's sender name: a missing or unusable one never stops a label.
+  const storeName = typeof body.storeName === "string" ? body.storeName.trim() : "";
+  const keepName = storeName.length > 0 && storeName.length <= 200 && !NOT_ONE_LINE.test(storeName);
   return {
     orderId: text(body.orderId, "orderId", 200),
     number: body.number === null || body.number === undefined ? null : whole(body.number, "number", 1, Number.MAX_SAFE_INTEGER),
@@ -145,6 +150,7 @@ export function parseShipOrder(value: unknown): ShipOrder {
     test: body.test,
     shipTo: shipTo(body.shipTo),
     email,
+    ...(keepName ? { storeName } : {}),
     completed: completed(body.completed, status),
     lines: body.lines.map(line),
   };

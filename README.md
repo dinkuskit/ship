@@ -13,7 +13,8 @@ provider actions remain disabled. This is not a signed Registry release.
 
 The hosted Ship service for ship.dinkuskit.com lives in [`service/`](service/README.md).
 It is the v1 path for Commerce orders (GrillTrack `ship-hosted-service-001`, approved; its ledger record lands in a follow-up PR).
-Order intake is built; the owner's label page, Pitney Bowes purchase and the
+Order intake and the owner's label page (Sign in with DinkusKit.com, settings,
+practice labels for TEST orders) are built; Pitney Bowes purchase and the
 shipped email follow. Nothing is deployed.
 
 - [Charter](docs/CHARTER.md)
