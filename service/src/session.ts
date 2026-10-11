@@ -1,4 +1,4 @@
-import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
+import { createRemoteJWKSet, errors, jwtVerify, type JWTVerifyGetKey } from "jose";
 import { ServiceError } from "./errors.js";
 import { NOT_ONE_LINE } from "./order.js";
 
@@ -88,7 +88,20 @@ async function sessionCookie(env: Env, site: string, sessionId: string): Promise
 
 type TokenAnswer = { kind: "pass"; pass: OwnerPass; refreshToken: string } | { kind: "refused" } | { kind: "unavailable" };
 
-/** Asks DinkusKit.com's token route (signin-contract steps 4 and "Staying signed in"); never throws. */
+/** DinkusKit.com answered, and its pass is not good for this store and person. */
+class PassRefused extends Error {}
+
+/**
+ * Pass problems that mean "no" rather than "DinkusKit.com is having trouble". Anything
+ * else (a key set that would not load, a timeout, a garbled answer) is treated as an
+ * outage: the session keeps its grace window, which never extends a session.
+ */
+const REFUSED_PASS_ERRORS = [errors.JWTExpired, errors.JWTClaimValidationFailed, errors.JWTInvalid, errors.JWSInvalid, errors.JWSSignatureVerificationFailed];
+
+/**
+ * Asks DinkusKit.com's token route (signin-contract steps 4 and "Staying signed in"); never throws.
+ * Only a 4xx answer or a pass that fails its checks is "refused", which ends the session.
+ */
 async function askToken(env: Env, body: object, site: string, fetcher: typeof fetch): Promise<TokenAnswer> {
   try {
     const answer = await fetcher(env.ACCOUNT_TOKEN_URL, {
@@ -100,10 +113,10 @@ async function askToken(env: Env, body: object, site: string, fetcher: typeof fe
     if (!answer.ok) return { kind: "unavailable" };
     const token = await answer.json() as { access_token?: unknown; refresh_token?: unknown };
     if (typeof token.access_token !== "string" || typeof token.refresh_token !== "string" ||
-        token.refresh_token.length < 32 || token.refresh_token.length > 512) return { kind: "refused" };
+        token.refresh_token.length < 32 || token.refresh_token.length > 512) return { kind: "unavailable" };
     return { kind: "pass", pass: await verifyOwnerPass(env, token.access_token, site), refreshToken: token.refresh_token };
   } catch (error) {
-    return error instanceof TypeError ? { kind: "unavailable" } : { kind: "refused" };
+    return error instanceof PassRefused ? { kind: "refused" } : { kind: "unavailable" };
   }
 }
 
@@ -158,13 +171,19 @@ export function ownerPassKeys(env: Env): JWTVerifyGetKey {
 export interface OwnerPass { site: string; uid: string; email: string }
 
 async function verifyOwnerPass(env: Env, token: string, site: string): Promise<OwnerPass> {
-  const { payload } = await jwtVerify(token, ownerPassKeys(env), {
-    issuer: env.ACCOUNT_ISSUER, audience: env.ACCOUNT_AUDIENCE, algorithms: ["ES256"], requiredClaims: ["exp", "iat", "sub"], maxTokenAge: "10m",
-  });
+  let payload;
+  try {
+    ({ payload } = await jwtVerify(token, ownerPassKeys(env), {
+      issuer: env.ACCOUNT_ISSUER, audience: env.ACCOUNT_AUDIENCE, algorithms: ["ES256"], requiredClaims: ["exp", "iat", "sub"], maxTokenAge: "10m",
+    }));
+  } catch (error) {
+    if (REFUSED_PASS_ERRORS.some(kind => error instanceof kind)) throw new PassRefused("owner pass refused", { cause: error });
+    throw error;
+  }
   const text = (value: unknown, max: number) => typeof value === "string" && value.length > 0 && value.length <= max && !NOT_ONE_LINE.test(value);
   if (payload.site_id !== site || typeof payload.scope !== "string" || !payload.scope.split(" ").includes("ship:labels") ||
       !text(payload.uid, 200) || !text(payload.email, 254)) {
-    throw new Error("owner pass does not match");
+    throw new PassRefused("owner pass does not match");
   }
   return { site, uid: payload.uid as string, email: payload.email as string };
 }

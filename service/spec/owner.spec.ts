@@ -9,25 +9,29 @@ let site: string;
 let issuer: string;
 let sessionKey: string;
 let privateKey: CryptoKey;
+let signingKey: CryptoKey;
 let ownerClaims: Record<string, unknown>;
 let tokenAnswer: (body: Record<string, string>) => Promise<Response>;
 let refreshes: number;
+let jwksUrl: string;
 
 const configured = () => ({
-  ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: `${issuer}/jwks`,
+  ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: jwksUrl,
   ACCOUNT_SIGNIN_URL: `${issuer}/ship-sign-in`, ACCOUNT_TOKEN_URL: `${issuer}/token`, SHIP_SESSION_SECRET: sessionKey,
 }) as unknown as Env;
 
 const pass = (claims: Record<string, unknown>) => new SignJWT(claims)
   .setProtectedHeader({ alg: "ES256", kid: "synthetic" }).setIssuer(issuer).setAudience("dinkus-ship")
-  .setSubject("synthetic-business").setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  .setSubject("synthetic-business").setIssuedAt().setExpirationTime("5m").sign(signingKey);
 
 beforeEach(async () => {
   site = `site-${crypto.randomUUID()}`;
   issuer = `https://accounts-${crypto.randomUUID()}.example.invalid`;
+  jwksUrl = `${issuer}/jwks`;
   sessionKey = `${crypto.randomUUID()}${crypto.randomUUID()}`;
   const keys = await generateKeyPair("ES256");
   privateKey = keys.privateKey;
+  signingKey = privateKey;
   const jwk = { ...await exportJWK(keys.publicKey), kid: "synthetic", alg: "ES256", use: "sig" };
   ownerClaims = { site_id: site, scope: "ship:labels", uid: "user-1", email: "owner@example.test" };
   refreshes = 0;
@@ -35,6 +39,7 @@ beforeEach(async () => {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(String(input)).href;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
+    if (url === `${issuer}/jwks-down`) return new Response("busy", { status: 503 });
     if (url === `${issuer}/token`) return tokenAnswer(JSON.parse(String(init?.body)));
     throw new Error(`unexpected fetch ${url}`);
   });
@@ -309,4 +314,22 @@ test("the shipped email's reply-to is the owner's to change, and the sender name
   await signedIn();
   expect((await shipStore().getSettings()).replyTo).toBe("help@example.test");
   expect(await (await request("GET", `/stores/${site}/settings`, { cookie })).text()).toContain("Demo Site Title");
+});
+
+test("a key set DinkusKit.com cannot serve right now keeps the session in its grace window", async () => {
+  const cookie = await signedIn();
+  await age(6 * 60);
+  jwksUrl = `${issuer}/jwks-down`;
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
+  await age(15 * 60);
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
+});
+
+test("a pass DinkusKit.com did not sign ends the session at the next check", async () => {
+  const cookie = await signedIn();
+  await age(6 * 60);
+  signingKey = (await generateKeyPair("ES256")).privateKey;
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
+  signingKey = privateKey;
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
 });
