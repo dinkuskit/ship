@@ -2,9 +2,9 @@
 
 The hosted Ship service for ship.dinkuskit.com. It runs as a Cloudflare Worker with one SQLite Durable Object per store, like the Payments and Coupons services. GrillTrack decisions: `ship-hosted-service-001` and `ship-order-intake-001` (approved by Ronald; their ledger records land in a follow-up PR).
 
-Status: order intake for Commerce and the owner's label page are built. Not built yet:
+Status: order intake for Commerce, the owner's label page, and Pitney Bowes sandbox labels (prices, buy, cancel for a refund) are built. Not built yet:
 
-- Pitney Bowes label purchase (a live order answers "Postage is not connected yet");
+- live Pitney Bowes postage (until the sandbox settings below are set, a real order answers "Pitney Bowes is not connected to Ship yet");
 - the shipped email.
 
 Nothing here is deployed.
