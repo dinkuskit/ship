@@ -516,6 +516,7 @@ export class StoreShipping extends DurableObject<Env> {
         order.orderId, order.version, JSON.stringify(order), now, now);
       if (order.storeName) this.setMeta("store_name", order.storeName);
       await this.queueShippedEmail(order);
+      await this.wakeForEmails();
       return ok({ orderId: order.orderId, version: order.version });
     } catch (error) {
       return toOutcome(error);
@@ -533,9 +534,19 @@ export class StoreShipping extends DurableObject<Env> {
     const connectedAt = Date.parse(this.meta("connected_at") ?? "");
     if (!Number.isFinite(completedAt) || completedAt < connectedAt - BEFORE_CONNECT_MS) return;
     const now = Date.now();
-    const added = this.sql.exec(`INSERT OR IGNORE INTO shipped_emails (order_id, completed_at, state, next_at, created_at) VALUES (?, ?, 'pending', ?, ?)`,
-      order.orderId, order.completed.at, now, now).rowsWritten;
-    if (added && this.emailSender()) await this.wakeAt(now);
+    this.sql.exec(`INSERT OR IGNORE INTO shipped_emails (order_id, completed_at, state, next_at, created_at) VALUES (?, ?, 'pending', ?, ?)`,
+      order.orderId, order.completed.at, now, now);
+  }
+
+  /**
+   * Makes sure an alarm is set for waiting emails once sending is set up. Commerce
+   * calls Ship on every sync, so emails queued before the deploy set up sending
+   * go out on the first call after it does.
+   */
+  private async wakeForEmails(): Promise<void> {
+    if (!this.emailSender()) return;
+    const next = this.sql.exec<{ next_at: number | null }>("SELECT MIN(next_at) AS next_at FROM shipped_emails WHERE state = 'pending'").one().next_at;
+    if (next !== null) await this.wakeAt(next);
   }
 
   /** The email binding, once the deploy has set it up; null leaves emails waiting. */
@@ -591,6 +602,7 @@ export class StoreShipping extends DurableObject<Env> {
 
   /** Labels Commerce has not acknowledged, oldest first. */
   async listLabels(): Promise<Outcome> {
+    await this.wakeForEmails();
     const rows = this.sql.exec<{ event_id: string; order_id: string; version: number; carrier: string; tracking: string }>(
       "SELECT event_id, order_id, version, carrier, tracking FROM label_events WHERE acked_at IS NULL ORDER BY seq LIMIT ?",
       LABELS_PER_LIST).toArray();

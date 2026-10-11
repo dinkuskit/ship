@@ -120,3 +120,17 @@ test("an order with no email address is skipped, and a failing email service is 
   // The order itself never changed because of the email.
   expect((await store().getOrder("order:abc"))!.status).toBe("completed");
 });
+
+test("emails queued before sending was set up go out on Commerce's next call after it is", async () => {
+  await receive(order());
+  await receive(completed(2, new Date().toISOString()));
+  // Sending is not set up in these tests, so nothing is scheduled yet.
+  expect(await runInDurableObject(store(), async (_, state) => state.storage.getAlarm())).toBeNull();
+  const scheduled = await runInDurableObject(store(), async (instance: StoreShipping, state) => {
+    (instance as unknown as { emailSender: () => SendEmail }).emailSender = () => ({ send: async () => ({}) }) as unknown as SendEmail;
+    await instance.listLabels();
+    return state.storage.getAlarm();
+  });
+  expect(scheduled).not.toBeNull();
+  expect(await sendDue()).toHaveLength(1);
+});
