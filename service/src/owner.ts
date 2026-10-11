@@ -1,7 +1,7 @@
 import { ServiceError, type Outcome } from "./errors.js";
 import { html, messagePage, orderPage, ordersPage, settingsPage } from "./pages.js";
 import { finishSignIn, readSession, requireSameOrigin, signInConfigured, signOut, startSignIn, type OwnerSession } from "./session.js";
-import type { StoreShipping } from "./store.js";
+import type { Quotes, StoreShipping } from "./store.js";
 
 /** Store ids, order ids and record ids as they appear in a path segment. */
 const SEGMENT = "([A-Za-z0-9._:%-]{1,600})";
@@ -43,7 +43,18 @@ const ROUTES: PageRoute[] = [
       if (outcome.ok) return see(`${storePath(site)}/orders/${encodeURIComponent(params[0]!)}`);
       const summary = await store.orderSummary(params[0]!);
       if (!summary) return messagePage("Order not found", outcome.message, { href: `${storePath(site)}/orders`, text: "Back to orders" }, 404);
-      return html(orderPage(site, session.email, summary, await store.getSettings(), outcome.message), errorStatus(outcome));
+      return html(orderPage(site, session.email, summary, await store.getSettings(),
+        { error: outcome.message, fields, askBuyAgain: outcome.code === "CHECK_PITNEY_BOWES" }), errorStatus(outcome));
+    },
+  },
+  {
+    method: "POST", pattern: new RegExp(`^/stores/${SEGMENT}/orders/${SEGMENT}/prices$`),
+    handle: async ({ site, session, store, params, fields }) => {
+      const outcome = await outcomeOf(store.quoteLabel({ orderId: params[0]!, fields }));
+      const summary = await store.orderSummary(params[0]!);
+      if (!summary) return messagePage("Order not found", "Ship has not received this order.", { href: `${storePath(site)}/orders`, text: "Back to orders" }, 404);
+      const form = outcome.ok ? { fields, quotes: outcome.body as Quotes } : { fields, error: outcome.message };
+      return html(orderPage(site, session.email, summary, await store.getSettings(), form), outcome.ok ? 200 : errorStatus(outcome));
     },
   },
   {
@@ -51,6 +62,7 @@ const ROUTES: PageRoute[] = [
     handle: async ({ store, params }) => {
       const pdf = await store.labelPdf(params[0]!);
       if (!pdf) return messagePage("Label not found", "This store has no such label.", undefined, 404);
+      if (pdf === "not_ready") return messagePage("Label PDF not ready", "The label is bought, but Ship could not download its PDF from Pitney Bowes yet. Try again in a minute.", undefined, 503);
       return new Response(pdf, { headers: {
         "content-type": "application/pdf", "content-disposition": `inline; filename="label-${params[0]!.replace(/[^A-Za-z0-9_-]/g, "")}.pdf"`,
         "cache-control": "private, no-store", "x-content-type-options": "nosniff",

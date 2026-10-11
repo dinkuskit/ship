@@ -16,7 +16,9 @@
     "ACCOUNT_AUDIENCE": "",
     "ACCOUNT_JWKS_URL": "",
     "ACCOUNT_SIGNIN_URL": "",
-    "ACCOUNT_TOKEN_URL": ""
+    "ACCOUNT_TOKEN_URL": "",
+    "PB_ENVIRONMENT": ""
   }
-  // Secret, set with `wrangler secret put`: SHIP_SESSION_SECRET (32+ random characters).
+  // Secrets, set with `wrangler secret put`: SHIP_SESSION_SECRET (32+ random characters);
+  // PB_API_KEY, PB_API_SECRET and PB_SHIPPER_ID (Pitney Bowes sandbox, set by Ronald).
 }

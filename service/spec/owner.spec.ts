@@ -3,6 +3,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
+import { pitneyConfig } from "../src/pitney";
 
 const ORIGIN = "https://ship.example.invalid";
 let site: string;
@@ -14,6 +15,29 @@ let ownerClaims: Record<string, unknown>;
 let tokenAnswer: (body: Record<string, string>) => Promise<Response>;
 let refreshes: number;
 let jwksUrl: string;
+
+const PB = "https://shipping-api-sandbox.pitneybowes.com";
+const LABEL_URL = "https://stg-labels-cls.gcs.pitneybowes.com/usps/sample/outbound/label/sample.pdf";
+const PB_PRICES: Record<string, number> = { UGA: 5.1, PM: 9.35, EM: 31.2 };
+interface PbCall { method: string; url: URL; headers: Headers; body: any }
+let pbCalls: PbCall[];
+/** The stand-in Pitney Bowes sandbox; a test swaps in its own answer for one route. */
+let pbAnswer: (call: PbCall) => Response | Promise<Response>;
+const sandbox = (call: PbCall): Response => {
+  const route = `${call.method} ${call.url.pathname}`;
+  if (route === "POST /oauth/token") return Response.json({ access_token: "synthetic-pb-pass", tokenType: "BearerToken", expiresIn: 36000 });
+  if (route === "POST /shippingservices/v1/rates") return Response.json({ rates: [{ ...call.body.rates[0], totalCarrierCharge: PB_PRICES[call.body.rates[0].serviceId], currencyCode: "USD" }] });
+  if (route === "POST /shippingservices/v1/shipments") return Response.json(pbLabel(call.body.rates[0].serviceId));
+  if (route === "GET /shippingservices/v1/shipments") return Response.json({ errors: [{ errorCode: "PB-SHIPMENT-NOT-FOUND", message: "not found" }] }, { status: 404 });
+  if (call.method === "DELETE" && call.url.pathname.startsWith("/shippingservices/v1/shipments/")) return Response.json({ carrier: "USPS", status: "INITIATED", totalCarrierCharge: 9.35 });
+  if (call.url.href === LABEL_URL) return new Response("%PDF-1.4 sandbox label", { headers: { "content-type": "application/pdf" } });
+  throw new Error(`unexpected Pitney Bowes call ${route}`);
+};
+const pbLabel = (serviceId: string) => ({
+  shipmentId: "SANDBOX-SHIPMENT-A", parcelTrackingNumber: "SANDBOX-TRACKING-A",
+  rates: [{ carrier: "USPS", serviceId, parcelType: "PKG", totalCarrierCharge: PB_PRICES[serviceId], currencyCode: "USD" }],
+  documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+});
 
 const configured = () => ({
   ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: jwksUrl,
@@ -35,12 +59,20 @@ beforeEach(async () => {
   const jwk = { ...await exportJWK(keys.publicKey), kid: "synthetic", alg: "ES256", use: "sig" };
   ownerClaims = { site_id: site, scope: "ship:labels", uid: "user-1", email: "owner@example.test" };
   refreshes = 0;
+  pbCalls = [];
+  pbAnswer = sandbox;
   tokenAnswer = async () => Response.json({ access_token: await pass(ownerClaims), token_type: "Bearer", expires_in: 300, refresh_token: `refresh-${++refreshes}-${"r".repeat(40)}` });
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(String(input)).href;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
     if (url === `${issuer}/jwks-down`) return new Response("busy", { status: 503 });
     if (url === `${issuer}/token`) return tokenAnswer(JSON.parse(String(init?.body)));
+    if (url.startsWith(`${PB}/`) || url === LABEL_URL) {
+      const body = typeof init?.body === "string" && init.body.startsWith("{") ? JSON.parse(init.body) : init?.body;
+      const call = { method: init?.method ?? "GET", url: new URL(url), headers: new Headers(init?.headers), body };
+      pbCalls.push(call);
+      return pbAnswer(call);
+    }
     throw new Error(`unexpected fetch ${url}`);
   });
 });
@@ -200,15 +232,12 @@ test("a TEST order goes from Commerce to a practice label to a label event Comme
   expect(await labels()).toHaveLength(2);
 });
 
-test("labels are refused for a changed, live, unaddressable or completed order", async () => {
+test("labels are refused for a changed, unaddressable or completed order", async () => {
   const cookie = await signedIn();
   const boxId = await setUp(cookie);
   const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
   const buy = (form: Record<string, string> = {}) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "20", service: "GA", ...form } });
-  await sendOrder({ test: false });
-  const live = await buy();
-  expect(live.status).toBe(409);
-  expect(await live.text()).toContain("Pitney Bowes comes in the next Ship update");
+  await sendOrder();
   await sendOrder({ version: 2, shipTo: { name: "A", line1: "B", city: "C", postalCode: "00901", country: "US", region: "PR" } });
   expect((await buy()).status).toBe(409);
   expect(await (await buy({ version: "2" })).text()).toContain("customs forms");
@@ -332,4 +361,125 @@ test("a pass DinkusKit.com did not sign ends the session at the next check", asy
   expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
   signingKey = privateKey;
   expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
+});
+
+const creates = () => pbCalls.filter(call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments");
+
+async function liveOrder() {
+  await sendOrder({ test: false });
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  const buy = (form: Record<string, string> = {}) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", ...form } });
+  return { cookie, boxId, orderPath, buy };
+}
+
+test("a real order's label is bought from the store's Pitney Bowes postage account and can be cancelled for a refund", async () => {
+  const { cookie, boxId, orderPath, buy } = await liveOrder();
+  const prices = await request("POST", `${orderPath}/prices`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM" } });
+  expect(prices.status).toBe(200);
+  const pricePage = await prices.text();
+  expect(pricePage).toContain("USPS Ground Advantage: $5.10");
+  expect(pricePage).toContain("USPS Priority Mail: $9.35");
+  expect(pricePage).toContain("USPS Priority Mail Express: $31.20");
+  expect(pricePage).toMatch(/<option value="PM" selected>/);
+
+  expect((await buy()).status).toBe(303);
+  const [create] = creates();
+  expect(create!.headers.get("x-pb-transactionid")).toMatch(/^shp[a-z0-9]{22}$/);
+  expect(create!.headers.get("authorization")).toBe("Bearer synthetic-pb-pass");
+  expect(create!.body.shipmentOptions).toEqual([{ name: "SHIPPER_ID", value: "synthetic-shipper" }]);
+  expect(create!.body.rates).toEqual([{ carrier: "USPS", serviceId: "PM", parcelType: "PKG", specialServices: [{ specialServiceId: "DelCon" }] }]);
+  expect(create!.body.parcel).toEqual({ weight: { unitOfMeasurement: "OZ", weight: 28 }, dimension: { unitOfMeasurement: "IN", length: 8, width: 6, height: 4 } });
+  expect(create!.body.fromAddress).toMatchObject({ name: "Demo Store", stateProvince: "NY", postalCode: "10001", countryCode: "US" });
+  expect(create!.body.toAddress).toMatchObject({ name: "Demo Shopper", addressLines: ["1 Example Way"], stateProvince: "CA", postalCode: "90000" });
+  expect(await labels()).toMatchObject([{ orderId: "order:abc", version: 1, carrier: "USPS", tracking: "SANDBOX-TRACKING-A" }]);
+
+  const label = (await shipStore().orderSummary("order:abc"))!.labels[0]!;
+  expect(label).toMatchObject({ test: false, priceCents: 935, status: "bought" });
+  const pdf = await request("GET", `/stores/${site}/labels/${label.labelId}.pdf`, { cookie });
+  expect(await pdf.text()).toBe("%PDF-1.4 sandbox label");
+  expect(pbCalls.filter(call => call.url.href === LABEL_URL)).toHaveLength(1);
+  expect(await (await request("GET", orderPath, { cookie })).text()).toContain("$9.35");
+  expect((await buy()).status).toBe(409);
+
+  expect((await request("POST", `/stores/${site}/labels/${label.labelId}/cancel`, { cookie })).status).toBe(303);
+  const cancel = pbCalls.find(call => call.method === "DELETE")!;
+  expect(cancel.url.pathname).toBe("/shippingservices/v1/shipments/SANDBOX-SHIPMENT-A");
+  expect(cancel.url.searchParams.get("cancelInitiator")).toBe("SHIPPER");
+  expect((await shipStore().orderSummary("order:abc"))!.labels[0]).toMatchObject({ status: "cancelled", refund: "INITIATED" });
+  expect(await (await request("GET", orderPath, { cookie })).text()).toContain("USPS refunds your postage account");
+});
+
+test("Pitney Bowes refusing a label buys nothing and tells the owner why", async () => {
+  const { buy } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments"
+    ? Response.json({ errors: [{ errorCode: "PB-SYNTHETIC", message: "Insufficient funds in the postage account." }] }, { status: 400 })
+    : sandbox(call);
+  const refused = await buy();
+  expect(refused.status).toBe(422);
+  expect(await refused.text()).toContain("Pitney Bowes said: Insufficient funds in the postage account.");
+  expect(await labels()).toEqual([]);
+  pbAnswer = sandbox;
+  expect((await buy()).status).toBe(303);
+  expect(creates()).toHaveLength(2);
+});
+
+test("when Pitney Bowes's answer is lost, Ship finds the label it bought instead of buying again", async () => {
+  const { buy } = await liveOrder();
+  pbAnswer = call => {
+    if (call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments") throw new Error("connection reset");
+    if (call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments") return Response.json(pbLabel("PM"));
+    return sandbox(call);
+  };
+  const lost = await buy();
+  expect(lost.status).toBe(502);
+  expect(await lost.text()).toContain("does not buy a second label without asking");
+  expect(await labels()).toEqual([]);
+  expect((await buy({ service: "GA" })).status).toBe(303);
+  expect(creates()).toHaveLength(1);
+  const lookup = pbCalls.find(call => call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments")!;
+  expect(lookup.url.searchParams.get("originalTransactionId")).toBe(creates()[0]!.headers.get("x-pb-transactionid"));
+  expect(await labels()).toMatchObject([{ tracking: "SANDBOX-TRACKING-A" }]);
+  // The label is the one Pitney Bowes sold (Priority Mail), not the service on the second form.
+  expect((await shipStore().orderSummary("order:abc"))!.labels).toMatchObject([{ service: "PM", priceCents: 935 }]);
+});
+
+test("when Pitney Bowes has no record of a lost purchase, the owner decides whether to buy again", async () => {
+  const { buy } = await liveOrder();
+  pbAnswer = call => {
+    if (call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments") return new Response("gateway timeout", { status: 504 });
+    return sandbox(call);
+  };
+  expect((await buy()).status).toBe(502);
+  pbAnswer = sandbox;
+  const ask = await buy();
+  expect(ask.status).toBe(409);
+  expect(await ask.text()).toContain('name="buyAgain"');
+  expect(creates()).toHaveLength(1);
+  expect((await buy({ buyAgain: "yes" })).status).toBe(303);
+  expect(creates()).toHaveLength(2);
+  expect(creates()[1]!.headers.get("x-pb-transactionid")).not.toBe(creates()[0]!.headers.get("x-pb-transactionid"));
+  expect(await labels()).toHaveLength(1);
+});
+
+test("a label whose PDF Pitney Bowes could not hand over yet is fetched when opened", async () => {
+  const { cookie, buy } = await liveOrder();
+  pbAnswer = call => call.url.href === LABEL_URL ? new Response("busy", { status: 503 }) : sandbox(call);
+  expect((await buy()).status).toBe(303);
+  expect(await labels()).toHaveLength(1);
+  const label = (await shipStore().orderSummary("order:abc"))!.labels[0]!;
+  const waiting = await request("GET", `/stores/${site}/labels/${label.labelId}.pdf`, { cookie });
+  expect(waiting.status).toBe(503);
+  expect(await waiting.text()).toContain("Label PDF not ready");
+  pbAnswer = sandbox;
+  expect(await (await request("GET", `/stores/${site}/labels/${label.labelId}.pdf`, { cookie })).text()).toBe("%PDF-1.4 sandbox label");
+});
+
+test("postage stays off until the Pitney Bowes sandbox keys are all set", () => {
+  const keys = { PB_ENVIRONMENT: "sandbox", PB_API_KEY: "k", PB_API_SECRET: "s", PB_SHIPPER_ID: "m" };
+  expect(pitneyConfig(keys as unknown as Env)).toEqual({ apiKey: "k", apiSecret: "s", shipperId: "m" });
+  for (const off of [{ PB_ENVIRONMENT: "" }, { PB_ENVIRONMENT: "live" }, { PB_SHIPPER_ID: "" }, { PB_API_SECRET: undefined }]) {
+    expect(pitneyConfig({ ...keys, ...off } as unknown as Env)).toBeNull();
+  }
 });
