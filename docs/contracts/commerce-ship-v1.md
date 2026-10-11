@@ -1,5 +1,15 @@
 # Minimal Commerce ↔ Ship contract (document, not code)
 
+> **Superseded for the wire format (2026-10-10).** Commerce now pushes each
+> order version to the hosted service at `https://ship.dinkuskit.com`
+> (GrillTrack `ship-hosted-service-001`, `ship-order-intake-001`; ledger records
+> follow in a later PR). The exact
+> fields are in [service/README.md](../../service/README.md) and Commerce's
+> `docs/contracts/commerce-handoffs.md`. Name mapping: `orderId` is
+> `commerce_order_id`, `version` is `order_revision`, and the store pass's
+> `site_id` is `shop_id`. The ownership, idempotency and money-separation
+> rules below still apply.
+
 Recommended v1 document contract. Ship must not require Inventory. Commerce
 remains source of paid money. Pitney Bowes is the selected provider direction
 for the next integration boundary, with merchant-managed and merchant-funded
@@ -48,15 +58,17 @@ resolve unknown.
 Ship accepts a fulfillment destination only after Commerce records shopper
 address consent (Checkout collection or an explicit merchant edit).
 
-Minimized recipient data:
+Minimized recipient data, each field sent for a reason:
 
-- name
-- company (optional)
-- address lines, city, region, postal code
+- name, address lines, city, region, postal code: the label
 - country (`US` for approved v1)
-- phone only if the selected service requires it
+- the shopper's email: Ship sends the shipped email
+- the box lines (item name, quantity, weight, price paid per unit): package
+  weight, packing slips and declared value
 
-Do not send cart contents, payment instruments, or full customer profile.
+Never send payment instruments, billing address, order totals, tax, phone
+or the full customer profile. The rule follows Shopify's: only the minimum
+personal data required.
 
 ## Package, origin, service
 
@@ -96,6 +108,9 @@ Advantage and Priority Mail only.
 Automatic purchase on packed/ready is out of v1.
 
 ## Money
+
+Commerce sends Ship only the price paid per unit on each line (v1). The
+order-level fields below stay in Commerce and are not sent.
 
 Commerce fields, immutable after payment:
 

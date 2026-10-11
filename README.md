@@ -11,6 +11,11 @@ sandbox package now renders Ship settings through pinned EmDash 1.2.0.
 Commerce orders are unavailable until the authorized Core handoff exists;
 provider actions remain disabled. This is not a signed Registry release.
 
+The hosted Ship service for ship.dinkuskit.com lives in [`service/`](service/README.md).
+It is the v1 path for Commerce orders (GrillTrack `ship-hosted-service-001`, approved; its ledger record lands in a follow-up PR).
+Order intake is built; the owner's label page, Pitney Bowes purchase and the
+shipped email follow. Nothing is deployed.
+
 - [Charter](docs/CHARTER.md)
 - [USPS feasibility research, 2026-09-30](docs/research/usps-feasibility-20260930.md)
 - [Minimal Commerce–Ship contract](docs/contracts/commerce-ship-v1.md)
