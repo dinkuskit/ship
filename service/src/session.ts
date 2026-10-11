@@ -1,5 +1,6 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
 import { ServiceError } from "./errors.js";
+import { NOT_ONE_LINE } from "./order.js";
 
 /**
  * Ship stays signed in for as long as the person stays signed in to DinkusKit.com
@@ -160,7 +161,7 @@ async function verifyOwnerPass(env: Env, token: string, site: string): Promise<O
   const { payload } = await jwtVerify(token, ownerPassKeys(env), {
     issuer: env.ACCOUNT_ISSUER, audience: env.ACCOUNT_AUDIENCE, algorithms: ["ES256"], requiredClaims: ["exp", "iat", "sub"], maxTokenAge: "10m",
   });
-  const text = (value: unknown, max: number) => typeof value === "string" && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/.test(value);
+  const text = (value: unknown, max: number) => typeof value === "string" && value.length > 0 && value.length <= max && !NOT_ONE_LINE.test(value);
   if (payload.site_id !== site || typeof payload.scope !== "string" || !payload.scope.split(" ").includes("ship:labels") ||
       !text(payload.uid, 200) || !text(payload.email, 254)) {
     throw new Error("owner pass does not match");

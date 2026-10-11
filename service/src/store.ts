@@ -36,7 +36,7 @@ function refuse(code: string, message: string, status = 400): never {
 function formText(fields: Fields, key: string, label: string, max: number, optional = false): string | undefined {
   const value = typeof fields[key] === "string" ? (fields[key] as string).trim() : "";
   if (!value) return optional ? undefined : refuse("INVALID_INPUT", `${label} is required.`);
-  if (value.length > max || /[\u0000-\u001f\u007f]/.test(value)) refuse("INVALID_INPUT", `${label} must be one line of at most ${max} characters.`);
+  if (value.length > max || NOT_ONE_LINE.test(value)) refuse("INVALID_INPUT", `${label} must be one line of at most ${max} characters.`);
   return value;
 }
 

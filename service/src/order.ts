@@ -141,7 +141,7 @@ export function parseShipOrder(value: unknown): ShipOrder {
   if (email !== null && !/^[^\s@]+@[^\s@]+$/.test(email)) invalid("email", "must be an email address");
   // Only the email's sender name: a missing or unusable one never stops a label.
   const storeName = typeof body.storeName === "string" ? body.storeName.trim() : "";
-  const keepName = storeName.length > 0 && storeName.length <= 200 && !/[\u0000-\u001f\u007f]/.test(storeName);
+  const keepName = storeName.length > 0 && storeName.length <= 200 && !NOT_ONE_LINE.test(storeName);
   return {
     orderId: text(body.orderId, "orderId", 200),
     number: body.number === null || body.number === undefined ? null : whole(body.number, "number", 1, Number.MAX_SAFE_INTEGER),
