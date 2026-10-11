@@ -16,6 +16,10 @@ declare namespace Cloudflare {
     PB_API_SECRET?: string;
     /** Secret: the PB merchant (shipper) id whose postage account pays. In the sandbox, PB's one test merchant. */
     PB_SHIPPER_ID?: string;
+    /** The shipped email's sender address (orders@dinkuskit.com). Emails wait until it is set. */
+    SHIP_EMAIL_FROM?: string;
+    /** Cloudflare Email Service binding that sends the shipped email. */
+    EMAIL?: SendEmail;
     SHIP_STORES: DurableObjectNamespace<import("./store").StoreShipping>;
   }
 }

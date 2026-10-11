@@ -4,8 +4,9 @@ The hosted Ship service for ship.dinkuskit.com. It runs as a Cloudflare Worker w
 
 Status: order intake for Commerce, the owner's label page, and Pitney Bowes sandbox labels (prices, buy, cancel for a refund) are built. Not built yet:
 
-- live Pitney Bowes postage (until the sandbox settings below are set, a real order answers "Pitney Bowes is not connected to Ship yet");
-- the shipped email.
+- live Pitney Bowes postage (until the sandbox settings below are set, a real order answers "Pitney Bowes is not connected to Ship yet").
+
+The shipped email is built and waits for its deploy settings.
 
 Nothing here is deployed.
 
@@ -75,6 +76,10 @@ Commerce's "Create shipping label" opens `https://ship.dinkuskit.com/stores/{sit
   - "Cancel label" voids it with PB (`DELETE /shippingservices/v1/shipments/{id}?cancelInitiator=SHIPPER`). USPS refunds the postage account within about 14 days. Cancelling never changes the Commerce order.
 - **TEST orders** get a practice label marked "TEST - NOT POSTAGE" with a TEST tracking number. Pitney Bowes is never called. The label still goes to Commerce through `GET /v1/labels`, so the TEST order shows as shipped.
 - **Settings:** ship-from address, the owner's box sizes, and the shipped email's reply-to address (filled with the first signer-in's email). The sender name is the store's EmDash Site title, which Commerce sends as `storeName`.
+- **Shipped email:** each time Commerce sends an order as Completed (by a Ship label or by the owner's Complete order), Ship emails the shopper once from `SHIP_EMAIL_FROM` (orders@dinkuskit.com). The sender name is the store's Site title and replies go to the reply-to address. The email holds the order number, carrier and tracking number, with a USPS tracking link for USPS. It never lists items and says "shipped", not "delivered".
+  - Once per completion: the key is the order id plus `completed.at`. A repeat or newer version of the same completion sends nothing more. An order moved back to Processing and completed again sends a new email, and one moved back before the email went out gets none.
+  - TEST orders email the owner's reply-to address, never the shopper. Orders completed before the store first sent Ship anything (allowing 15 minutes for clock differences) get no email.
+  - Sending runs on the store's Durable Object alarm. When the email service fails, Ship tries again after 1 minute, 5 minutes, 30 minutes, 2 hours, 6 hours and 12 hours, then gives up. A failed email never changes the order. The order page shows whether the email went out.
 - Forms are accepted only from Ship's own pages (`Origin` check); pages send a strict Content-Security-Policy.
 
 ## Deploy settings (for Ronald's deploy agents, on his go)
@@ -86,5 +91,6 @@ Commerce's "Create shipping label" opens `https://ship.dinkuskit.com/stores/{sit
   - `ACCOUNT_SIGNIN_URL=https://dinkuskit.com/account/ship-sign-in`
   - `ACCOUNT_TOKEN_URL=https://dinkuskit.com/api/ship-sign-in/token`
 - **Secret:** `SHIP_SESSION_SECRET`, 32 or more random characters, set with `wrangler secret put`. The label page answers 503 until it and the two sign-in URLs are set.
+- **Shipped email:** var `SHIP_EMAIL_FROM=orders@dinkuskit.com` and the `EMAIL` send_email binding (already in `wrangler.jsonc`), with Cloudflare Email Service sending for dinkuskit.com as DinkusKit.com's own sign-in emails do. Until the var is set, completions wait and nothing is sent; anything waiting more than 3 days is dropped.
 - **Route:** `ship.dinkuskit.com`.
 - **Pitney Bowes (sandbox):** var `PB_ENVIRONMENT=sandbox`, and secrets `PB_API_KEY`, `PB_API_SECRET` (DinkusKit's PB developer keys) and `PB_SHIPPER_ID` (the sandbox's test merchant), set by Ronald with `wrangler secret put`. They never go in this repository. Until all four are set, real orders cannot get labels and TEST orders still get practice labels. Live postage is not built: it needs Ronald's word, PB's live keys, and a PB sign-up link so each owner can open their own postage account, with that account's shipper id kept per store.

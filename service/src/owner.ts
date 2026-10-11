@@ -33,7 +33,7 @@ const ROUTES: PageRoute[] = [
     handle: async ({ site, session, store, params }) => {
       const summary = await store.orderSummary(params[0]!);
       if (!summary) return messagePage("Order not found", "Ship has not received this order from Commerce yet. Open Orders in Commerce, then try again.", { href: `${storePath(site)}/orders`, text: "Back to orders" }, 404);
-      return html(orderPage(site, session.email, summary, await store.getSettings()));
+      return html(orderPage(site, session.email, summary, await store.getSettings(), { shippedEmail: await store.shippedEmailState(params[0]!) }));
     },
   },
   {
