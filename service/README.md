@@ -2,10 +2,9 @@
 
 The hosted Ship service for ship.dinkuskit.com. It runs as a Cloudflare Worker with one SQLite Durable Object per store, like the Payments and Coupons services. GrillTrack decisions: `ship-hosted-service-001` and `ship-order-intake-001` (approved by Ronald; their ledger records land in a follow-up PR).
 
-Status: order intake for Commerce is built. Not built yet:
+Status: order intake for Commerce and the owner's label page are built. Not built yet:
 
-- the owner's label page, with Sign in with DinkusKit.com (`ship-owner-signin-001`);
-- Pitney Bowes label purchase;
+- Pitney Bowes label purchase (a live order answers "Postage is not connected yet");
 - the shipped email.
 
 Nothing here is deployed.
@@ -60,11 +59,24 @@ npm test        # Workers runtime tests (vitest with @cloudflare/vitest-plugin)
 npm run build   # wrangler deploy --dry-run
 ```
 
+## The owner's label page
+
+Commerce's "Create shipping label" opens `https://ship.dinkuskit.com/stores/{site_id}/orders/{orderId}`.
+
+- **Sign-in:** Sign in with DinkusKit.com (contract: `/mnt/project-files/ship-hosted/signin-contract.md` in the project; DinkusKit.com side is dinkuskit/dinkuskit#31). Owners and employees with label permission get in. Ship stays signed in for as long as the person stays signed in to DinkusKit.com: the browser cookie names a session kept in the store's Durable Object with DinkusKit.com's rotating refresh token, and Ship checks again at least every 5 minutes. A refused check signs Ship out; while DinkusKit.com is unavailable Ship waits at most 20 minutes.
+- **Pages:** orders waiting to ship; one order with box, weight (items plus box, editable) and service (USPS Ground Advantage by default, Priority Mail, Priority Mail Express); Buy label, Print (PDF), Cancel label.
+- **TEST orders** get a practice label marked "TEST - NOT POSTAGE" with a TEST tracking number. Pitney Bowes is never called. The label still goes to Commerce through `GET /v1/labels`, so the TEST order shows as shipped.
+- **Settings:** ship-from address, the owner's box sizes, and the shipped email's reply-to address (filled with the first signer-in's email). The sender name is the store's EmDash Site title, which Commerce sends as `storeName`.
+- Forms are accepted only from Ship's own pages (`Origin` check); pages send a strict Content-Security-Policy.
+
 ## Deploy settings (for Ronald's deploy agents, on his go)
 
 - **Vars:**
   - `ACCOUNT_ISSUER=https://dinkuskit.com/account`
   - `ACCOUNT_AUDIENCE=dinkus-ship`
   - `ACCOUNT_JWKS_URL=https://dinkuskit.com/account/.well-known/jwks.json`
+  - `ACCOUNT_SIGNIN_URL=https://dinkuskit.com/account/ship-sign-in`
+  - `ACCOUNT_TOKEN_URL=https://dinkuskit.com/api/ship-sign-in/token`
+- **Secret:** `SHIP_SESSION_SECRET`, 32 or more random characters, set with `wrangler secret put`. The label page answers 503 until it and the two sign-in URLs are set.
 - **Route:** `ship.dinkuskit.com`.
 - **Pitney Bowes keys:** these will be Worker secrets that Ronald sets. They never go in this repository.
