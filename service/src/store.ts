@@ -3,6 +3,7 @@ import { ok, ServiceError, toOutcome, type Outcome } from "./errors.js";
 import { labelAddress, type LabelAddress } from "./address.js";
 import { NOT_ONE_LINE, parseShipOrder, type ShipOrder } from "./order.js";
 import { practiceLabelPdf } from "./practice-pdf.js";
+import { GRACE_SECONDS, REFRESH_SECONDS } from "./session.js";
 
 /** Commerce reads at most this many labels per call (dinkuskit/commerce src/features/orders/ship.ts). */
 export const LABELS_PER_LIST = 100;
@@ -87,6 +88,9 @@ export class StoreShipping extends DurableObject<Env> {
       service TEXT NOT NULL, box TEXT NOT NULL, weight_oz REAL NOT NULL, carrier TEXT NOT NULL, tracking TEXT NOT NULL,
       pdf BLOB NOT NULL, status TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, cancelled_at TEXT)`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS labels_by_order ON labels (order_id, created_at)");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS sessions (
+      session_id TEXT PRIMARY KEY, uid TEXT NOT NULL, email TEXT NOT NULL, refresh_token TEXT NOT NULL,
+      checked_at INTEGER NOT NULL, refreshing_until INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`);
   }
 
   private meta(key: string): string | null {
@@ -97,10 +101,59 @@ export class StoreShipping extends DurableObject<Env> {
     this.sql.exec("INSERT INTO store_meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value", key, value);
   }
 
-  /** Keeps the store name and reply address DinkusKit.com sent at the latest sign-in, for the shipped email. */
-  async rememberStore(profile: { storeName?: string; replyTo?: string }): Promise<void> {
-    if (profile.storeName) this.setMeta("store_name", profile.storeName);
-    if (profile.replyTo) this.setMeta("reply_to", profile.replyTo);
+  /**
+   * A person signed in through DinkusKit.com. The refresh token stays here, never in
+   * the browser. The first sign-in fills the reply-to address with their email.
+   */
+  async startSession(uid: string, email: string, refreshToken: string): Promise<string> {
+    const sessionId = crypto.randomUUID();
+    this.sql.exec(`INSERT INTO sessions (session_id, uid, email, refresh_token, checked_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
+      sessionId, uid, email, refreshToken, Math.floor(Date.now() / 1000), new Date().toISOString());
+    this.sql.exec("INSERT OR IGNORE INTO store_meta (key, value) VALUES ('reply_to', ?)", email);
+    return sessionId;
+  }
+
+  /**
+   * The session, and the refresh token when it is due for a check with DinkusKit.com.
+   * Only one request at a time gets the token: a refresh token works once, and a
+   * second use would end the person's sign-in. The others carry on in the grace window.
+   */
+  async readSession(sessionId: string): Promise<{ uid: string; email: string; refreshToken?: string; withinGrace: boolean } | null> {
+    const row = this.sql.exec<{ uid: string; email: string; refresh_token: string; checked_at: number; refreshing_until: number }>(
+      "SELECT uid, email, refresh_token, checked_at, refreshing_until FROM sessions WHERE session_id = ?", sessionId).toArray()[0];
+    if (!row) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const withinGrace = now - row.checked_at < GRACE_SECONDS;
+    if (now - row.checked_at < REFRESH_SECONDS) return { uid: row.uid, email: row.email, withinGrace };
+    if (row.refreshing_until > now) return withinGrace ? { uid: row.uid, email: row.email, withinGrace } : null;
+    this.sql.exec("UPDATE sessions SET refreshing_until = ? WHERE session_id = ?", now + 30, sessionId);
+    return { uid: row.uid, email: row.email, refreshToken: row.refresh_token, withinGrace };
+  }
+
+  async refreshedSession(sessionId: string, refreshToken: string, email: string): Promise<void> {
+    this.sql.exec("UPDATE sessions SET refresh_token = ?, email = ?, checked_at = ?, refreshing_until = 0 WHERE session_id = ?",
+      refreshToken, email, Math.floor(Date.now() / 1000), sessionId);
+  }
+
+  /** DinkusKit.com was busy or down: try again on a later page. */
+  async refreshFailed(sessionId: string): Promise<void> {
+    this.sql.exec("UPDATE sessions SET refreshing_until = 0 WHERE session_id = ?", sessionId);
+  }
+
+  async endSession(sessionId: string): Promise<void> {
+    this.sql.exec("DELETE FROM sessions WHERE session_id = ?", sessionId);
+  }
+
+  /** Where shoppers' replies to the shipped email go. */
+  async saveReplyTo(fields: Fields): Promise<Outcome> {
+    try {
+      const replyTo = formText(fields, "replyTo", "Reply-to email", 254)!;
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(replyTo)) refuse("INVALID_INPUT", "Reply-to email must be an email address.");
+      this.setMeta("reply_to", replyTo);
+      return ok(await this.getSettings());
+    } catch (error) {
+      return toOutcome(error);
+    }
   }
 
   async getSettings(): Promise<Settings> {
@@ -265,6 +318,7 @@ export class StoreShipping extends DurableObject<Env> {
       this.sql.exec(`INSERT INTO orders (order_id, version, record, first_received_at, updated_at) VALUES (?, ?, ?, ?, ?)
         ON CONFLICT (order_id) DO UPDATE SET version = excluded.version, record = excluded.record, updated_at = excluded.updated_at`,
         order.orderId, order.version, JSON.stringify(order), now, now);
+      if (order.storeName) this.setMeta("store_name", order.storeName);
       return ok({ orderId: order.orderId, version: order.version });
     } catch (error) {
       return toOutcome(error);

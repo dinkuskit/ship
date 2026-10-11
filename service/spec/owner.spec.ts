@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
@@ -9,7 +10,8 @@ let issuer: string;
 let sessionKey: string;
 let privateKey: CryptoKey;
 let ownerClaims: Record<string, unknown>;
-let tokenAnswer: (body: { code: string; code_verifier: string }) => Promise<Response>;
+let tokenAnswer: (body: Record<string, string>) => Promise<Response>;
+let refreshes: number;
 
 const configured = () => ({
   ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: `${issuer}/jwks`,
@@ -27,8 +29,9 @@ beforeEach(async () => {
   const keys = await generateKeyPair("ES256");
   privateKey = keys.privateKey;
   const jwk = { ...await exportJWK(keys.publicKey), kid: "synthetic", alg: "ES256", use: "sig" };
-  ownerClaims = { site_id: site, scope: "ship:labels", uid: "user-1", email: "owner@example.test", store_name: "Demo Store", reply_to: "help@example.test" };
-  tokenAnswer = async () => Response.json({ access_token: await pass(ownerClaims), token_type: "Bearer", expires_in: 300 });
+  ownerClaims = { site_id: site, scope: "ship:labels", uid: "user-1", email: "owner@example.test" };
+  refreshes = 0;
+  tokenAnswer = async () => Response.json({ access_token: await pass(ownerClaims), token_type: "Bearer", expires_in: 300, refresh_token: `refresh-${++refreshes}-${"r".repeat(40)}` });
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(String(input)).href;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
@@ -107,18 +110,19 @@ test("the label page is unreachable until Ship's sign-in is configured", async (
 test("signing in goes through DinkusKit.com with PKCE and comes back to the page first asked for", async () => {
   let traded: { code: string; code_verifier: string } | undefined;
   tokenAnswer = async body => {
-    traded = body;
-    return Response.json({ access_token: await pass(ownerClaims) });
+    traded = body as typeof traded;
+    return Response.json({ access_token: await pass(ownerClaims), refresh_token: "r".repeat(40) });
   };
   const { back, target } = await signIn(`/stores/${site}/settings`);
   expect(back.status).toBe(303);
   expect(back.headers.get("location")).toBe(`/stores/${site}/settings`);
-  expect(back.headers.getSetCookie().join("\n")).toMatch(/__Host-ship-session=[^;]+; Path=\/; Max-Age=3600; HttpOnly; Secure; SameSite=Lax/);
+  expect(back.headers.getSetCookie().join("\n")).toMatch(/__Host-ship-session=[^;]+; Path=\/; Max-Age=2592000; HttpOnly; Secure; SameSite=Lax/);
   const challenge = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(traded!.code_verifier)));
   expect(btoa(String.fromCharCode(...challenge)).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "")).toBe(target.searchParams.get("code_challenge"));
   expect(traded!.code).toBe("one-time");
   const settings = await env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site)).getSettings();
-  expect([settings.storeName, settings.replyTo]).toEqual(["Demo Store", "help@example.test"]);
+  // The first sign-in fills the reply-to address; the store name comes with Commerce's orders.
+  expect([settings.storeName, settings.replyTo]).toEqual([null, "owner@example.test"]);
   const page = await request("GET", `/stores/${site}/settings`, { cookie: cookies(back) });
   expect(page.status).toBe(200);
   expect(await page.text()).toContain("owner@example.test");
@@ -151,7 +155,9 @@ test("a session is for one store only, and a forged cookie is ignored", async ()
   const cookie = await signedIn();
   expect((await request("GET", `/stores/other-${site}/orders`, { cookie })).status).toBe(303);
   // A well-formed session for this store whose signature was not made with Ship's secret.
-  const payload = btoa(JSON.stringify({ site, uid: "intruder", email: "intruder@example.test", exp: Math.floor(Date.now() / 1000) + 600 }))
+  // It names the real session, so only the signature check can refuse it.
+  const genuine = JSON.parse(atob(cookie.split("=")[1]!.split(".")[0]!.replaceAll("-", "+").replaceAll("_", "/"))) as { sessionId: string };
+  const payload = btoa(JSON.stringify({ site, sessionId: genuine.sessionId, exp: Math.floor(Date.now() / 1000) + 600 }))
     .replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
   const forged = cookie.replace(/=([^.]+)\./, `=${payload}.`);
   expect(forged).not.toBe(cookie);
@@ -230,4 +236,77 @@ test("page text from Commerce is escaped", async () => {
   const page = await (await request("GET", `/stores/${site}/orders/${encodeURIComponent("order:abc")}`, { cookie })).text();
   expect(page).not.toContain("<script>alert");
   expect(page).toContain("&lt;script&gt;");
+});
+
+const shipStore = () => env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site));
+
+/** Moves every session's last check with DinkusKit.com back by this many seconds. */
+async function age(seconds: number) {
+  await runInDurableObject(shipStore(), async (_, state) => {
+    state.storage.sql.exec("UPDATE sessions SET checked_at = checked_at - ?", seconds);
+  });
+}
+
+test("Ship stays signed in by checking with DinkusKit.com every few minutes", async () => {
+  const cookie = await signedIn();
+  const sent: Record<string, string>[] = [];
+  const answer = tokenAnswer;
+  tokenAnswer = async body => (sent.push(body), answer(body));
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).headers.getSetCookie()).toEqual([]);
+  expect(sent).toEqual([]);
+  await age(6 * 60);
+  const checked = await request("GET", `/stores/${site}/orders`, { cookie });
+  expect(checked.status).toBe(200);
+  expect(checked.headers.getSetCookie().join()).toContain("__Host-ship-session=");
+  expect(sent).toEqual([{ grant_type: "refresh_token", refresh_token: `refresh-1-${"r".repeat(40)}` }]);
+  // DinkusKit.com hands out a new refresh token each time; the next check uses it.
+  await age(6 * 60);
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
+  expect(sent[1]!.refresh_token).toBe(`refresh-2-${"r".repeat(40)}`);
+});
+
+test("signing out of DinkusKit.com, or losing access, signs Ship out at the next check", async () => {
+  const cookie = await signedIn();
+  await age(6 * 60);
+  tokenAnswer = async () => Response.json({ error: "invalid_grant" }, { status: 400 });
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
+  tokenAnswer = async () => { throw new Error("no second check: the session is gone"); };
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
+});
+
+test("a pass for another person never continues the session", async () => {
+  const cookie = await signedIn();
+  await age(6 * 60);
+  ownerClaims = { ...ownerClaims, uid: "user-2" };
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
+});
+
+test("while DinkusKit.com is down Ship waits up to 20 minutes, then asks for sign-in", async () => {
+  const cookie = await signedIn();
+  tokenAnswer = async () => new Response("busy", { status: 503 });
+  await age(6 * 60);
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
+  await age(15 * 60);
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
+});
+
+test("signing out of Ship ends the session even for a copied cookie", async () => {
+  const cookie = await signedIn();
+  const out = await request("POST", "/auth/sign-out", { cookie });
+  expect(out.status).toBe(200);
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
+});
+
+test("the shipped email's reply-to is the owner's to change, and the sender name is the store's Site title", async () => {
+  await sendOrder({ storeName: "  Demo Site Title  " });
+  const cookie = await signedIn();
+  const bad = await request("POST", `/stores/${site}/settings/reply-to`, { cookie, form: { replyTo: "not an email" } });
+  expect(bad.status).toBe(400);
+  expect((await request("POST", `/stores/${site}/settings/reply-to`, { cookie, form: { replyTo: "help@example.test" } })).status).toBe(303);
+  const settings = await shipStore().getSettings();
+  expect([settings.storeName, settings.replyTo]).toEqual(["Demo Site Title", "help@example.test"]);
+  // A later sign-in keeps what the owner chose.
+  await signedIn();
+  expect((await shipStore().getSettings()).replyTo).toBe("help@example.test");
+  expect(await (await request("GET", `/stores/${site}/settings`, { cookie })).text()).toContain("Demo Site Title");
 });

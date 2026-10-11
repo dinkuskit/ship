@@ -1,15 +1,25 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
 import { ServiceError } from "./errors.js";
 
-/** How long Ship trusts one sign-in before asking DinkusKit.com again (ship-owner-signin-001). */
-export const SESSION_SECONDS = 60 * 60;
+/**
+ * Ship stays signed in for as long as the person stays signed in to DinkusKit.com
+ * (ship-owner-signin-001, Ronald 2026-10-11): the cookie only names a session kept in
+ * the store's Durable Object, and Ship asks DinkusKit.com again at least every
+ * REFRESH_SECONDS. The cookie is renewed on each check, so it lapses only after
+ * COOKIE_SECONDS without a visit.
+ */
+export const REFRESH_SECONDS = 5 * 60;
+/** How long a session may go unchecked while DinkusKit.com is busy or down. */
+export const GRACE_SECONDS = 20 * 60;
+const COOKIE_SECONDS = 30 * 24 * 60 * 60;
 /** How long a started sign-in may take to come back. */
 const SIGNIN_SECONDS = 10 * 60;
 const SESSION_COOKIE = "__Host-ship-session";
 const SIGNIN_COOKIE = "__Host-ship-signin";
 
 /** Who is signed in to Ship's pages, and for which one store. */
-export interface OwnerSession { site: string; uid: string; email: string; exp: number }
+export interface OwnerSession { site: string; sessionId: string; uid: string; email: string }
+interface SessionCookie { site: string; sessionId: string; exp: number }
 interface PendingSignIn { site: string; state: string; verifier: string; next: string; exp: number }
 
 const encoder = new TextEncoder();
@@ -68,10 +78,59 @@ function setCookie(name: string, value: string, maxAge: number): string {
   return `${name}=${value}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Lax`;
 }
 
-/** The signed-in person for this store, or null when they must sign in (again). */
-export async function readSession(request: Request, env: Env, site: string): Promise<OwnerSession | null> {
-  const session = await open<OwnerSession>(env, cookie(request, SESSION_COOKIE));
-  return session?.site === site ? session : null;
+const storeOf = (env: Env, site: string) => env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site));
+
+async function sessionCookie(env: Env, site: string, sessionId: string): Promise<string> {
+  const value: SessionCookie = { site, sessionId, exp: Math.floor(Date.now() / 1000) + COOKIE_SECONDS };
+  return setCookie(SESSION_COOKIE, await seal(env, value), COOKIE_SECONDS);
+}
+
+type TokenAnswer = { kind: "pass"; pass: OwnerPass; refreshToken: string } | { kind: "refused" } | { kind: "unavailable" };
+
+/** Asks DinkusKit.com's token route (signin-contract steps 4 and "Staying signed in"); never throws. */
+async function askToken(env: Env, body: object, site: string, fetcher: typeof fetch): Promise<TokenAnswer> {
+  try {
+    const answer = await fetcher(env.ACCOUNT_TOKEN_URL, {
+      method: "POST", redirect: "error", cache: "no-store",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (answer.status === 400 || answer.status === 401 || answer.status === 403) return { kind: "refused" };
+    if (!answer.ok) return { kind: "unavailable" };
+    const token = await answer.json() as { access_token?: unknown; refresh_token?: unknown };
+    if (typeof token.access_token !== "string" || typeof token.refresh_token !== "string" ||
+        token.refresh_token.length < 32 || token.refresh_token.length > 512) return { kind: "refused" };
+    return { kind: "pass", pass: await verifyOwnerPass(env, token.access_token, site), refreshToken: token.refresh_token };
+  } catch (error) {
+    return error instanceof TypeError ? { kind: "unavailable" } : { kind: "refused" };
+  }
+}
+
+/**
+ * The signed-in person for this store, or null when they must sign in (again).
+ * `setCookie` is set when the session was checked with DinkusKit.com and its cookie renewed.
+ */
+export async function readSession(request: Request, env: Env, site: string, fetcher: typeof fetch = fetch):
+    Promise<{ session: OwnerSession; setCookie?: string } | null> {
+  const cookieValue = await open<SessionCookie>(env, cookie(request, SESSION_COOKIE));
+  if (cookieValue?.site !== site || typeof cookieValue.sessionId !== "string") return null;
+  const store = storeOf(env, site);
+  const found = await store.readSession(cookieValue.sessionId);
+  if (!found) return null;
+  const session: OwnerSession = { site, sessionId: cookieValue.sessionId, uid: found.uid, email: found.email };
+  if (!found.refreshToken) return { session };
+  const answer = await askToken(env, { grant_type: "refresh_token", refresh_token: found.refreshToken }, site, fetcher);
+  if (answer.kind === "pass" && answer.pass.uid === found.uid) {
+    await store.refreshedSession(session.sessionId, answer.refreshToken, answer.pass.email);
+    return { session: { ...session, email: answer.pass.email }, setCookie: await sessionCookie(env, site, session.sessionId) };
+  }
+  if (answer.kind === "unavailable") {
+    await store.refreshFailed(session.sessionId);
+    return found.withinGrace ? { session } : null;
+  }
+  // Signed out of DinkusKit.com, removed, suspended, cut off, or the token was reused.
+  await store.endSession(session.sessionId);
+  return null;
 }
 
 /** Sends the browser to DinkusKit.com to prove the person may act for this store. */
@@ -95,7 +154,7 @@ export function ownerPassKeys(env: Env): JWTVerifyGetKey {
 }
 
 /** What DinkusKit.com vouches for in a ship:labels pass. */
-export interface OwnerPass { site: string; uid: string; email: string; storeName?: string; replyTo?: string }
+export interface OwnerPass { site: string; uid: string; email: string }
 
 async function verifyOwnerPass(env: Env, token: string, site: string): Promise<OwnerPass> {
   const { payload } = await jwtVerify(token, ownerPassKeys(env), {
@@ -106,11 +165,7 @@ async function verifyOwnerPass(env: Env, token: string, site: string): Promise<O
       !text(payload.uid, 200) || !text(payload.email, 254)) {
     throw new Error("owner pass does not match");
   }
-  return {
-    site, uid: payload.uid as string, email: payload.email as string,
-    ...(text(payload.store_name, 200) ? { storeName: payload.store_name as string } : {}),
-    ...(text(payload.reply_to, 254) && /^[^\s@]+@[^\s@]+$/.test(payload.reply_to as string) ? { replyTo: payload.reply_to as string } : {}),
-  };
+  return { site, uid: payload.uid as string, email: payload.email as string };
 }
 
 const CALLBACK_ERRORS: Record<string, string> = {
@@ -134,26 +189,25 @@ export async function finishSignIn(request: Request, env: Env, fetcher: typeof f
   if (error) return { ok: false, status: 403, message: CALLBACK_ERRORS[error] ?? "DinkusKit.com could not sign you in.", site: pending.site };
   const code = url.searchParams.get("code");
   if (!code || code.length > 512) return { ok: false, status: 400, message: "DinkusKit.com sent no sign-in code.", site: pending.site };
-  let pass: OwnerPass;
-  try {
-    const answer = await fetcher(env.ACCOUNT_TOKEN_URL, {
-      method: "POST", redirect: "error", cache: "no-store",
-      headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ code, code_verifier: pending.verifier }),
-    });
-    if (!answer.ok) throw new Error(`token ${answer.status}`);
-    const body = await answer.json() as { access_token?: unknown };
-    if (typeof body.access_token !== "string") throw new Error("no access token");
-    pass = await verifyOwnerPass(env, body.access_token, pending.site);
-  } catch {
+  const answer = await askToken(env, { code, code_verifier: pending.verifier }, pending.site, fetcher);
+  if (answer.kind !== "pass") {
     return { ok: false, status: 502, message: "DinkusKit.com could not confirm the sign-in. Try again.", site: pending.site };
   }
+  const sessionId = await storeOf(env, pending.site).startSession(answer.pass.uid, answer.pass.email, answer.refreshToken);
   const headers = new Headers({ "cache-control": "no-store" });
-  const session: OwnerSession = { site: pass.site, uid: pass.uid, email: pass.email, exp: Math.floor(Date.now() / 1000) + SESSION_SECONDS };
-  headers.append("set-cookie", setCookie(SESSION_COOKIE, await seal(env, session), SESSION_SECONDS));
+  headers.append("set-cookie", await sessionCookie(env, pending.site, sessionId));
   headers.append("set-cookie", setCookie(SIGNIN_COOKIE, "", 0));
   const next = pending.next.startsWith(`/stores/${encodeURIComponent(pending.site)}/`) ? pending.next : `/stores/${encodeURIComponent(pending.site)}/orders`;
-  return { ok: true, pass, next, headers };
+  return { ok: true, pass: answer.pass, next, headers };
+}
+
+/** Ends Ship's session only; DinkusKit.com keeps its own sign-in. */
+export async function signOut(request: Request, env: Env): Promise<Headers> {
+  const cookieValue = await open<SessionCookie>(env, cookie(request, SESSION_COOKIE));
+  if (cookieValue && typeof cookieValue.site === "string" && typeof cookieValue.sessionId === "string") {
+    await storeOf(env, cookieValue.site).endSession(cookieValue.sessionId);
+  }
+  return signOutHeaders();
 }
 
 export function signOutHeaders(): Headers {

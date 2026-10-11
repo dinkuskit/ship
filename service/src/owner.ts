@@ -1,6 +1,6 @@
 import { ServiceError, type Outcome } from "./errors.js";
 import { html, messagePage, orderPage, ordersPage, settingsPage } from "./pages.js";
-import { finishSignIn, readSession, requireSameOrigin, signInConfigured, signOutHeaders, startSignIn, type OwnerSession } from "./session.js";
+import { finishSignIn, readSession, requireSameOrigin, signInConfigured, signOut, startSignIn, type OwnerSession } from "./session.js";
 import type { StoreShipping } from "./store.js";
 
 /** Store ids, order ids and record ids as they appear in a path segment. */
@@ -78,6 +78,10 @@ const ROUTES: PageRoute[] = [
     handle: async ({ site, session, store, fields }) => settingsResult(site, session, store, await outcomeOf(store.saveShipFrom(fields))),
   },
   {
+    method: "POST", pattern: new RegExp(`^/stores/${SEGMENT}/settings/reply-to$`),
+    handle: async ({ site, session, store, fields }) => settingsResult(site, session, store, await outcomeOf(store.saveReplyTo(fields))),
+  },
+  {
     method: "POST", pattern: new RegExp(`^/stores/${SEGMENT}/settings/boxes$`),
     handle: async ({ site, session, store, fields }) => settingsResult(site, session, store, await outcomeOf(store.addBox(fields))),
   },
@@ -120,15 +124,13 @@ export async function handlePage(request: Request, env: Env): Promise<Response> 
         const restart = result.site ? { href: `${storePath(result.site)}/orders`, text: "Start again" } : undefined;
         return messagePage(result.status === 400 ? "Start again" : "Could not sign in", result.message, restart, result.status);
       }
-      const store = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(result.pass.site));
-      await store.rememberStore({ storeName: result.pass.storeName, replyTo: result.pass.replyTo });
       result.headers.set("location", result.next);
       return new Response(null, { status: 303, headers: result.headers });
     }
     if (url.pathname === "/auth/sign-out" && request.method === "POST") {
       requireSameOrigin(request);
       const signedOut = messagePage("Signed out", "You are signed out of Ship. DinkusKit.com keeps its own sign-in.");
-      signOutHeaders().forEach((value, key) => key === "set-cookie" ? signedOut.headers.append(key, value) : signedOut.headers.set(key, value));
+      (await signOut(request, env)).forEach((value, key) => key === "set-cookie" ? signedOut.headers.append(key, value) : signedOut.headers.set(key, value));
       return signedOut;
     }
     for (const route of ROUTES) {
@@ -138,13 +140,15 @@ export async function handlePage(request: Request, env: Env): Promise<Response> 
       const decoded = found.slice(1).map(decode);
       if (decoded.some(value => value === null)) break;
       const [site, ...params] = decoded as string[];
-      const session = await readSession(request, env, site!);
-      if (!session) {
+      const signedIn = await readSession(request, env, site!);
+      if (!signedIn) {
         // A form posted after the session expired goes back to the store's orders after sign-in.
         return startSignIn(env, site!, request.method === "GET" ? url.pathname : `${storePath(site!)}/orders`);
       }
       const fields = request.method === "POST" ? (requireSameOrigin(request), await readForm(request)) : {};
-      return await route.handle({ site: site!, session, store: env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site!)), params, fields });
+      const response = await route.handle({ site: site!, session: signedIn.session, store: env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site!)), params, fields });
+      if (signedIn.setCookie) response.headers.append("set-cookie", signedIn.setCookie);
+      return response;
     }
     return messagePage("Not found", "There is no such page.", undefined, 404);
   } catch (error) {

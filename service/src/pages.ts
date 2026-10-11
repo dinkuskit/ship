@@ -140,6 +140,9 @@ export function settingsPage(site: string, email: string, settings: Settings, er
       ${field("line1", "Address", from?.line1)}${field("line2", "Address line 2 (optional)", from?.line2, false)}
       <div class="row">${field("city", "City", from?.city)}${field("region", "State", from?.region)}${field("postalCode", "ZIP code", from?.postalCode)}</div>
       <button>Save ship-from address</button></form>
+    <h2>Shipped email</h2><p class="muted">Sent from orders@dinkuskit.com under ${settings.storeName ? `the name ${esc(settings.storeName)} (your store's Site title)` : "your store's Site title"}. When a shopper replies, the reply goes here.</p>
+    <form method="post" action="${base}/reply-to">${field("replyTo", "Reply-to email", settings.replyTo ?? "")}
+      <button>Save reply-to email</button></form>
     <h2>Box sizes</h2>${boxes ? `<table><thead><tr><th>Name</th><th>Size</th><th>Empty weight</th><th></th></tr></thead><tbody>${boxes}</tbody></table>` : '<p class="muted">No box sizes yet.</p>'}
     <form method="post" action="${base}/boxes">${field("name", "Box name")}
       <div class="row">${field("lengthIn", "Length (in)")}${field("widthIn", "Width (in)")}${field("heightIn", "Height (in)")}${field("weightOz", "Empty weight (oz)", "0")}</div>
