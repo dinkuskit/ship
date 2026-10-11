@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
 import { pitneyConfig } from "../src/pitney";
+import { addLabelColumns } from "../src/store";
 
 const ORIGIN = "https://ship.example.invalid";
 let site: string;
@@ -482,4 +483,26 @@ test("postage stays off until the Pitney Bowes sandbox keys are all set", () => 
   for (const off of [{ PB_ENVIRONMENT: "" }, { PB_ENVIRONMENT: "live" }, { PB_SHIPPER_ID: "" }, { PB_API_SECRET: undefined }]) {
     expect(pitneyConfig({ ...keys, ...off } as unknown as Env)).toBeNull();
   }
+});
+
+test("a store whose labels were kept before Pitney Bowes postage gets the new label columns", async () => {
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  expect((await request("POST", `/stores/${site}/orders/${encodeURIComponent("order:abc")}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA" } })).status).toBe(303);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    const sql = state.storage.sql;
+    // The labels table exactly as the label page (PR 24) made it.
+    sql.exec("ALTER TABLE labels RENAME TO labels_now");
+    sql.exec(`CREATE TABLE labels (
+      label_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL, test INTEGER NOT NULL,
+      service TEXT NOT NULL, box TEXT NOT NULL, weight_oz REAL NOT NULL, carrier TEXT NOT NULL, tracking TEXT NOT NULL,
+      pdf BLOB NOT NULL, status TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, cancelled_at TEXT)`);
+    sql.exec(`INSERT INTO labels SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, pdf, status, created_by, created_at, cancelled_at FROM labels_now`);
+    sql.exec("DROP TABLE labels_now");
+    addLabelColumns(sql);
+    addLabelColumns(sql);
+  });
+  expect((await shipStore().orderSummary("order:abc"))!.labels).toMatchObject([{ test: true, priceCents: null, refund: null }]);
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
 });

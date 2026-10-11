@@ -62,6 +62,16 @@ function formNumber(fields: Fields, key: string, label: string, min: number, max
   return Math.round(value * 100) / 100;
 }
 
+/** Columns labels gained with Pitney Bowes postage; a store made before then gets them added once. */
+const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT" } as const;
+
+export function addLabelColumns(sql: SqlStorage): void {
+  const present = new Set(sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('labels')").toArray().map(row => row.name));
+  for (const [column, type] of Object.entries(LABEL_COLUMNS)) {
+    if (!present.has(column)) sql.exec(`ALTER TABLE labels ADD COLUMN ${column} ${type}`);
+  }
+}
+
 /** Pitney Bowes failures become messages for the owner's page. */
 function asServiceError(error: unknown): unknown {
   if (!(error instanceof PitneyError)) return error;
@@ -108,8 +118,8 @@ export class StoreShipping extends DurableObject<Env> {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS labels (
       label_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL, test INTEGER NOT NULL,
       service TEXT NOT NULL, box TEXT NOT NULL, weight_oz REAL NOT NULL, carrier TEXT NOT NULL, tracking TEXT NOT NULL,
-      pdf BLOB NOT NULL, status TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, cancelled_at TEXT,
-      price_cents INTEGER, shipment_id TEXT, pdf_url TEXT, refund TEXT)`);
+      pdf BLOB NOT NULL, status TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, cancelled_at TEXT)`);
+    addLabelColumns(this.sql);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS purchases (
       transaction_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL, service TEXT NOT NULL, box TEXT NOT NULL,
       weight_oz REAL NOT NULL, state TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`);
