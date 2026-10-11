@@ -91,7 +91,19 @@ function labelRow(site: string, label: Label, current: boolean): string {
 }
 
 /** What the label form shows besides the order: an error, the owner's last choices, prices. */
-export interface LabelForm { error?: string; fields?: Record<string, string>; quotes?: Quotes; askBuyAgain?: boolean }
+export interface LabelForm {
+  error?: string; fields?: Record<string, string>; quotes?: Quotes; askBuyAgain?: boolean;
+  /** The latest completion's shipped email. */
+  shippedEmail?: { state: string; sentAt: number | null } | null;
+}
+
+const EMAIL_STATES: Record<string, string> = {
+  pending: "Ship is sending the shipped email.",
+  sent: "Ship sent the shipped email.",
+  no_recipient: "No shipped email: the order has no email address to send to.",
+  failed: "The shipped email could not be sent.",
+  expired: "The shipped email could not be sent in time and was dropped.",
+};
 
 export function orderPage(site: string, email: string, summary: OrderSummary, settings: Settings, options: LabelForm = {}): string {
   const { order } = summary;
@@ -121,7 +133,8 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
     return cents === null || cents === undefined ? " (not available for this package)" : `: ${money(cents)}`;
   };
   const form = order.status === "completed"
-    ? `<p>This order is Completed in Commerce${order.completed?.tracking ? ` with tracking ${esc(order.completed.tracking)}` : ""}.</p>`
+    ? `<p>This order is Completed in Commerce${order.completed?.tracking ? ` with tracking ${esc(order.completed.tracking)}` : ""}.</p>${
+      options.shippedEmail && EMAIL_STATES[options.shippedEmail.state] ? `<p class="muted">${esc(EMAIL_STATES[options.shippedEmail.state])}${order.test ? " TEST orders email you, never the shopper." : ""}</p>` : ""}`
     : label ? `<p>This order has a label. Commerce marks it Completed with the tracking number on its next check.</p>`
     : `<form method="post" action="${base}/labels">
       <input type="hidden" name="version" value="${order.version}">

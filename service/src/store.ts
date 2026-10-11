@@ -4,6 +4,7 @@ import { labelAddress, type LabelAddress } from "./address.js";
 import { NOT_ONE_LINE, parseShipOrder, type ShipOrder } from "./order.js";
 import { buy, downloadPdf, findPurchase, newTransactionId, PitneyError, pitneyConfig, quote, voidLabel, type PbLabel, type PbShipment } from "./pitney.js";
 import { practiceLabelPdf } from "./practice-pdf.js";
+import { DEFAULT_FROM, shippedEmail } from "./shipped-email.js";
 import { GRACE_SECONDS, REFRESH_SECONDS } from "./session.js";
 
 /** Commerce reads at most this many labels per call (dinkuskit/commerce src/features/orders/ship.ts). */
@@ -40,6 +41,14 @@ export type Quotes = Partial<Record<ServiceCode, number | null>>;
 type Purchase = { transaction_id: string; order_id: string; version: number; service: string; box: string; weight_oz: number; state: string; created_by: string; created_at: number };
 /** How long a purchase counts as still in flight before another page may check on it. */
 const IN_FLIGHT_MS = 60_000;
+
+/** Orders completed this long before the store first sent Ship anything get no email (clock differences aside). */
+const BEFORE_CONNECT_MS = 15 * 60_000;
+/** Waits between tries when the email service fails; after the last one the email is given up. */
+const EMAIL_RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 6 * 3_600_000, 12 * 3_600_000];
+/** A completion older than this is not emailed any more, however it got stuck. */
+const EMAIL_MAX_AGE_MS = 3 * 24 * 3_600_000;
+const EMAILS_PER_ALARM = 25;
 export interface OrderSummary { order: ShipOrder; labels: Label[]; address: LabelAddress }
 
 type Fields = Record<string, unknown>;
@@ -124,6 +133,10 @@ export class StoreShipping extends DurableObject<Env> {
       transaction_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL, service TEXT NOT NULL, box TEXT NOT NULL,
       weight_oz REAL NOT NULL, state TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS labels_by_order ON labels (order_id, created_at)");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS shipped_emails (
+      order_id TEXT NOT NULL, completed_at TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+      next_at INTEGER NOT NULL, created_at INTEGER NOT NULL, sent_at INTEGER, PRIMARY KEY (order_id, completed_at))`);
+    this.sql.exec("CREATE INDEX IF NOT EXISTS shipped_emails_due ON shipped_emails (state, next_at)");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS sessions (
       session_id TEXT PRIMARY KEY, uid TEXT NOT NULL, email TEXT NOT NULL, refresh_token TEXT NOT NULL,
       checked_at INTEGER NOT NULL, refreshing_until INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`);
@@ -502,14 +515,94 @@ export class StoreShipping extends DurableObject<Env> {
         ON CONFLICT (order_id) DO UPDATE SET version = excluded.version, record = excluded.record, updated_at = excluded.updated_at`,
         order.orderId, order.version, JSON.stringify(order), now, now);
       if (order.storeName) this.setMeta("store_name", order.storeName);
+      await this.queueShippedEmail(order);
+      await this.wakeForEmails();
       return ok({ orderId: order.orderId, version: order.version });
     } catch (error) {
       return toOutcome(error);
     }
   }
 
+  /**
+   * One shipped email per completion: the order id plus the completion time, so a
+   * retried or newer version of the same completion never sends twice, and an
+   * order moved back to Processing and completed again sends a new one.
+   */
+  private async queueShippedEmail(order: ShipOrder): Promise<void> {
+    if (order.status !== "completed" || !order.completed) return;
+    const completedAt = Date.parse(order.completed.at);
+    const connectedAt = Date.parse(this.meta("connected_at") ?? "");
+    if (!Number.isFinite(completedAt) || completedAt < connectedAt - BEFORE_CONNECT_MS) return;
+    const now = Date.now();
+    this.sql.exec(`INSERT OR IGNORE INTO shipped_emails (order_id, completed_at, state, next_at, created_at) VALUES (?, ?, 'pending', ?, ?)`,
+      order.orderId, order.completed.at, now, now);
+  }
+
+  /**
+   * Makes sure an alarm is set for waiting emails once sending is set up. Commerce
+   * calls Ship on every sync, so emails queued before the deploy set up sending
+   * go out on the first call after it does.
+   */
+  private async wakeForEmails(): Promise<void> {
+    if (!this.emailSender()) return;
+    const next = this.sql.exec<{ next_at: number | null }>("SELECT MIN(next_at) AS next_at FROM shipped_emails WHERE state = 'pending'").one().next_at;
+    if (next !== null) await this.wakeAt(next);
+  }
+
+  /** The email binding, once the deploy has set it up; null leaves emails waiting. */
+  protected emailSender(): SendEmail | null {
+    return this.env.SHIP_EMAIL_FROM && this.env.EMAIL ? this.env.EMAIL : null;
+  }
+
+  private async wakeAt(when: number): Promise<void> {
+    const current = await this.ctx.storage.getAlarm();
+    if (current === null || current > when) await this.ctx.storage.setAlarm(when);
+  }
+
+  /** Sends the shipped emails that are due, and tries failed ones again later. A failed email never changes an order. */
+  override async alarm(): Promise<void> {
+    const sender = this.emailSender();
+    if (!sender) return;
+    const now = Date.now();
+    const due = this.sql.exec<{ order_id: string; completed_at: string; attempts: number; created_at: number }>(
+      "SELECT order_id, completed_at, attempts, created_at FROM shipped_emails WHERE state = 'pending' AND next_at <= ? ORDER BY next_at LIMIT ?",
+      now, EMAILS_PER_ALARM).toArray();
+    const settings = await this.getSettings();
+    for (const row of due) {
+      const finish = (state: string) => this.sql.exec("UPDATE shipped_emails SET state = ?, sent_at = ? WHERE order_id = ? AND completed_at = ?",
+        state, state === "sent" ? Date.now() : null, row.order_id, row.completed_at);
+      const order = await this.getOrder(row.order_id);
+      // The owner moved the order back to Processing, or completed it again, before the email went out.
+      if (!order || order.status !== "completed" || order.completed?.at !== row.completed_at) { finish("superseded"); continue; }
+      if (now - row.created_at > EMAIL_MAX_AGE_MS) { finish("expired"); continue; }
+      // TEST orders email the store owner (the reply-to address), never the shopper.
+      const to = order.test ? settings.replyTo : order.email;
+      if (!to) { finish("no_recipient"); continue; }
+      try {
+        await sender.send(shippedEmail(order, { to, from: this.env.SHIP_EMAIL_FROM || DEFAULT_FROM, storeName: settings.storeName, replyTo: settings.replyTo }));
+        finish("sent");
+      } catch (error) {
+        console.error("ship shipped email failed", error instanceof Error ? error.message : "unknown");
+        const wait = EMAIL_RETRY_MS[row.attempts];
+        if (wait === undefined) finish("failed");
+        else this.sql.exec("UPDATE shipped_emails SET attempts = attempts + 1, next_at = ? WHERE order_id = ? AND completed_at = ?",
+          Date.now() + wait, row.order_id, row.completed_at);
+      }
+    }
+    const next = this.sql.exec<{ next_at: number | null }>("SELECT MIN(next_at) AS next_at FROM shipped_emails WHERE state = 'pending'").one().next_at;
+    if (next !== null) await this.ctx.storage.setAlarm(Math.max(next, Date.now() + 1000));
+  }
+
+  /** Where each completion's shipped email stands, for the owner's order page. */
+  async shippedEmailState(orderId: string): Promise<{ state: string; sentAt: number | null } | null> {
+    const row = this.sql.exec<{ state: string; sent_at: number | null }>(
+      "SELECT state, sent_at FROM shipped_emails WHERE order_id = ? ORDER BY created_at DESC LIMIT 1", orderId).toArray()[0];
+    return row ? { state: row.state, sentAt: row.sent_at } : null;
+  }
+
   /** Labels Commerce has not acknowledged, oldest first. */
   async listLabels(): Promise<Outcome> {
+    await this.wakeForEmails();
     const rows = this.sql.exec<{ event_id: string; order_id: string; version: number; carrier: string; tracking: string }>(
       "SELECT event_id, order_id, version, carrier, tracking FROM label_events WHERE acked_at IS NULL ORDER BY seq LIMIT ?",
       LABELS_PER_LIST).toArray();
