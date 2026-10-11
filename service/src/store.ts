@@ -2,6 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { ok, ServiceError, toOutcome, type Outcome } from "./errors.js";
 import { labelAddress, type LabelAddress } from "./address.js";
 import { NOT_ONE_LINE, parseShipOrder, type ShipOrder } from "./order.js";
+import { buy, downloadPdf, findPurchase, newTransactionId, PitneyError, pitneyConfig, quote, voidLabel, type PbLabel, type PbShipment } from "./pitney.js";
 import { practiceLabelPdf } from "./practice-pdf.js";
 import { GRACE_SECONDS, REFRESH_SECONDS } from "./session.js";
 
@@ -23,8 +24,22 @@ export interface Box { boxId: string; name: string; lengthIn: number; widthIn: n
 export interface Label {
   labelId: string; orderId: string; version: number; test: boolean; service: ServiceCode; box: Box; weightOz: number;
   carrier: string; tracking: string; status: "bought" | "cancelled"; createdBy: string; createdAt: string; cancelledAt: string | null;
+  /** What the store's postage account paid; null for practice labels. */
+  priceCents: number | null;
+  /** PB's refund state after a cancel ("INITIATED" or "APPROVED"); null otherwise. */
+  refund: string | null;
 }
-export interface Settings { shipFrom: ShipFrom | null; boxes: Box[]; storeName: string | null; replyTo: string | null }
+export interface Settings {
+  shipFrom: ShipFrom | null; boxes: Box[]; storeName: string | null; replyTo: string | null;
+  /** Whether Ship can buy real postage from Pitney Bowes. */
+  postageConnected: boolean;
+}
+export type Quotes = Partial<Record<ServiceCode, number | null>>;
+
+/** A Pitney Bowes purchase Ship sent and has not finished recording. */
+type Purchase = { transaction_id: string; order_id: string; version: number; service: string; box: string; weight_oz: number; state: string; created_by: string; created_at: number };
+/** How long a purchase counts as still in flight before another page may check on it. */
+const IN_FLIGHT_MS = 60_000;
 export interface OrderSummary { order: ShipOrder; labels: Label[]; address: LabelAddress }
 
 type Fields = Record<string, unknown>;
@@ -45,6 +60,23 @@ function formNumber(fields: Fields, key: string, label: string, min: number, max
   const value = typeof raw === "number" ? raw : raw === "" || raw === undefined ? NaN : Number(raw);
   if (!Number.isFinite(value) || value < min || value > max) refuse("INVALID_INPUT", `${label} must be a number from ${min} to ${max}.`);
   return Math.round(value * 100) / 100;
+}
+
+/** Columns labels gained with Pitney Bowes postage; a store made before then gets them added once. */
+const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT" } as const;
+
+export function addLabelColumns(sql: SqlStorage): void {
+  const present = new Set(sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('labels')").toArray().map(row => row.name));
+  for (const [column, type] of Object.entries(LABEL_COLUMNS)) {
+    if (!present.has(column)) sql.exec(`ALTER TABLE labels ADD COLUMN ${column} ${type}`);
+  }
+}
+
+/** Pitney Bowes failures become messages for the owner's page. */
+function asServiceError(error: unknown): unknown {
+  if (!(error instanceof PitneyError)) return error;
+  if (error.kind === "refused") return new ServiceError(422, "PITNEY_BOWES_REFUSED", error.message);
+  return new ServiceError(503, "PITNEY_BOWES_UNAVAILABLE", error.message);
 }
 
 function randomDigits(count: number): string {
@@ -87,6 +119,10 @@ export class StoreShipping extends DurableObject<Env> {
       label_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL, test INTEGER NOT NULL,
       service TEXT NOT NULL, box TEXT NOT NULL, weight_oz REAL NOT NULL, carrier TEXT NOT NULL, tracking TEXT NOT NULL,
       pdf BLOB NOT NULL, status TEXT NOT NULL, created_by TEXT NOT NULL, created_at TEXT NOT NULL, cancelled_at TEXT)`);
+    addLabelColumns(this.sql);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS purchases (
+      transaction_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL, service TEXT NOT NULL, box TEXT NOT NULL,
+      weight_oz REAL NOT NULL, state TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS labels_by_order ON labels (order_id, created_at)");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS sessions (
       session_id TEXT PRIMARY KEY, uid TEXT NOT NULL, email TEXT NOT NULL, refresh_token TEXT NOT NULL,
@@ -161,7 +197,10 @@ export class StoreShipping extends DurableObject<Env> {
     const boxes = this.sql.exec<{ box_id: string; name: string; length_in: number; width_in: number; height_in: number; weight_oz: number }>(
       "SELECT * FROM boxes ORDER BY created_at, box_id").toArray()
       .map(row => ({ boxId: row.box_id, name: row.name, lengthIn: row.length_in, widthIn: row.width_in, heightIn: row.height_in, weightOz: row.weight_oz }));
-    return { shipFrom: shipFrom ? JSON.parse(shipFrom) as ShipFrom : null, boxes, storeName: this.meta("store_name"), replyTo: this.meta("reply_to") };
+    return {
+      shipFrom: shipFrom ? JSON.parse(shipFrom) as ShipFrom : null, boxes, storeName: this.meta("store_name"), replyTo: this.meta("reply_to"),
+      postageConnected: pitneyConfig(this.env) !== null,
+    };
   }
 
   /** The one US address this store ships from, printed as the label's return address. */
@@ -209,12 +248,13 @@ export class StoreShipping extends DurableObject<Env> {
 
   private labelsFor(orderId: string): Label[] {
     return this.sql.exec<Record<string, string | number | null>>(
-      "SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at FROM labels WHERE order_id = ? ORDER BY created_at",
+      "SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at, price_cents, refund FROM labels WHERE order_id = ? ORDER BY created_at",
       orderId).toArray().map(row => ({
         labelId: row.label_id as string, orderId: row.order_id as string, version: row.version as number, test: row.test === 1,
         service: row.service as ServiceCode, box: JSON.parse(row.box as string) as Box, weightOz: row.weight_oz as number,
         carrier: row.carrier as string, tracking: row.tracking as string, status: row.status as Label["status"],
         createdBy: row.created_by as string, createdAt: row.created_at as string, cancelledAt: row.cancelled_at as string | null,
+        priceCents: row.price_cents as number | null, refund: row.refund as string | null,
       }));
   }
 
@@ -233,64 +273,196 @@ export class StoreShipping extends DurableObject<Env> {
     return order ? { order, labels: this.labelsFor(orderId), address: labelAddress(order.shipTo) } : null;
   }
 
-  /**
-   * Buys one label for the order's latest version. A TEST order gets a practice
-   * label: a PDF marked "TEST - NOT POSTAGE" and a TEST tracking number, with no
-   * call to Pitney Bowes. Either way the label is queued for Commerce, which then
-   * marks the order Completed.
-   */
-  async buyLabel(input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
+  /** Checks a label form against the order's latest version and the store's settings. */
+  private async labelRequest(orderId: string, fields: Fields, needService: boolean) {
+    const summary = await this.orderSummary(orderId);
+    if (!summary) refuse("NOT_FOUND", "Ship has not received this order.", 404);
+    const { order } = summary;
+    if (formNumber(fields, "version", "Order version", 1, Number.MAX_SAFE_INTEGER) !== order.version) {
+      refuse("ORDER_CHANGED", "The order changed in Commerce since this page opened. Reload to see the latest.", 409);
+    }
+    if (order.status !== "processing") refuse("ALREADY_COMPLETED", "This order is already Completed in Commerce.", 409);
+    this.refuseIfLabeled(order.orderId, order.version);
+    if (!summary.address.ok) refuse("ADDRESS_PROBLEM", summary.address.problem, 409);
+    const settings = await this.getSettings();
+    if (!settings.shipFrom) refuse("NO_SHIP_FROM", "Add your ship-from address in Settings first.", 409);
+    const service = fields.service;
+    if (needService && (typeof service !== "string" || !(service in SERVICES))) refuse("INVALID_INPUT", "Pick a USPS service.");
+    const box = settings.boxes.find(candidate => candidate.boxId === fields.boxId);
+    if (!box) refuse("INVALID_INPUT", "Pick one of your box sizes. Add box sizes in Settings.");
+    const weightOz = formNumber(fields, "weightOz", "Package weight (oz)", 0.1, MAX_WEIGHT_OZ);
+    const to = summary.address as Extract<LabelAddress, { ok: true }>;
+    const from = settings.shipFrom;
+    const shipment = (code: ServiceCode): PbShipment => ({
+      from: { name: from.name, ...(from.company ? { company: from.company } : {}), lines: [from.line1, from.line2].filter((line): line is string => Boolean(line)), city: from.city, state: from.region, zip: from.postalCode },
+      to: { name: to.name, lines: to.lines, city: to.city, state: to.state, zip: to.zip },
+      service: code, weightOz, lengthIn: box.lengthIn, widthIn: box.widthIn, heightIn: box.heightIn,
+    });
+    return { order, settings, from, to, box, weightOz, service: service as ServiceCode, shipment };
+  }
+
+  /** One live label per order version; a purchase still in flight counts too. */
+  private refuseIfLabeled(orderId: string, version: number): void {
+    const live = this.sql.exec("SELECT 1 FROM labels WHERE order_id = ? AND version = ? AND status = 'bought'", orderId, version).toArray().length;
+    if (live) refuse("ALREADY_LABELED", "This order already has a label. Cancel it first to buy another.", 409);
+  }
+
+  private openPurchase(orderId: string): Purchase | undefined {
+    return this.sql.exec<Purchase>("SELECT * FROM purchases WHERE order_id = ? ORDER BY created_at LIMIT 1", orderId).toArray()[0];
+  }
+
+  /** What each USPS service costs for this package, from the store's PB postage account. */
+  async quoteLabel(input: { orderId: string; fields: Fields }): Promise<Outcome> {
     try {
-      const summary = await this.orderSummary(input.orderId);
-      if (!summary) refuse("NOT_FOUND", "Ship has not received this order.", 404);
-      const { order, labels } = summary;
-      if (formNumber(input.fields, "version", "Order version", 1, Number.MAX_SAFE_INTEGER) !== order.version) {
-        refuse("ORDER_CHANGED", "The order changed in Commerce since this page opened. Reload to see the latest.", 409);
-      }
-      if (order.status !== "processing") refuse("ALREADY_COMPLETED", "This order is already Completed in Commerce.", 409);
-      if (labels.some(label => label.status === "bought" && label.version === order.version)) {
-        refuse("ALREADY_LABELED", "This order already has a label. Cancel it first to buy another.", 409);
-      }
-      if (!summary.address.ok) refuse("ADDRESS_PROBLEM", summary.address.problem, 409);
-      const settings = await this.getSettings();
-      if (!settings.shipFrom) refuse("NO_SHIP_FROM", "Add your ship-from address in Settings first.", 409);
-      const service = input.fields.service;
-      if (typeof service !== "string" || !(service in SERVICES)) refuse("INVALID_INPUT", "Pick a USPS service.");
-      const box = settings.boxes.find(candidate => candidate.boxId === input.fields.boxId);
-      if (!box) refuse("INVALID_INPUT", "Pick one of your box sizes. Add box sizes in Settings.");
-      const weightOz = formNumber(input.fields, "weightOz", "Package weight (oz)", 0.1, MAX_WEIGHT_OZ);
-      if (!order.test) {
-        refuse("POSTAGE_NOT_CONNECTED", "Buying real postage through Pitney Bowes comes in the next Ship update. TEST orders can use practice labels now.", 409);
-      }
-      const now = new Date().toISOString();
-      const label: Label = {
-        labelId: `label_${crypto.randomUUID()}`, orderId: order.orderId, version: order.version, test: true,
-        service: service as ServiceCode, box, weightOz, carrier: "USPS", tracking: `TEST${randomDigits(18)}`,
-        status: "bought", createdBy: input.uid, createdAt: now, cancelledAt: null,
-      };
-      const to = summary.address as Extract<LabelAddress, { ok: true }>;
-      const pdf = practiceLabelPdf([
-        `ORDER: ${order.number === null ? order.orderId : `#${order.number}`}   SERVICE: ${SERVICES[label.service]}`,
-        `TRACKING: ${label.tracking}`,
-        `FROM: ${settings.shipFrom.name}, ${settings.shipFrom.city} ${settings.shipFrom.region} ${settings.shipFrom.postalCode}`,
-        `TO: ${to.name}`, ...to.lines.map(line => `    ${line}`), `    ${to.city} ${to.state} ${to.zip}`,
-        `BOX: ${box.name} (${box.lengthIn} x ${box.widthIn} x ${box.heightIn} in)   WEIGHT: ${weightOz} oz`,
-      ]);
-      this.sql.exec(`INSERT INTO labels (label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, pdf, status, created_by, created_at)
-        VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'bought', ?, ?)`,
-        label.labelId, label.orderId, label.version, label.service, JSON.stringify(box), weightOz, label.carrier, label.tracking, pdf, label.createdBy, now);
-      await this.recordLabel({ orderId: order.orderId, version: order.version, carrier: label.carrier, tracking: label.tracking });
-      return ok(label, 201);
+      const request = await this.labelRequest(input.orderId, input.fields, false);
+      if (request.order.test) refuse("TEST_ORDER", "Practice labels for TEST orders are free.", 409);
+      const config = pitneyConfig(this.env);
+      if (!config) refuse("POSTAGE_NOT_CONNECTED", "Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels.", 409);
+      const codes = Object.keys(SERVICES) as ServiceCode[];
+      const prices = await Promise.allSettled(codes.map(code => quote(config, request.shipment(code))));
+      const unreachable = prices.find(result => result.status === "rejected" && !(result.reason instanceof PitneyError && result.reason.kind === "refused"));
+      if (unreachable) throw unreachable.status === "rejected" && unreachable.reason instanceof PitneyError ? unreachable.reason : new Error("quote failed");
+      const quotes: Quotes = {};
+      codes.forEach((code, index) => {
+        const result = prices[index]!;
+        quotes[code] = result.status === "fulfilled" ? result.value : null;
+      });
+      return ok(quotes);
     } catch (error) {
-      return toOutcome(error);
+      return toOutcome(asServiceError(error));
     }
   }
 
-  /** Cancelling a label never changes the Commerce order (order-and-shipping-decisions answer 8). */
+  /**
+   * Buys one label for the order's latest version. A TEST order gets a practice
+   * label: a PDF marked "TEST - NOT POSTAGE" and a TEST tracking number, with no
+   * call to Pitney Bowes. A real order's label is bought from Pitney Bowes and
+   * charged to the store's own PB postage account. Either way the label is
+   * queued for Commerce, which then marks the order Completed.
+   */
+  async buyLabel(input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
+    try {
+      const request = await this.labelRequest(input.orderId, input.fields, true);
+      return request.order.test ? this.practiceLabel(request, input.uid) : await this.postageLabel(request, input);
+    } catch (error) {
+      return toOutcome(asServiceError(error));
+    }
+  }
+
+  private practiceLabel(request: Awaited<ReturnType<StoreShipping["labelRequest"]>>, uid: string): Outcome {
+    const { order, from, to, box, weightOz, service } = request;
+    const now = new Date().toISOString();
+    const label: Label = {
+      labelId: `label_${crypto.randomUUID()}`, orderId: order.orderId, version: order.version, test: true,
+      service, box, weightOz, carrier: "USPS", tracking: `TEST${randomDigits(18)}`,
+      status: "bought", createdBy: uid, createdAt: now, cancelledAt: null, priceCents: null, refund: null,
+    };
+    const pdf = practiceLabelPdf([
+      `ORDER: ${order.number === null ? order.orderId : `#${order.number}`}   SERVICE: ${SERVICES[label.service]}`,
+      `TRACKING: ${label.tracking}`,
+      `FROM: ${from.name}, ${from.city} ${from.region} ${from.postalCode}`,
+      `TO: ${to.name}`, ...to.lines.map(line => `    ${line}`), `    ${to.city} ${to.state} ${to.zip}`,
+      `BOX: ${box.name} (${box.lengthIn} x ${box.widthIn} x ${box.heightIn} in)   WEIGHT: ${weightOz} oz`,
+    ]);
+    this.sql.exec(`INSERT INTO labels (label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, pdf, status, created_by, created_at)
+      VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, 'bought', ?, ?)`,
+      label.labelId, label.orderId, label.version, label.service, JSON.stringify(box), weightOz, label.carrier, label.tracking, pdf, label.createdBy, now);
+    this.queueLabel({ orderId: order.orderId, version: order.version, carrier: label.carrier, tracking: label.tracking });
+    return ok(label, 201);
+  }
+
+  /**
+   * Pitney Bowes keeps a purchase's transaction id, so when its answer is lost
+   * Ship looks the label up before buying again, and never buys a second label
+   * for that order without the owner saying so.
+   */
+  private async postageLabel(request: Awaited<ReturnType<StoreShipping["labelRequest"]>>, input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
+    const config = pitneyConfig(this.env);
+    if (!config) refuse("POSTAGE_NOT_CONNECTED", "Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels.", 409);
+    const { order } = request;
+    const earlier = this.openPurchase(order.orderId);
+    if (earlier) {
+      if (earlier.state === "pending" && Date.now() - earlier.created_at < IN_FLIGHT_MS) {
+        refuse("LABEL_IN_PROGRESS", "Ship is buying a label for this order right now. Reload the page in a moment.", 409);
+      }
+      const found = await findPurchase(config, earlier.transaction_id);
+      if (found) return ok(await this.finishPurchase(earlier, found), 201);
+      if (input.fields.buyAgain !== "yes") {
+        refuse("CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", 409);
+      }
+      this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? AND state = ?", earlier.transaction_id, earlier.state);
+    }
+    // Nothing above may have changed while Ship waited on Pitney Bowes.
+    this.refuseIfLabeled(order.orderId, order.version);
+    if (this.openPurchase(order.orderId)) refuse("LABEL_IN_PROGRESS", "Ship is buying a label for this order right now. Reload the page in a moment.", 409);
+    const purchase: Purchase = {
+      transaction_id: newTransactionId(), order_id: order.orderId, version: order.version, service: request.service,
+      box: JSON.stringify(request.box), weight_oz: request.weightOz, state: "pending", created_by: input.uid, created_at: Date.now(),
+    };
+    this.sql.exec(`INSERT INTO purchases (transaction_id, order_id, version, service, box, weight_oz, state, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      purchase.transaction_id, purchase.order_id, purchase.version, purchase.service, purchase.box, purchase.weight_oz, purchase.state, purchase.created_by, purchase.created_at);
+    let bought: PbLabel;
+    try {
+      bought = await buy(config, request.shipment(request.service), purchase.transaction_id);
+    } catch (error) {
+      if (error instanceof PitneyError && error.kind === "unknown") {
+        this.sql.exec("UPDATE purchases SET state = 'unknown' WHERE transaction_id = ?", purchase.transaction_id);
+        refuse("PITNEY_BOWES_NO_ANSWER", "Pitney Bowes did not confirm the label, so Ship does not know yet whether it was bought. Press Buy label again: Ship checks with Pitney Bowes first and does not buy a second label without asking.", 502);
+      }
+      this.sql.exec("DELETE FROM purchases WHERE transaction_id = ?", purchase.transaction_id);
+      throw error;
+    }
+    return ok(await this.finishPurchase(purchase, bought), 201);
+  }
+
+  /** Keeps a label Pitney Bowes sold, with a copy of its PDF, and queues it for Commerce. */
+  private async finishPurchase(purchase: Purchase, bought: PbLabel): Promise<Label> {
+    let pdf: Uint8Array = new Uint8Array();
+    try {
+      pdf = await downloadPdf(bought.pdfUrl);
+    } catch {
+      // The label is bought either way; its page fetches the PDF again when opened.
+    }
+    this.sql.exec("DELETE FROM purchases WHERE transaction_id = ?", purchase.transaction_id);
+    const kept = this.sql.exec<{ label_id: string }>("SELECT label_id FROM labels WHERE shipment_id = ?", bought.shipmentId).toArray()[0];
+    // Another page recorded this purchase while the PDF downloaded.
+    if (kept) return this.labelsFor(purchase.order_id).find(label => label.labelId === kept.label_id)!;
+    const now = new Date().toISOString();
+    const label: Label = {
+      labelId: `label_${crypto.randomUUID()}`, orderId: purchase.order_id, version: purchase.version, test: false,
+      service: purchase.service as ServiceCode, box: JSON.parse(purchase.box) as Box, weightOz: purchase.weight_oz, carrier: "USPS",
+      tracking: bought.tracking, status: "bought", createdBy: purchase.created_by, createdAt: now, cancelledAt: null,
+      priceCents: bought.priceCents, refund: null,
+    };
+    this.sql.exec(`INSERT INTO labels (label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, pdf, status, created_by, created_at, price_cents, shipment_id, pdf_url)
+      VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 'bought', ?, ?, ?, ?, ?)`,
+      label.labelId, label.orderId, label.version, label.service, purchase.box, label.weightOz, label.carrier, label.tracking, pdf,
+      label.createdBy, now, label.priceCents, bought.shipmentId, bought.pdfUrl);
+    this.queueLabel({ orderId: label.orderId, version: label.version, carrier: label.carrier, tracking: label.tracking });
+    return label;
+  }
+
+  /**
+   * Cancelling a label never changes the Commerce order (order-and-shipping-decisions answer 8).
+   * A real label is voided with Pitney Bowes first, and USPS refunds the store's postage account.
+   */
   async cancelLabel(labelId: string): Promise<Outcome> {
-    const changed = this.sql.exec("UPDATE labels SET status = 'cancelled', cancelled_at = ? WHERE label_id = ? AND status = 'bought'",
-      new Date().toISOString(), labelId).rowsWritten;
-    return changed ? ok({ labelId }) : toOutcome(new ServiceError(404, "NOT_FOUND", "No label to cancel."));
+    try {
+      const row = this.sql.exec<{ test: number; shipment_id: string | null }>(
+        "SELECT test, shipment_id FROM labels WHERE label_id = ? AND status = 'bought'", labelId).toArray()[0];
+      if (!row) refuse("NOT_FOUND", "No label to cancel.", 404);
+      let refund: string | null = null;
+      if (!row.test) {
+        const config = pitneyConfig(this.env);
+        if (!config || !row.shipment_id) refuse("POSTAGE_NOT_CONNECTED", "Pitney Bowes is not connected to Ship right now, so the label cannot be cancelled yet.", 503);
+        refund = await voidLabel(config, row.shipment_id);
+      }
+      this.sql.exec("UPDATE labels SET status = 'cancelled', cancelled_at = ?, refund = ? WHERE label_id = ? AND status = 'bought'",
+        new Date().toISOString(), refund, labelId);
+      return ok({ labelId, refund });
+    } catch (error) {
+      return toOutcome(asServiceError(error));
+    }
   }
 
   /** The order a label belongs to, for going back to its page. */
@@ -298,8 +470,19 @@ export class StoreShipping extends DurableObject<Env> {
     return this.sql.exec<{ order_id: string }>("SELECT order_id FROM labels WHERE label_id = ?", labelId).toArray()[0]?.order_id ?? null;
   }
 
-  async labelPdf(labelId: string): Promise<ArrayBuffer | null> {
-    return this.sql.exec<{ pdf: ArrayBuffer }>("SELECT pdf FROM labels WHERE label_id = ?", labelId).toArray()[0]?.pdf ?? null;
+  /** The label's PDF; "not_ready" when Pitney Bowes's copy could not be downloaded yet. */
+  async labelPdf(labelId: string): Promise<ArrayBuffer | Uint8Array | "not_ready" | null> {
+    const row = this.sql.exec<{ pdf: ArrayBuffer; pdf_url: string | null }>("SELECT pdf, pdf_url FROM labels WHERE label_id = ?", labelId).toArray()[0];
+    if (!row) return null;
+    if (row.pdf.byteLength > 0) return row.pdf;
+    if (!row.pdf_url) return "not_ready";
+    try {
+      const pdf = await downloadPdf(row.pdf_url);
+      this.sql.exec("UPDATE labels SET pdf = ? WHERE label_id = ?", pdf, labelId);
+      return pdf;
+    } catch {
+      return "not_ready";
+    }
   }
 
   /**
@@ -358,6 +541,10 @@ export class StoreShipping extends DurableObject<Env> {
    * single-line limit.
    */
   async recordLabel(label: Omit<LabelEvent, "eventId">): Promise<LabelEvent> {
+    return this.queueLabel(label);
+  }
+
+  private queueLabel(label: Omit<LabelEvent, "eventId">): LabelEvent {
     for (const value of [label.carrier, label.tracking]) {
       if (!value || value.length > 64 || NOT_ONE_LINE.test(value)) throw new Error("carrier and tracking must be one line of at most 64 characters");
     }

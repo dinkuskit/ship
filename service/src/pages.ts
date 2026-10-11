@@ -1,6 +1,6 @@
 import type { LabelAddress } from "./address.js";
 import type { ShipOrder } from "./order.js";
-import { MAX_WEIGHT_OZ, SERVICES, type Label, type OrderSummary, type Settings } from "./store.js";
+import { MAX_WEIGHT_OZ, SERVICES, type Label, type OrderSummary, type Quotes, type ServiceCode, type Settings } from "./store.js";
 
 /** Escapes text for HTML element content and attribute values. */
 export function esc(value: unknown): string {
@@ -77,18 +77,25 @@ export function ordersPage(site: string, email: string, orders: OrderSummary[]):
   return page("Orders", `<h1>Orders</h1>${body}`, { site, email });
 }
 
+const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+
 function labelRow(site: string, label: Label, current: boolean): string {
   const base = `/stores/${encodeURIComponent(site)}/labels/${encodeURIComponent(label.labelId)}`;
   const actions = label.status === "bought"
     ? `<a href="${base}.pdf" target="_blank" rel="noopener">Open PDF to print</a>
        <form class="inline" method="post" action="${base}/cancel"><button class="secondary" style="margin:0 0 0 12px">Cancel label</button></form>`
-    : `<span class="muted">Cancelled</span>`;
+    : `<span class="muted">Cancelled${label.refund ? ". USPS refunds your postage account, which can take up to 14 days." : ""}</span>`;
   return `<tr><td>${esc(SERVICES[label.service])}${label.test ? ' <span class="tag test">PRACTICE</span>' : ""}${current ? "" : ' <span class="muted">(older order version)</span>'}</td>
-    <td>${esc(label.tracking)}</td><td>${esc(label.box.name)}, ${esc(label.weightOz)} oz</td><td>${actions}</td></tr>`;
+    <td>${esc(label.tracking)}</td><td>${esc(label.box.name)}, ${esc(label.weightOz)} oz</td>
+    <td>${label.priceCents === null ? '<span class="muted">—</span>' : money(label.priceCents)}</td><td>${actions}</td></tr>`;
 }
 
-export function orderPage(site: string, email: string, summary: OrderSummary, settings: Settings, error?: string): string {
+/** What the label form shows besides the order: an error, the owner's last choices, prices. */
+export interface LabelForm { error?: string; fields?: Record<string, string>; quotes?: Quotes; askBuyAgain?: boolean }
+
+export function orderPage(site: string, email: string, summary: OrderSummary, settings: Settings, options: LabelForm = {}): string {
   const { order } = summary;
+  const { error, fields = {}, quotes } = options;
   const label = liveLabel(summary);
   const knownWeight = order.lines.reduce((sum, line) => sum + (line.weightOz ?? 0) * line.quantity, 0);
   const missingWeight = order.lines.some(line => line.weightOz === undefined);
@@ -97,26 +104,39 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
     <td>${line.unitPrice ? `$${(Number(line.unitPrice.minor) / 100).toFixed(2)}` : '<span class="muted">—</span>'}</td></tr>`).join("");
   const notices: string[] = [];
   if (order.test) notices.push("This is a TEST order. Ship makes a practice label marked \"TEST - NOT POSTAGE\" and buys no postage.");
+  else if (!settings.postageConnected) notices.push("Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels.");
   if (!summary.address.ok) notices.push(summary.address.problem);
   if (!settings.shipFrom) notices.push(`Add your ship-from address in <a href="/stores/${encodeURIComponent(site)}/settings">Settings</a> before buying labels.`);
   if (!settings.boxes.length) notices.push(`Add your box sizes in <a href="/stores/${encodeURIComponent(site)}/settings">Settings</a> before buying labels.`);
   if (missingWeight) notices.push("Some items have no weight in Commerce, so check the package weight before buying.");
-  const blocked = order.status !== "processing" || Boolean(label) || !summary.address.ok || !settings.shipFrom || !settings.boxes.length;
+  const blocked = order.status !== "processing" || Boolean(label) || !summary.address.ok || !settings.shipFrom || !settings.boxes.length ||
+    (!order.test && !settings.postageConnected);
+  const base = `/stores/${encodeURIComponent(site)}/orders/${encodeURIComponent(order.orderId)}`;
+  const chosenBox = settings.boxes.find(box => box.boxId === fields.boxId) ?? settings.boxes[0];
+  const weight = fields.weightOz ?? (chosenBox ? String(Math.round((knownWeight + chosenBox.weightOz) * 10) / 10) : "");
+  const chosenService = fields.service && fields.service in SERVICES ? fields.service : "GA";
+  const price = (code: ServiceCode) => {
+    if (!quotes || !(code in quotes)) return "";
+    const cents = quotes[code];
+    return cents === null || cents === undefined ? " (not available for this package)" : `: ${money(cents)}`;
+  };
   const form = order.status === "completed"
     ? `<p>This order is Completed in Commerce${order.completed?.tracking ? ` with tracking ${esc(order.completed.tracking)}` : ""}.</p>`
     : label ? `<p>This order has a label. Commerce marks it Completed with the tracking number on its next check.</p>`
-    : `<form method="post" action="/stores/${encodeURIComponent(site)}/orders/${encodeURIComponent(order.orderId)}/labels">
+    : `<form method="post" action="${base}/labels">
       <input type="hidden" name="version" value="${order.version}">
       <label for="boxId">Box</label><select id="boxId" name="boxId" required>${settings.boxes.map(box =>
-        `<option value="${esc(box.boxId)}" data-weight="${box.weightOz}">${esc(box.name)}: ${box.lengthIn} × ${box.widthIn} × ${box.heightIn} in, ${box.weightOz} oz empty</option>`).join("")}</select>
+        `<option value="${esc(box.boxId)}"${box === chosenBox ? " selected" : ""}>${esc(box.name)}: ${box.lengthIn} × ${box.widthIn} × ${box.heightIn} in, ${box.weightOz} oz empty</option>`).join("")}</select>
       <label for="weightOz">Package weight (oz)</label>
-      <input id="weightOz" name="weightOz" type="number" step="0.1" min="0.1" max="${MAX_WEIGHT_OZ}" required value="${settings.boxes[0] ? Math.round((knownWeight + settings.boxes[0].weightOz) * 10) / 10 : ""}">
+      <input id="weightOz" name="weightOz" type="number" step="0.1" min="0.1" max="${MAX_WEIGHT_OZ}" required value="${esc(weight)}">
       <p class="muted">Items ${Math.round(knownWeight * 10) / 10} oz plus the empty box. Change it if your scale says otherwise.</p>
       <label for="service">Service</label><select id="service" name="service">${Object.entries(SERVICES).map(([code, name]) =>
-        `<option value="${code}"${code === "GA" ? " selected" : ""}>${esc(name)}</option>`).join("")}</select>
-      <button${blocked ? " disabled" : ""}>${order.test ? "Make practice label" : "Buy label"}</button></form>`;
+        `<option value="${code}"${code === chosenService ? " selected" : ""}>${esc(name)}${esc(price(code as ServiceCode))}</option>`).join("")}</select>
+      ${options.askBuyAgain ? '<label><input type="checkbox" name="buyAgain" value="yes" style="width:auto"> Buy a new label (Pitney Bowes has no record of the last one)</label>' : ""}
+      ${order.test ? "" : `<p class="muted">${quotes ? "Prices come from your Pitney Bowes postage account." : "Check prices before buying, or buy at the price Pitney Bowes charges."} Postage is paid from your Pitney Bowes postage account.</p>
+      <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> `}<button${blocked ? " disabled" : ""}>${order.test ? "Make practice label" : "Buy label"}</button></form>`;
   const labels = summary.labels.length
-    ? `<h2>Labels</h2><table><thead><tr><th>Service</th><th>Tracking</th><th>Package</th><th></th></tr></thead><tbody>${summary.labels.map(item => labelRow(site, item, item.version === order.version)).join("")}</tbody></table>`
+    ? `<h2>Labels</h2><table><thead><tr><th>Service</th><th>Tracking</th><th>Package</th><th>Postage</th><th></th></tr></thead><tbody>${summary.labels.map(item => labelRow(site, item, item.version === order.version)).join("")}</tbody></table>`
     : "";
   return page(`Order ${orderName(order)}`, `<p><a href="/stores/${encodeURIComponent(site)}/orders">← Orders</a></p>
     <h1>Order ${esc(orderName(order))}${order.test ? ' <span class="tag test">TEST</span>' : ""}</h1>
