@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import { ok, ServiceError, toOutcome, type Outcome } from "./errors.js";
-import { parseShipOrder, type ShipOrder } from "./order.js";
+import { NOT_ONE_LINE, parseShipOrder, type ShipOrder } from "./order.js";
 
 /** Commerce reads at most this many labels per call (dinkuskit/commerce src/features/orders/ship.ts). */
 export const LABELS_PER_LIST = 100;
@@ -94,7 +94,7 @@ export class StoreShipping extends DurableObject<Env> {
    */
   async recordLabel(label: Omit<LabelEvent, "eventId">): Promise<LabelEvent> {
     for (const value of [label.carrier, label.tracking]) {
-      if (!value || value.length > 64 || /[\u0000-\u001f\u007f]/.test(value)) throw new Error("carrier and tracking must be one line of at most 64 characters");
+      if (!value || value.length > 64 || NOT_ONE_LINE.test(value)) throw new Error("carrier and tracking must be one line of at most 64 characters");
     }
     const event = { eventId: `lbl_${crypto.randomUUID()}`, ...label };
     this.sql.exec("INSERT INTO label_events (event_id, order_id, version, carrier, tracking, created_at) VALUES (?, ?, ?, ?, ?, ?)",

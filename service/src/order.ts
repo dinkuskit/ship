@@ -45,9 +45,12 @@ function object(value: unknown, field: string): Body {
   return value as Body;
 }
 
+/** Control characters, including C1 controls and the Unicode line and paragraph separators. */
+export const NOT_ONE_LINE = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/;
+
 function text(value: unknown, field: string, max: number): string {
   // No line breaks or other control characters: these end up on labels, packing slips and emails.
-  if (typeof value !== "string" || !value.trim() || value.length > max || /[\u0000-\u001f\u007f]/.test(value)) {
+  if (typeof value !== "string" || !value.trim() || value.length > max || NOT_ONE_LINE.test(value)) {
     invalid(field, `must be text of at most ${max} characters`);
   }
   return value;
