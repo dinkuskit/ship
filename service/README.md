@@ -1,6 +1,6 @@
 # DinkusKit Ship service
 
-The hosted Ship service for ship.dinkuskit.com. It runs as a Cloudflare Worker with one SQLite Durable Object per store, like the Payments and Coupons services. GrillTrack decisions: `ship-hosted-service-001` and `ship-order-intake-001`.
+The hosted Ship service for ship.dinkuskit.com. It runs as a Cloudflare Worker with one SQLite Durable Object per store, like the Payments and Coupons services. GrillTrack decisions: `ship-hosted-service-001` and `ship-order-intake-001` (approved by Ronald; their ledger records land in a follow-up PR).
 
 Status: order intake for Commerce is built. Not built yet:
 

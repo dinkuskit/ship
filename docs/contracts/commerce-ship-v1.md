@@ -2,7 +2,8 @@
 
 > **Superseded for the wire format (2026-10-10).** Commerce now pushes each
 > order version to the hosted service at `https://ship.dinkuskit.com`
-> (GrillTrack `ship-hosted-service-001`, `ship-order-intake-001`). The exact
+> (GrillTrack `ship-hosted-service-001`, `ship-order-intake-001`; ledger records
+> follow in a later PR). The exact
 > fields are in [service/README.md](../../service/README.md) and Commerce's
 > `docs/contracts/commerce-handoffs.md`. Name mapping: `orderId` is
 > `commerce_order_id`, `version` is `order_revision`, and the store pass's
