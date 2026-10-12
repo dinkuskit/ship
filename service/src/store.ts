@@ -2,7 +2,7 @@ import { DurableObject } from "cloudflare:workers";
 import { ok, ServiceError, toOutcome, type Outcome } from "./errors.js";
 import { labelAddress, type LabelAddress } from "./address.js";
 import { NOT_ONE_LINE, parseShipOrder, type ShipOrder } from "./order.js";
-import { buy, downloadPdf, findPurchase, newTransactionId, PitneyError, pitneyConfig, quote, voidLabel, type PbLabel, type PbShipment } from "./pitney.js";
+import { authorizeMerchant, buy, downloadPdf, findPurchase, newTransactionId, PitneyError, pitneyConfig, quote, voidLabel, type PbConfig, type PbLabel, type PbShipment } from "./pitney.js";
 import { practiceLabelPdf } from "./practice-pdf.js";
 import { DEFAULT_FROM, shippedEmail } from "./shipped-email.js";
 import { GRACE_SECONDS, REFRESH_SECONDS } from "./session.js";
@@ -36,10 +36,21 @@ export interface Settings {
   shipFrom: ShipFrom | null; boxes: Box[]; storeName: string | null; replyTo: string | null;
   /** Whether Ship can buy labels from Pitney Bowes. */
   postageConnected: boolean;
+  /** The store owner's own PB postage account, which pays for real orders' labels; null until they connect it. */
+  postageAccount: PostageAccount | null;
+  /** DinkusKit's PB developer id for the owner's sign-up link; null while Ship cannot connect owners' accounts. */
+  signupDeveloperId: string | null;
   /** Whether TEST orders get free Pitney Bowes sandbox labels instead of practice labels. */
   testSandbox: boolean;
 }
 export type Quotes = Partial<Record<ServiceCode, number | null>>;
+/** The owner's PB postage account as Ship keeps it: never their PB password. */
+export interface PostageAccount {
+  shipperId: string; company: string | null; email: string | null;
+  /** The last four characters of PB's postage account number, for the owner to recognize it. */
+  accountEnding: string | null;
+  connectedBy: string; connectedAt: string;
+}
 
 /** A Pitney Bowes purchase Ship sent and has not finished recording. */
 type Purchase = { transaction_id: string; order_id: string; version: number; test: number; service: string; box: string; weight_oz: number; state: string; created_by: string; created_at: number };
@@ -238,6 +249,8 @@ export class StoreShipping extends DurableObject<Env> {
     return {
       shipFrom: shipFrom ? JSON.parse(shipFrom) as ShipFrom : null, boxes, storeName: this.meta("store_name"), replyTo: this.meta("reply_to"),
       postageConnected: pitneyConfig(this.env) !== null, testSandbox: testUsesSandbox(this.env),
+      postageAccount: this.postageAccount(),
+      signupDeveloperId: pitneyConfig(this.env) && this.env.PB_DEVELOPER_ID ? this.env.PB_DEVELOPER_ID : null,
     };
   }
 
@@ -277,6 +290,55 @@ export class StoreShipping extends DurableObject<Env> {
     } catch (error) {
       return toOutcome(error);
     }
+  }
+
+  private postageAccount(): PostageAccount | null {
+    const kept = this.meta("pb_account");
+    return kept ? JSON.parse(kept) as PostageAccount : null;
+  }
+
+  /**
+   * Connects the owner's own PB postage account (decision 2a). The username and password
+   * go to PB once to find the account's Shipper ID; Ship keeps only what PostageAccount holds.
+   */
+  async connectPostage(fields: Fields, uid: string): Promise<Outcome> {
+    try {
+      const config = pitneyConfig(this.env);
+      const developerId = this.env.PB_DEVELOPER_ID;
+      if (!config || !developerId) refuse("POSTAGE_NOT_CONNECTED", "Ship cannot connect Pitney Bowes accounts yet.", 409);
+      const username = formText(fields, "username", "Pitney Bowes username", 254)!;
+      const password = typeof fields.password === "string" ? fields.password : "";
+      if (!password || password.length > 200) refuse("INVALID_INPUT", "Enter your Pitney Bowes password.");
+      const merchant = await authorizeMerchant(config, developerId, username, password);
+      const account: PostageAccount = {
+        shipperId: merchant.shipperId, company: merchant.company, email: merchant.email,
+        accountEnding: merchant.accountNumber ? merchant.accountNumber.slice(-4) : null,
+        connectedBy: uid, connectedAt: new Date().toISOString(),
+      };
+      this.setMeta("pb_account", JSON.stringify(account));
+      return ok(account);
+    } catch (error) {
+      return toOutcome(asServiceError(error));
+    }
+  }
+
+  /** Real orders cannot get labels again until an account is connected. Labels already bought stay, and can still be cancelled. */
+  async disconnectPostage(): Promise<Outcome> {
+    this.sql.exec("DELETE FROM store_meta WHERE key = 'pb_account'");
+    return ok({ disconnected: true });
+  }
+
+  /**
+   * Who pays for a label: a TEST order's sandbox label is paid by PB's sandbox test
+   * merchant; a real order's by the store's own connected postage account, never DinkusKit's.
+   */
+  private postageConfig(test: boolean): PbConfig {
+    const config = pitneyConfig(this.env);
+    if (!config) refuse("POSTAGE_NOT_CONNECTED", NOT_CONNECTED, 409);
+    if (test) return config;
+    const account = this.postageAccount();
+    if (!account) refuse("NO_POSTAGE_ACCOUNT", "Connect your Pitney Bowes postage account in Settings before buying labels for real orders.", 409);
+    return { ...config, shipperId: account.shipperId };
   }
 
   async removeBox(boxId: string): Promise<Outcome> {
@@ -354,8 +416,7 @@ export class StoreShipping extends DurableObject<Env> {
     try {
       const request = await this.labelRequest(input.orderId, input.fields, false);
       if (request.order.test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "Practice labels for TEST orders are free.", 409);
-      const config = pitneyConfig(this.env);
-      if (!config) refuse("POSTAGE_NOT_CONNECTED", NOT_CONNECTED, 409);
+      const config = this.postageConfig(request.order.test);
       const codes = Object.keys(SERVICES) as ServiceCode[];
       const prices = await Promise.allSettled(codes.map(code => quote(config, request.shipment(code))));
       const unreachable = prices.find(result => result.status === "rejected" && !(result.reason instanceof PitneyError && result.reason.kind === "refused"));
@@ -420,11 +481,10 @@ export class StoreShipping extends DurableObject<Env> {
    * for that order without the owner saying so.
    */
   private async postageLabel(request: Awaited<ReturnType<StoreShipping["labelRequest"]>>, input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
-    const config = pitneyConfig(this.env);
-    if (!config) refuse("POSTAGE_NOT_CONNECTED", NOT_CONNECTED, 409);
     const { order } = request;
     // Never buys postage for a TEST order outside Pitney Bowes's sandbox.
     if (order.test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "TEST orders get practice labels while Ship is not on the Pitney Bowes sandbox.", 409);
+    const config = this.postageConfig(order.test);
     const earlier = this.openPurchase(order.orderId);
     if (earlier) {
       if (earlier.state === "pending" && Date.now() - earlier.created_at < IN_FLIGHT_MS) {

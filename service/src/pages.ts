@@ -1,5 +1,6 @@
 import type { LabelAddress } from "./address.js";
 import type { ShipOrder } from "./order.js";
+import { signupUrl } from "./pitney.js";
 import { MAX_WEIGHT_OZ, SERVICES, type Label, type OrderSummary, type Quotes, type ServiceCode, type Settings } from "./store.js";
 
 /** Escapes text for HTML element content and attribute values. */
@@ -119,12 +120,13 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
   if (sandbox) notices.push("This is a TEST order. Ship makes a free Pitney Bowes sandbox label: nothing is charged and it is not real postage, so never mail with it.");
   else if (order.test) notices.push("This is a TEST order. Ship makes a practice label marked \"TEST - NOT POSTAGE\" and buys no postage.");
   else if (!settings.postageConnected) notices.push("Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels.");
+  else if (!settings.postageAccount) notices.push(`Connect your Pitney Bowes postage account in <a href="/stores/${encodeURIComponent(site)}/settings">Settings</a> before buying labels for real orders.`);
   if (!summary.address.ok) notices.push(summary.address.problem);
   if (!settings.shipFrom) notices.push(`Add your ship-from address in <a href="/stores/${encodeURIComponent(site)}/settings">Settings</a> before buying labels.`);
   if (!settings.boxes.length) notices.push(`Add your box sizes in <a href="/stores/${encodeURIComponent(site)}/settings">Settings</a> before buying labels.`);
   if (missingWeight) notices.push("Some items have no weight in Commerce, so check the package weight before buying.");
   const blocked = order.status !== "processing" || Boolean(label) || !summary.address.ok || !settings.shipFrom || !settings.boxes.length ||
-    (!order.test && !settings.postageConnected);
+    (!order.test && (!settings.postageConnected || !settings.postageAccount));
   const base = `/stores/${encodeURIComponent(site)}/orders/${encodeURIComponent(order.orderId)}`;
   const chosenBox = settings.boxes.find(box => box.boxId === fields.boxId) ?? settings.boxes[0];
   const weight = fields.weightOz ?? (chosenBox ? String(Math.round((knownWeight + chosenBox.weightOz) * 10) / 10) : "");
@@ -165,6 +167,31 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
     ${labels}<h2>${label || order.status === "completed" ? "Shipping" : "Create shipping label"}</h2>${form}`, { site, email });
 }
 
+/** Real orders' labels are paid from the owner's own Pitney Bowes postage account (decision 2a). */
+function postageBox(base: string, email: string, settings: Settings): string {
+  const account = settings.postageAccount;
+  if (account) {
+    const details = [account.company, account.accountEnding ? `postage account ending ${account.accountEnding}` : null, account.email].filter(Boolean).map(esc).join(" · ");
+    return `<h2>Postage</h2><p>Connected to Pitney Bowes: ${details || "your postage account"}.</p>
+      <p class="muted">Labels for real orders are paid from this account. Pitney Bowes charges your card there, not DinkusKit.</p>
+      <form method="post" action="${base}/postage/disconnect"><button class="secondary">Disconnect Pitney Bowes</button></form>`;
+  }
+  const intro = `<h2>Postage</h2><p>To buy USPS labels for real orders, you need your own Pitney Bowes postage account. Pitney Bowes charges postage to the card you add there, not DinkusKit. TEST orders don't need one.</p>`;
+  if (!settings.signupDeveloperId) return `${intro}<p class="muted">Connecting a Pitney Bowes account isn't available in Ship yet.</p>`;
+  const from = settings.shipFrom;
+  const link = signupUrl(settings.signupDeveloperId, {
+    email, name: from?.name, company: from?.company ?? settings.storeName ?? undefined,
+    line1: from?.line1, line2: from?.line2, city: from?.city, state: from?.region, postalCode: from?.postalCode,
+  });
+  return `${intro}${settings.testSandbox ? '<p class="muted">Ship is on the Pitney Bowes sandbox, so this makes a test account and nothing is charged.</p>' : ""}
+    <p><strong>1.</strong> <a href="${esc(link)}" target="_blank" rel="noopener noreferrer">Create your Pitney Bowes account</a> (opens Pitney Bowes with your details filled in). Add a card there; Pitney Bowes refills your postage balance automatically. Use this link: an account made elsewhere may not connect.</p>
+    <p><strong>2.</strong> Come back here and connect it. Ship sends your username and password to Pitney Bowes once to find your account, and never keeps your password.</p>
+    <form method="post" action="${base}/postage" autocomplete="off">
+      <div><label for="pbUsername">Pitney Bowes username</label><input id="pbUsername" name="username" required autocomplete="off"></div>
+      <div><label for="pbPassword">Pitney Bowes password</label><input id="pbPassword" name="password" type="password" required autocomplete="off"></div>
+      <button>Connect Pitney Bowes</button></form>`;
+}
+
 export function settingsPage(site: string, email: string, settings: Settings, error?: string): string {
   const from = settings.shipFrom;
   const field = (name: string, label: string, value = "", required = true) =>
@@ -179,6 +206,7 @@ export function settingsPage(site: string, email: string, settings: Settings, er
       ${field("line1", "Address", from?.line1)}${field("line2", "Address line 2 (optional)", from?.line2, false)}
       <div class="row">${field("city", "City", from?.city)}${field("region", "State", from?.region)}${field("postalCode", "ZIP code", from?.postalCode)}</div>
       <button>Save ship-from address</button></form>
+    ${postageBox(base, email, settings)}
     <h2>Shipped email</h2><p class="muted">Sent from orders@dinkuskit.com under ${settings.storeName ? `the name ${esc(settings.storeName)} (your store's Site title)` : "your store's Site title"}. When a shopper replies, the reply goes here.</p>
     <form method="post" action="${base}/reply-to">${field("replyTo", "Reply-to email", settings.replyTo ?? "")}
       <button>Save reply-to email</button></form>

@@ -6,6 +6,11 @@ import { NOT_ONE_LINE } from "./order.js";
  * PB merchant sign-up link. Ported from the plugin's src/pb-sandbox.js.
  */
 export const PB_SANDBOX_ORIGIN = "https://shipping-api-sandbox.pitneybowes.com";
+/**
+ * Pitney Bowes's sandbox Merchant Portal, where a store owner signs up for their own PB
+ * postage account under DinkusKit's developer account (production is www.pbshippingmerchant.pitneybowes.com).
+ */
+export const PB_SANDBOX_SIGNUP_ORIGIN = "https://developer.pbshippingmerchant.pitneybowes.com";
 /** Where the sandbox serves label PDFs; nothing else is downloaded. */
 export const PB_SANDBOX_LABEL_HOST = "stg-labels-cls.gcs.pitneybowes.com";
 /** PB's service ids for the three services Ship offers (PB carrier reference, PB Expedited). */
@@ -24,6 +29,13 @@ export interface PbShipment {
   weightOz: number; lengthIn: number; widthIn: number; heightIn: number;
 }
 export interface PbLabel { shipmentId: string; tracking: string; priceCents: number; pdfUrl: string }
+/** A store owner's own PB postage account, as PB describes it once they connect it. */
+export interface PbMerchant { shipperId: string; company: string | null; email: string | null; accountNumber: string | null }
+/** What Ship already knows about the owner, filled into PB's sign-up form. */
+export interface SignupPrefill {
+  email?: string; name?: string; company?: string;
+  line1?: string; line2?: string; city?: string; state?: string; postalCode?: string;
+}
 
 /**
  * Why a call failed.
@@ -267,4 +279,55 @@ export async function downloadPdf(url: string): Promise<Uint8Array> {
   } catch {
     throw new PitneyError("not_started", "Ship could not download the label PDF yet. Try again in a minute.");
   }
+}
+
+/**
+ * PB's sign-up page for a new postage account under DinkusKit's developer account,
+ * with what Ship knows filled in. PB has no way back to Ship afterwards; the owner
+ * returns and connects the account.
+ */
+export function signupUrl(developerId: string, prefill: SignupPrefill): string {
+  const [first, ...rest] = (prefill.name ?? "").trim().split(/\s+/);
+  const params: Record<string, string | undefined> = {
+    developerID: developerId, fName: first || undefined, lName: rest.join(" ") || undefined, email: prefill.email,
+    companyName: prefill.company, addressLine1: prefill.line1, addressLine2: prefill.line2,
+    city: prefill.city, state: prefill.state, postalCode: prefill.postalCode,
+  };
+  const query = Object.entries(params).filter((entry): entry is [string, string] => Boolean(entry[1]))
+    .map(([key, value]) => `${key}=${encodeURIComponent(value)}`).join("&");
+  return `${PB_SANDBOX_SIGNUP_ORIGIN}/create/accountInfo?${query}`;
+}
+
+function oneLine(value: unknown, max: number): string | null {
+  return typeof value === "string" && value.trim() && value.length <= max && !NOT_ONE_LINE.test(value) ? value.trim() : null;
+}
+
+/**
+ * Finds the owner's PB postage account from the username and password they signed up
+ * with, and returns its Shipper ID. PB sees the password; Ship passes it on once and
+ * never keeps it.
+ */
+export async function authorizeMerchant(config: PbConfig, developerId: string, username: string, password: string): Promise<PbMerchant> {
+  let response: Response;
+  try {
+    response = await call(config, "POST", `/v1/developers/${encodeURIComponent(developerId)}/merchants/credentials`, { body: { username, password } });
+  } catch (error) {
+    if (error instanceof PitneyError) throw error;
+    throw new PitneyError("not_started", "Ship could not reach Pitney Bowes. Try again in a minute.");
+  }
+  const answer = await readJson(response) as Record<string, unknown> | undefined;
+  if (response.status === 401 || response.status === 403 || response.status === 404) {
+    throw new PitneyError("refused", "Pitney Bowes did not accept that username and password. Use the account you made from Ship's sign-up link.");
+  }
+  if (response.status >= 400 && response.status < 500) throw new PitneyError("refused", refusalText(answer));
+  const shipperId = oneLine(answer?.postalReportingNumber, 100);
+  if (!response.ok || !shipperId) throw new PitneyError("not_started", "Pitney Bowes did not return your account. Try again in a minute.");
+  if (answer?.merchantStatus !== "ACTIVE") throw new PitneyError("refused", "Pitney Bowes says this account is not active yet. Finish signing up with Pitney Bowes, then connect it again.");
+  if (answer?.paymentServicesAccountIdActive === false) {
+    throw new PitneyError("refused", "This Pitney Bowes account has no working way to pay for postage yet. Add a card in Pitney Bowes, then connect it again.");
+  }
+  return {
+    shipperId, company: oneLine(answer?.company, 200), email: oneLine(answer?.email, 254),
+    accountNumber: oneLine(answer?.paymentAccountNumber, 100),
+  };
 }

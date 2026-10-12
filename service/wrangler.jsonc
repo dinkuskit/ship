@@ -18,6 +18,8 @@
     "ACCOUNT_SIGNIN_URL": "",
     "ACCOUNT_TOKEN_URL": "",
     "PB_ENVIRONMENT": "",
+    // DinkusKit's Pitney Bowes developer id (Developer Hub, Profile), for owners' own postage accounts.
+    "PB_DEVELOPER_ID": "",
     // orders@dinkuskit.com once DinkusKit's Cloudflare Email Service sends for dinkuskit.com.
     "SHIP_EMAIL_FROM": ""
   },
