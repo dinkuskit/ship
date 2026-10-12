@@ -81,6 +81,8 @@ beforeEach(async () => {
   envOverrides = {};
   tokenAnswer = async () => Response.json({ access_token: await pass(ownerClaims), token_type: "Bearer", expires_in: 300, refresh_token: `refresh-${++refreshes}-${"r".repeat(40)}` });
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+    // The Workers runtime checks fetch options before sending; options it refuses fail here too.
+    new Request(String(input), init);
     const url = new URL(String(input)).href;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
     if (url === `${issuer}/jwks-down`) return new Response("busy", { status: 503 });
@@ -204,6 +206,12 @@ test("DinkusKit.com's refusals and bad passes never start a session", async () =
   }
   tokenAnswer = async () => Response.json({ error: "invalid_grant" }, { status: 400 });
   expect((await signIn()).back.status).toBe(502);
+  // The code goes to DinkusKit.com's token address only; Ship never follows a redirect elsewhere.
+  tokenAnswer = async () => new Response(null, { status: 302, headers: { location: "https://elsewhere.example.invalid/token" } });
+  const redirected = (await signIn()).back;
+  expect(redirected.status).toBe(502);
+  expect(await redirected.text()).toContain("could not confirm the sign-in");
+  expect(redirected.headers.getSetCookie().join()).not.toContain("ship-session=");
 });
 
 test("a session is for one store only, and a forged cookie is ignored", async () => {

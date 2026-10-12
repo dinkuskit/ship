@@ -104,8 +104,9 @@ const REFUSED_PASS_ERRORS = [errors.JWTExpired, errors.JWTClaimValidationFailed,
  */
 async function askToken(env: Env, body: object, site: string, fetcher: typeof fetch): Promise<TokenAnswer> {
   try {
+    // Workers refuse redirect: "error", so a redirect comes back as a 3xx answer and is refused below.
     const answer = await fetcher(env.ACCOUNT_TOKEN_URL, {
-      method: "POST", redirect: "error", cache: "no-store",
+      method: "POST", redirect: "manual", cache: "no-store",
       headers: { "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify(body),
     });
