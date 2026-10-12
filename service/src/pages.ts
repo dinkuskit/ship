@@ -84,10 +84,10 @@ function labelRow(site: string, label: Label, current: boolean): string {
   const actions = label.status === "bought"
     ? `<a href="${base}.pdf" target="_blank" rel="noopener">Open PDF to print</a>
        <form class="inline" method="post" action="${base}/cancel"><button class="secondary" style="margin:0 0 0 12px">Cancel label</button></form>`
-    : `<span class="muted">Cancelled${label.refund ? ". USPS refunds your postage account, which can take up to 14 days." : ""}</span>`;
-  return `<tr><td>${esc(SERVICES[label.service])}${label.test ? ' <span class="tag test">PRACTICE</span>' : ""}${current ? "" : ' <span class="muted">(older order version)</span>'}</td>
+    : `<span class="muted">Cancelled${label.refund && !label.test ? ". USPS refunds your postage account, which can take up to 14 days." : ""}</span>`;
+  return `<tr><td>${esc(SERVICES[label.service])}${label.practice ? ' <span class="tag test">PRACTICE</span>' : label.test ? ' <span class="tag test">TEST SANDBOX</span>' : ""}${current ? "" : ' <span class="muted">(older order version)</span>'}</td>
     <td>${esc(label.tracking)}</td><td>${esc(label.box.name)}, ${esc(label.weightOz)} oz</td>
-    <td>${label.priceCents === null ? '<span class="muted">—</span>' : money(label.priceCents)}</td><td>${actions}</td></tr>`;
+    <td>${label.priceCents === null ? '<span class="muted">—</span>' : `${money(label.priceCents)}${label.test ? ' <span class="muted">(sandbox, not charged)</span>' : ""}`}</td><td>${actions}</td></tr>`;
 }
 
 /** What the label form shows besides the order: an error, the owner's last choices, prices. */
@@ -115,7 +115,9 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
     <td>${line.weightOz === undefined ? '<span class="muted">not set</span>' : `${esc(line.weightOz)} oz`}</td>
     <td>${line.unitPrice ? `$${(Number(line.unitPrice.minor) / 100).toFixed(2)}` : '<span class="muted">—</span>'}</td></tr>`).join("");
   const notices: string[] = [];
-  if (order.test) notices.push("This is a TEST order. Ship makes a practice label marked \"TEST - NOT POSTAGE\" and buys no postage.");
+  const sandbox = order.test && settings.testSandbox;
+  if (sandbox) notices.push("This is a TEST order. Ship makes a free Pitney Bowes sandbox label: nothing is charged and it is not real postage, so never mail with it.");
+  else if (order.test) notices.push("This is a TEST order. Ship makes a practice label marked \"TEST - NOT POSTAGE\" and buys no postage.");
   else if (!settings.postageConnected) notices.push("Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels.");
   if (!summary.address.ok) notices.push(summary.address.problem);
   if (!settings.shipFrom) notices.push(`Add your ship-from address in <a href="/stores/${encodeURIComponent(site)}/settings">Settings</a> before buying labels.`);
@@ -146,8 +148,12 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
       <label for="service">Service</label><select id="service" name="service">${Object.entries(SERVICES).map(([code, name]) =>
         `<option value="${code}"${code === chosenService ? " selected" : ""}>${esc(name)}${esc(price(code as ServiceCode))}</option>`).join("")}</select>
       ${options.askBuyAgain ? '<label><input type="checkbox" name="buyAgain" value="yes" style="width:auto"> Buy a new label (Pitney Bowes has no record of the last one)</label>' : ""}
-      ${order.test ? "" : `<p class="muted">${quotes ? "Prices come from your Pitney Bowes postage account." : "Check prices before buying, or buy at the price Pitney Bowes charges."} Postage is paid from your Pitney Bowes postage account.</p>
-      <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> `}<button${blocked ? " disabled" : ""}>${order.test ? "Make practice label" : "Buy label"}</button></form>`;
+      ${sandbox ? `<p class="muted">Sandbox prices come from Pitney Bowes's test system. Nothing is charged to any postage account.</p>
+      <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> <button${blocked ? " disabled" : ""}>Make sandbox label</button>
+      <button class="secondary" name="kind" value="practice"${blocked ? " disabled" : ""}>Make practice label instead</button>`
+      : order.test ? `<button${blocked ? " disabled" : ""}>Make practice label</button>`
+      : `<p class="muted">${quotes ? "Prices come from your Pitney Bowes postage account." : "Check prices before buying, or buy at the price Pitney Bowes charges."} Postage is paid from your Pitney Bowes postage account.</p>
+      <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> <button${blocked ? " disabled" : ""}>Buy label</button>`}</form>`;
   const labels = summary.labels.length
     ? `<h2>Labels</h2><table><thead><tr><th>Service</th><th>Tracking</th><th>Package</th><th>Postage</th><th></th></tr></thead><tbody>${summary.labels.map(item => labelRow(site, item, item.version === order.version)).join("")}</tbody></table>`
     : "";

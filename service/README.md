@@ -1,14 +1,12 @@
 # DinkusKit Ship service
 
-The hosted Ship service for ship.dinkuskit.com. It runs as a Cloudflare Worker with one SQLite Durable Object per store, like the Payments and Coupons services. GrillTrack decisions: `ship-hosted-service-001` and `ship-order-intake-001` (approved by Ronald; their ledger records land in a follow-up PR).
+The hosted Ship service for ship.dinkuskit.com. It runs as a Cloudflare Worker with one SQLite Durable Object per store, like the Payments and Coupons services. GrillTrack decisions: `ship-hosted-service-001`, `ship-order-intake-001` and `ship-test-sandbox-labels-001` (approved by Ronald; their ledger records land in a follow-up PR).
 
-Status: order intake for Commerce, the owner's label page, and Pitney Bowes sandbox labels (prices, buy, cancel for a refund) are built. Not built yet:
+Status: order intake for Commerce, the owner's label page, Pitney Bowes sandbox labels (prices, buy, cancel for a refund, for real orders and TEST orders alike) and the shipped email are built. Not built yet:
 
 - live Pitney Bowes postage (until the sandbox settings below are set, a real order answers "Pitney Bowes is not connected to Ship yet").
 
-The shipped email is built and waits for its deploy settings.
-
-Nothing here is deployed.
+ship.dinkuskit.com runs this service on the Pitney Bowes sandbox. TEST orders get sandbox labels there once a version with them is deployed.
 
 ## What Commerce calls
 
@@ -74,7 +72,10 @@ Commerce's "Create shipping label" opens `https://ship.dinkuskit.com/stores/{sit
   - "Buy label" sends `POST /shippingservices/v1/shipments` with a new `X-PB-TransactionId` and the store's `SHIPPER_ID`. Ship keeps a copy of the PDF, because PB's link lasts about a day, and queues the tracking number for Commerce.
   - PB answering with a refusal (for example, not enough postage) buys nothing; the owner sees PB's reason. If PB's answer is lost, Ship does not know whether it bought a label. The next press of "Buy label" looks the purchase up by its transaction id first (`GET /shippingservices/v1/shipments?originalTransactionId=`). If PB has no record, Ship asks the owner before buying a new one.
   - "Cancel label" voids it with PB (`DELETE /shippingservices/v1/shipments/{id}?cancelInitiator=SHIPPER`). USPS refunds the postage account within about 14 days. Cancelling never changes the Commerce order.
-- **TEST orders** get a practice label marked "TEST - NOT POSTAGE" with a TEST tracking number. Pitney Bowes is never called. The label still goes to Commerce through `GET /v1/labels`, so the TEST order shows as shipped.
+- **TEST orders** stay TEST everywhere and never get live postage.
+  - While Ship runs on the Pitney Bowes sandbox (`PB_ENVIRONMENT=sandbox` with every PB setting below), a TEST order gets a free PB sandbox label: real sandbox prices, a PB shipment, PB's own PDF and tracking number, and a void with PB when cancelled. Nothing is charged. The page tags it "TEST SANDBOX".
+  - The owner can press "Make practice label instead", and with PB off or set to anything but the sandbox every TEST order gets one: a PDF marked "TEST - NOT POSTAGE" with a TEST tracking number, made without calling Pitney Bowes.
+  - Either way the label goes to Commerce through `GET /v1/labels`, so the TEST order becomes Completed with that tracking number.
 - **Settings:** ship-from address, the owner's box sizes, and the shipped email's reply-to address (filled with the first signer-in's email). The sender name is the store's EmDash Site title, which Commerce sends as `storeName`.
 - **Shipped email:** each time Commerce sends an order as Completed (by a Ship label or by the owner's Complete order), Ship emails the shopper once from `SHIP_EMAIL_FROM` (orders@dinkuskit.com). The sender name is the store's Site title and replies go to the reply-to address. The email holds the order number, carrier and tracking number, with a USPS tracking link for USPS. It never lists items and says "shipped", not "delivered".
   - Once per completion: the key is the order id plus `completed.at`. A repeat or newer version of the same completion sends nothing more. An order moved back to Processing and completed again sends a new email, and one moved back before the email went out gets none.
@@ -93,4 +94,4 @@ Commerce's "Create shipping label" opens `https://ship.dinkuskit.com/stores/{sit
 - **Secret:** `SHIP_SESSION_SECRET`, 32 or more random characters, set with `wrangler secret put`. The label page answers 503 until it and the two sign-in URLs are set.
 - **Shipped email:** var `SHIP_EMAIL_FROM=orders@dinkuskit.com` and the `EMAIL` send_email binding (already in `wrangler.jsonc`), with Cloudflare Email Service sending for dinkuskit.com as DinkusKit.com's own sign-in emails do. Until the var is set, completions wait and nothing is sent. Once it is set, waiting emails go out on Commerce's next call to Ship; anything waiting more than 3 days is dropped.
 - **Route:** `ship.dinkuskit.com`.
-- **Pitney Bowes (sandbox):** var `PB_ENVIRONMENT=sandbox`, and secrets `PB_API_KEY`, `PB_API_SECRET` (DinkusKit's PB developer keys) and `PB_SHIPPER_ID` (the sandbox's test merchant), set by Ronald with `wrangler secret put`. They never go in this repository. Until all four are set, real orders cannot get labels and TEST orders still get practice labels. Live postage is not built: it needs Ronald's word, PB's live keys, and a PB sign-up link so each owner can open their own postage account, with that account's shipper id kept per store.
+- **Pitney Bowes (sandbox):** var `PB_ENVIRONMENT=sandbox`, and secrets `PB_API_KEY`, `PB_API_SECRET` (DinkusKit's PB developer keys) and `PB_SHIPPER_ID` (the sandbox's test merchant), set by Ronald with `wrangler secret put`. They never go in this repository. Until all four are set, real orders cannot get labels and TEST orders get practice labels. Live postage is not built: it needs Ronald's word, PB's live keys, and a PB sign-up link so each owner can open their own postage account, with that account's shipper id kept per store.
