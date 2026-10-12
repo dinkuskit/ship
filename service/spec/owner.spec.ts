@@ -660,7 +660,14 @@ test("an owner creates their own Pitney Bowes account from Ship's link and conne
 
 test("a Pitney Bowes account that is not active or cannot pay yet is not connected", async () => {
   const cookie = await signedIn();
-  for (const [change, words] of [[{ merchantStatus: "INACTIVE" }, "not active yet"], [{ paymentServicesAccountIdActive: false }, "no working way to pay"]] as const) {
+  const refusals: [Record<string, unknown>, string][] = [
+    [{ merchantStatus: "INACTIVE" }, "not active yet"],
+    [{ paymentServicesAccountIdActive: false }, "no working way to pay"],
+    // PB has to say the payment account works; a missing or odd answer is not a yes.
+    [{ paymentServicesAccountIdActive: undefined }, "no working way to pay"],
+    [{ paymentServicesAccountIdActive: "true" }, "no working way to pay"],
+  ];
+  for (const [change, words] of refusals) {
     merchant = { ...ownMerchant(), ...change };
     const response = await connect(cookie);
     expect(response.status).toBe(422);

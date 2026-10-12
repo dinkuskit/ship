@@ -323,7 +323,7 @@ export async function authorizeMerchant(config: PbConfig, developerId: string, u
   const shipperId = oneLine(answer?.postalReportingNumber, 100);
   if (!response.ok || !shipperId) throw new PitneyError("not_started", "Pitney Bowes did not return your account. Try again in a minute.");
   if (answer?.merchantStatus !== "ACTIVE") throw new PitneyError("refused", "Pitney Bowes says this account is not active yet. Finish signing up with Pitney Bowes, then connect it again.");
-  if (answer?.paymentServicesAccountIdActive === false) {
+  if (answer?.paymentServicesAccountIdActive !== true) {
     throw new PitneyError("refused", "This Pitney Bowes account has no working way to pay for postage yet. Add a card in Pitney Bowes, then connect it again.");
   }
   return {
