@@ -13,10 +13,11 @@ provider actions remain disabled. This is not a signed Registry release.
 
 The hosted Ship service for ship.dinkuskit.com lives in [`service/`](service/README.md).
 It is the v1 path for Commerce orders (GrillTrack `ship-hosted-service-001`, approved; its ledger record lands in a follow-up PR).
-Order intake, the owner's label page (Sign in with DinkusKit.com, settings,
-practice labels for TEST orders) and Pitney Bowes sandbox labels (prices, buy,
-cancel for a refund) are built; live postage and the shipped email follow.
-Nothing is deployed.
+Order intake, the owner's label page (Sign in with DinkusKit.com, settings),
+Pitney Bowes sandbox labels (prices, buy, cancel for a refund) and the shipped
+email are built. TEST orders get free PB sandbox labels while Ship runs on the
+sandbox, or practice labels; they stay TEST and never get live postage. Live
+postage follows. ship.dinkuskit.com runs the service on the PB sandbox.
 
 - [Charter](docs/CHARTER.md)
 - [USPS feasibility research, 2026-09-30](docs/research/usps-feasibility-20260930.md)

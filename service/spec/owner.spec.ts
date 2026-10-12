@@ -4,7 +4,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
 import { pitneyConfig } from "../src/pitney";
-import { addLabelColumns } from "../src/store";
+import { addLabelColumns, addPurchaseColumns } from "../src/store";
 
 const ORIGIN = "https://ship.example.invalid";
 let site: string;
@@ -16,6 +16,8 @@ let ownerClaims: Record<string, unknown>;
 let tokenAnswer: (body: Record<string, string>) => Promise<Response>;
 let refreshes: number;
 let jwksUrl: string;
+/** Per-test changes to the Worker's settings, such as Pitney Bowes being off. */
+let envOverrides: Record<string, unknown>;
 
 const PB = "https://shipping-api-sandbox.pitneybowes.com";
 const LABEL_URL = "https://stg-labels-cls.gcs.pitneybowes.com/usps/sample/outbound/label/sample.pdf";
@@ -42,7 +44,7 @@ const pbLabel = (serviceId: string) => ({
 
 const configured = () => ({
   ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: jwksUrl,
-  ACCOUNT_SIGNIN_URL: `${issuer}/ship-sign-in`, ACCOUNT_TOKEN_URL: `${issuer}/token`, SHIP_SESSION_SECRET: sessionKey,
+  ACCOUNT_SIGNIN_URL: `${issuer}/ship-sign-in`, ACCOUNT_TOKEN_URL: `${issuer}/token`, SHIP_SESSION_SECRET: sessionKey, ...envOverrides,
 }) as unknown as Env;
 
 const pass = (claims: Record<string, unknown>) => new SignJWT(claims)
@@ -62,6 +64,7 @@ beforeEach(async () => {
   refreshes = 0;
   pbCalls = [];
   pbAnswer = sandbox;
+  envOverrides = {};
   tokenAnswer = async () => Response.json({ access_token: await pass(ownerClaims), token_type: "Bearer", expires_in: 300, refresh_token: `refresh-${++refreshes}-${"r".repeat(40)}` });
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new URL(String(input)).href;
@@ -202,7 +205,7 @@ test("a session is for one store only, and a forged cookie is ignored", async ()
   expect((await request("GET", `/stores/${site}/orders`, { cookie: forged })).status).toBe(303);
 });
 
-test("a TEST order goes from Commerce to a practice label to a label event Commerce picks up", async () => {
+test("a TEST order goes from Commerce to a practice label, when the owner asks for one, to a label event Commerce picks up", async () => {
   await sendOrder();
   const cookie = await signedIn();
   const list = await request("GET", `/stores/${site}/orders`, { cookie });
@@ -210,10 +213,10 @@ test("a TEST order goes from Commerce to a practice label to a label event Comme
   const boxId = await setUp(cookie);
   const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
   const page = await (await request("GET", orderPath, { cookie })).text();
-  expect(page).toContain("Make practice label");
+  expect(page).toContain('name="kind" value="practice"');
   expect(page).toContain('value="28"'); // 2 × 12.5 oz plus the 3 oz box
   expect(page).toContain("$12.50");
-  const bought = await request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA" } });
+  const bought = await request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA", kind: "practice" } });
   expect(bought.status).toBe(303);
   const [event] = await labels();
   expect(event).toMatchObject({ orderId: "order:abc", version: 1, carrier: "USPS" });
@@ -226,11 +229,87 @@ test("a TEST order goes from Commerce to a practice label to a label event Comme
   expect(text.startsWith("%PDF-1.4")).toBe(true);
   expect(text).toContain("TEST - NOT POSTAGE");
   expect(text).toContain("TO: Demo Shopper");
-  const again = await request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA" } });
+  expect(label).toMatchObject({ test: true, practice: true, priceCents: null });
+  expect(await (await request("GET", orderPath, { cookie })).text()).toContain("PRACTICE");
+  const again = await request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA", kind: "practice" } });
   expect(again.status).toBe(409);
   expect((await request("POST", `/stores/${site}/labels/${label.labelId}/cancel`, { cookie })).status).toBe(303);
-  expect((await request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM" } })).status).toBe(303);
+  expect((await request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", kind: "practice" } })).status).toBe(303);
   expect(await labels()).toHaveLength(2);
+  expect(pbCalls).toEqual([]);
+});
+
+test("a TEST order gets a free Pitney Bowes sandbox label that stays TEST, shows sandbox prices, and cancels with a void", async () => {
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  const page = await (await request("GET", orderPath, { cookie })).text();
+  expect(page).toContain("free Pitney Bowes sandbox label");
+  expect(page).toContain("Make sandbox label");
+  expect(page).not.toContain("Postage is paid from your Pitney Bowes postage account");
+  const form = { version: "1", boxId, weightOz: "28", service: "PM" };
+  const prices = await request("POST", `${orderPath}/prices`, { cookie, form });
+  expect(prices.status).toBe(200);
+  expect(await prices.text()).toContain("USPS Priority Mail: $9.35");
+
+  expect((await request("POST", `${orderPath}/labels`, { cookie, form })).status).toBe(303);
+  expect(creates()).toHaveLength(1);
+  expect(creates()[0]!.url.origin).toBe(PB);
+  expect(await labels()).toMatchObject([{ orderId: "order:abc", version: 1, carrier: "USPS", tracking: "SANDBOX-TRACKING-A" }]);
+  const label = (await shipStore().orderSummary("order:abc"))!.labels[0]!;
+  expect(label).toMatchObject({ test: true, practice: false, priceCents: 935, status: "bought" });
+  expect(await (await request("GET", `/stores/${site}/labels/${label.labelId}.pdf`, { cookie })).text()).toBe("%PDF-1.4 sandbox label");
+  const withLabel = await (await request("GET", orderPath, { cookie })).text();
+  expect(withLabel).toContain("TEST SANDBOX");
+  expect(withLabel).toContain("(sandbox, not charged)");
+
+  expect((await request("POST", `/stores/${site}/labels/${label.labelId}/cancel`, { cookie })).status).toBe(303);
+  expect(pbCalls.find(call => call.method === "DELETE")!.url.pathname).toBe("/shippingservices/v1/shipments/SANDBOX-SHIPMENT-A");
+  expect((await shipStore().orderSummary("order:abc"))!.labels[0]).toMatchObject({ test: true, status: "cancelled", refund: "INITIATED" });
+  expect(await (await request("GET", orderPath, { cookie })).text()).not.toContain("USPS refunds your postage account");
+});
+
+test("a TEST order whose sandbox answer was lost stays TEST when Ship finds the label", async () => {
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const buy = () => request("POST", `/stores/${site}/orders/${encodeURIComponent("order:abc")}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM" } });
+  pbAnswer = call => {
+    if (call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments") throw new Error("connection reset");
+    if (call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments") return Response.json(pbLabel("PM"));
+    return sandbox(call);
+  };
+  expect((await buy()).status).toBe(502);
+  const practice = await request("POST", `/stores/${site}/orders/${encodeURIComponent("order:abc")}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", kind: "practice" } });
+  expect(practice.status).toBe(409);
+  expect((await buy()).status).toBe(303);
+  expect((await shipStore().orderSummary("order:abc"))!.labels).toMatchObject([{ test: true, practice: false }]);
+});
+
+test("a TEST order never reaches Pitney Bowes unless Ship runs on its sandbox with every key set", async () => {
+  for (const off of [{ PB_ENVIRONMENT: "production" }, { PB_SHIPPER_ID: "" }]) {
+    envOverrides = off;
+    site = `site-${crypto.randomUUID()}`;
+    ownerClaims = { ...ownerClaims, site_id: site };
+    // The store's Durable Object reads its own settings, not the Worker's.
+    await runInDurableObject(shipStore(), instance => {
+      const store = instance as unknown as { env: Env };
+      store.env = { ...store.env, ...off };
+    });
+    await sendOrder();
+    const cookie = await signedIn();
+    const boxId = await setUp(cookie);
+    const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+    const page = await (await request("GET", orderPath, { cookie })).text();
+    expect(page).toContain("Ship makes a practice label");
+    expect(page).not.toContain("Make sandbox label");
+    const form = { version: "1", boxId, weightOz: "28", service: "GA" };
+    expect((await request("POST", `${orderPath}/prices`, { cookie, form })).status).toBe(409);
+    expect((await request("POST", `${orderPath}/labels`, { cookie, form })).status).toBe(303);
+    expect((await shipStore().orderSummary("order:abc"))!.labels).toMatchObject([{ test: true, practice: true }]);
+  }
+  expect(pbCalls).toEqual([]);
 });
 
 test("labels are refused for a changed, unaddressable or completed order", async () => {
@@ -485,11 +564,25 @@ test("postage stays off until the Pitney Bowes sandbox keys are all set", () => 
   }
 });
 
+test("a purchase Ship started before TEST orders reached the sandbox finishes as a real order's label", async () => {
+  await runInDurableObject(shipStore(), async (_, state) => {
+    const sql = state.storage.sql;
+    sql.exec("DROP TABLE purchases");
+    sql.exec(`CREATE TABLE purchases (
+      transaction_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL, service TEXT NOT NULL, box TEXT NOT NULL,
+      weight_oz REAL NOT NULL, state TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`);
+    sql.exec("INSERT INTO purchases VALUES ('shp-old', 'order:abc', 1, 'PM', '{}', 28, 'unknown', 'user-1', 0)");
+    addPurchaseColumns(sql);
+    addPurchaseColumns(sql);
+    expect(sql.exec("SELECT test FROM purchases").one().test).toBe(0);
+  });
+});
+
 test("a store whose labels were kept before Pitney Bowes postage gets the new label columns", async () => {
   await sendOrder();
   const cookie = await signedIn();
   const boxId = await setUp(cookie);
-  expect((await request("POST", `/stores/${site}/orders/${encodeURIComponent("order:abc")}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA" } })).status).toBe(303);
+  expect((await request("POST", `/stores/${site}/orders/${encodeURIComponent("order:abc")}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA", kind: "practice" } })).status).toBe(303);
   await runInDurableObject(shipStore(), async (_, state) => {
     const sql = state.storage.sql;
     // The labels table exactly as the label page (PR 24) made it.
@@ -503,6 +596,6 @@ test("a store whose labels were kept before Pitney Bowes postage gets the new la
     addLabelColumns(sql);
     addLabelColumns(sql);
   });
-  expect((await shipStore().orderSummary("order:abc"))!.labels).toMatchObject([{ test: true, priceCents: null, refund: null }]);
+  expect((await shipStore().orderSummary("order:abc"))!.labels).toMatchObject([{ test: true, practice: true, priceCents: null, refund: null }]);
   expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
 });

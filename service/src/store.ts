@@ -25,20 +25,25 @@ export interface Box { boxId: string; name: string; lengthIn: number; widthIn: n
 export interface Label {
   labelId: string; orderId: string; version: number; test: boolean; service: ServiceCode; box: Box; weightOz: number;
   carrier: string; tracking: string; status: "bought" | "cancelled"; createdBy: string; createdAt: string; cancelledAt: string | null;
-  /** What the store's postage account paid; null for practice labels. */
+  /** A free practice PDF made by Ship itself, never sent to Pitney Bowes. */
+  practice: boolean;
+  /** What Pitney Bowes charged (nothing is charged in its sandbox); null for practice labels. */
   priceCents: number | null;
   /** PB's refund state after a cancel ("INITIATED" or "APPROVED"); null otherwise. */
   refund: string | null;
 }
 export interface Settings {
   shipFrom: ShipFrom | null; boxes: Box[]; storeName: string | null; replyTo: string | null;
-  /** Whether Ship can buy real postage from Pitney Bowes. */
+  /** Whether Ship can buy labels from Pitney Bowes. */
   postageConnected: boolean;
+  /** Whether TEST orders get free Pitney Bowes sandbox labels instead of practice labels. */
+  testSandbox: boolean;
 }
 export type Quotes = Partial<Record<ServiceCode, number | null>>;
 
 /** A Pitney Bowes purchase Ship sent and has not finished recording. */
-type Purchase = { transaction_id: string; order_id: string; version: number; service: string; box: string; weight_oz: number; state: string; created_by: string; created_at: number };
+type Purchase = { transaction_id: string; order_id: string; version: number; test: number; service: string; box: string; weight_oz: number; state: string; created_by: string; created_at: number };
+const NOT_CONNECTED = "Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels: practice labels with no postage.";
 /** How long a purchase counts as still in flight before another page may check on it. */
 const IN_FLIGHT_MS = 60_000;
 
@@ -74,11 +79,30 @@ function formNumber(fields: Fields, key: string, label: string, min: number, max
 /** Columns labels gained with Pitney Bowes postage; a store made before then gets them added once. */
 const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT" } as const;
 
-export function addLabelColumns(sql: SqlStorage): void {
-  const present = new Set(sql.exec<{ name: string }>("SELECT name FROM pragma_table_info('labels')").toArray().map(row => row.name));
-  for (const [column, type] of Object.entries(LABEL_COLUMNS)) {
-    if (!present.has(column)) sql.exec(`ALTER TABLE labels ADD COLUMN ${column} ${type}`);
+/** Columns purchases gained when TEST orders got Pitney Bowes sandbox labels. */
+const PURCHASE_COLUMNS = { test: "INTEGER NOT NULL DEFAULT 0" } as const;
+
+function addColumns(sql: SqlStorage, table: "labels" | "purchases", columns: Record<string, string>): void {
+  const present = new Set(sql.exec<{ name: string }>(`SELECT name FROM pragma_table_info('${table}')`).toArray().map(row => row.name));
+  for (const [column, type] of Object.entries(columns)) {
+    if (!present.has(column)) sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
+}
+
+export function addLabelColumns(sql: SqlStorage): void {
+  addColumns(sql, "labels", LABEL_COLUMNS);
+}
+
+export function addPurchaseColumns(sql: SqlStorage): void {
+  addColumns(sql, "purchases", PURCHASE_COLUMNS);
+}
+
+/**
+ * TEST orders get free Pitney Bowes sandbox labels only while Ship runs on PB's
+ * sandbox, checked here by name so a live setup can never buy postage for one.
+ */
+export function testUsesSandbox(env: Env): boolean {
+  return env.PB_ENVIRONMENT === "sandbox" && pitneyConfig(env) !== null;
 }
 
 /** Pitney Bowes failures become messages for the owner's page. */
@@ -132,6 +156,7 @@ export class StoreShipping extends DurableObject<Env> {
     this.sql.exec(`CREATE TABLE IF NOT EXISTS purchases (
       transaction_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL, service TEXT NOT NULL, box TEXT NOT NULL,
       weight_oz REAL NOT NULL, state TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`);
+    addPurchaseColumns(this.sql);
     this.sql.exec("CREATE INDEX IF NOT EXISTS labels_by_order ON labels (order_id, created_at)");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS shipped_emails (
       order_id TEXT NOT NULL, completed_at TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
@@ -212,7 +237,7 @@ export class StoreShipping extends DurableObject<Env> {
       .map(row => ({ boxId: row.box_id, name: row.name, lengthIn: row.length_in, widthIn: row.width_in, heightIn: row.height_in, weightOz: row.weight_oz }));
     return {
       shipFrom: shipFrom ? JSON.parse(shipFrom) as ShipFrom : null, boxes, storeName: this.meta("store_name"), replyTo: this.meta("reply_to"),
-      postageConnected: pitneyConfig(this.env) !== null,
+      postageConnected: pitneyConfig(this.env) !== null, testSandbox: testUsesSandbox(this.env),
     };
   }
 
@@ -261,13 +286,13 @@ export class StoreShipping extends DurableObject<Env> {
 
   private labelsFor(orderId: string): Label[] {
     return this.sql.exec<Record<string, string | number | null>>(
-      "SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at, price_cents, refund FROM labels WHERE order_id = ? ORDER BY created_at",
+      "SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at, price_cents, refund, shipment_id FROM labels WHERE order_id = ? ORDER BY created_at",
       orderId).toArray().map(row => ({
         labelId: row.label_id as string, orderId: row.order_id as string, version: row.version as number, test: row.test === 1,
         service: row.service as ServiceCode, box: JSON.parse(row.box as string) as Box, weightOz: row.weight_oz as number,
         carrier: row.carrier as string, tracking: row.tracking as string, status: row.status as Label["status"],
         createdBy: row.created_by as string, createdAt: row.created_at as string, cancelledAt: row.cancelled_at as string | null,
-        priceCents: row.price_cents as number | null, refund: row.refund as string | null,
+        practice: row.test === 1 && row.shipment_id === null, priceCents: row.price_cents as number | null, refund: row.refund as string | null,
       }));
   }
 
@@ -324,13 +349,13 @@ export class StoreShipping extends DurableObject<Env> {
     return this.sql.exec<Purchase>("SELECT * FROM purchases WHERE order_id = ? ORDER BY created_at LIMIT 1", orderId).toArray()[0];
   }
 
-  /** What each USPS service costs for this package, from the store's PB postage account. */
+  /** What each USPS service costs for this package, from the store's PB postage account (or PB's sandbox for a TEST order). */
   async quoteLabel(input: { orderId: string; fields: Fields }): Promise<Outcome> {
     try {
       const request = await this.labelRequest(input.orderId, input.fields, false);
-      if (request.order.test) refuse("TEST_ORDER", "Practice labels for TEST orders are free.", 409);
+      if (request.order.test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "Practice labels for TEST orders are free.", 409);
       const config = pitneyConfig(this.env);
-      if (!config) refuse("POSTAGE_NOT_CONNECTED", "Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels.", 409);
+      if (!config) refuse("POSTAGE_NOT_CONNECTED", NOT_CONNECTED, 409);
       const codes = Object.keys(SERVICES) as ServiceCode[];
       const prices = await Promise.allSettled(codes.map(code => quote(config, request.shipment(code))));
       const unreachable = prices.find(result => result.status === "rejected" && !(result.reason instanceof PitneyError && result.reason.kind === "refused"));
@@ -347,16 +372,20 @@ export class StoreShipping extends DurableObject<Env> {
   }
 
   /**
-   * Buys one label for the order's latest version. A TEST order gets a practice
-   * label: a PDF marked "TEST - NOT POSTAGE" and a TEST tracking number, with no
-   * call to Pitney Bowes. A real order's label is bought from Pitney Bowes and
-   * charged to the store's own PB postage account. Either way the label is
-   * queued for Commerce, which then marks the order Completed.
+   * Buys one label for the order's latest version. A TEST order gets a free label
+   * from Pitney Bowes's sandbox while Ship runs on it, and stays TEST; otherwise,
+   * or when the owner asks for one, it gets a practice label: a PDF marked
+   * "TEST - NOT POSTAGE" and a TEST tracking number, with no call to Pitney Bowes.
+   * A real order's label is bought from Pitney Bowes and charged to the store's
+   * own PB postage account. Either way the label is queued for Commerce, which
+   * then marks the order Completed.
    */
   async buyLabel(input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
     try {
       const request = await this.labelRequest(input.orderId, input.fields, true);
-      return request.order.test ? this.practiceLabel(request, input.uid) : await this.postageLabel(request, input);
+      if (!request.order.test) return await this.postageLabel(request, input);
+      return testUsesSandbox(this.env) && input.fields.kind !== "practice"
+        ? await this.postageLabel(request, input) : this.practiceLabel(request, input.uid);
     } catch (error) {
       return toOutcome(asServiceError(error));
     }
@@ -364,11 +393,12 @@ export class StoreShipping extends DurableObject<Env> {
 
   private practiceLabel(request: Awaited<ReturnType<StoreShipping["labelRequest"]>>, uid: string): Outcome {
     const { order, from, to, box, weightOz, service } = request;
+    if (this.openPurchase(order.orderId)) refuse("LABEL_IN_PROGRESS", "Ship is buying a sandbox label for this order. Reload the page in a moment.", 409);
     const now = new Date().toISOString();
     const label: Label = {
       labelId: `label_${crypto.randomUUID()}`, orderId: order.orderId, version: order.version, test: true,
       service, box, weightOz, carrier: "USPS", tracking: `TEST${randomDigits(18)}`,
-      status: "bought", createdBy: uid, createdAt: now, cancelledAt: null, priceCents: null, refund: null,
+      status: "bought", createdBy: uid, createdAt: now, cancelledAt: null, practice: true, priceCents: null, refund: null,
     };
     const pdf = practiceLabelPdf([
       `ORDER: ${order.number === null ? order.orderId : `#${order.number}`}   SERVICE: ${SERVICES[label.service]}`,
@@ -391,8 +421,10 @@ export class StoreShipping extends DurableObject<Env> {
    */
   private async postageLabel(request: Awaited<ReturnType<StoreShipping["labelRequest"]>>, input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
     const config = pitneyConfig(this.env);
-    if (!config) refuse("POSTAGE_NOT_CONNECTED", "Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels.", 409);
+    if (!config) refuse("POSTAGE_NOT_CONNECTED", NOT_CONNECTED, 409);
     const { order } = request;
+    // Never buys postage for a TEST order outside Pitney Bowes's sandbox.
+    if (order.test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "TEST orders get practice labels while Ship is not on the Pitney Bowes sandbox.", 409);
     const earlier = this.openPurchase(order.orderId);
     if (earlier) {
       if (earlier.state === "pending" && Date.now() - earlier.created_at < IN_FLIGHT_MS) {
@@ -409,11 +441,11 @@ export class StoreShipping extends DurableObject<Env> {
     this.refuseIfLabeled(order.orderId, order.version);
     if (this.openPurchase(order.orderId)) refuse("LABEL_IN_PROGRESS", "Ship is buying a label for this order right now. Reload the page in a moment.", 409);
     const purchase: Purchase = {
-      transaction_id: newTransactionId(), order_id: order.orderId, version: order.version, service: request.service,
+      transaction_id: newTransactionId(), order_id: order.orderId, version: order.version, test: order.test ? 1 : 0, service: request.service,
       box: JSON.stringify(request.box), weight_oz: request.weightOz, state: "pending", created_by: input.uid, created_at: Date.now(),
     };
-    this.sql.exec(`INSERT INTO purchases (transaction_id, order_id, version, service, box, weight_oz, state, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      purchase.transaction_id, purchase.order_id, purchase.version, purchase.service, purchase.box, purchase.weight_oz, purchase.state, purchase.created_by, purchase.created_at);
+    this.sql.exec(`INSERT INTO purchases (transaction_id, order_id, version, test, service, box, weight_oz, state, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      purchase.transaction_id, purchase.order_id, purchase.version, purchase.test, purchase.service, purchase.box, purchase.weight_oz, purchase.state, purchase.created_by, purchase.created_at);
     let bought: PbLabel;
     try {
       bought = await buy(config, request.shipment(request.service), purchase.transaction_id);
@@ -442,14 +474,14 @@ export class StoreShipping extends DurableObject<Env> {
     if (kept) return this.labelsFor(purchase.order_id).find(label => label.labelId === kept.label_id)!;
     const now = new Date().toISOString();
     const label: Label = {
-      labelId: `label_${crypto.randomUUID()}`, orderId: purchase.order_id, version: purchase.version, test: false,
+      labelId: `label_${crypto.randomUUID()}`, orderId: purchase.order_id, version: purchase.version, test: purchase.test === 1,
       service: purchase.service as ServiceCode, box: JSON.parse(purchase.box) as Box, weightOz: purchase.weight_oz, carrier: "USPS",
       tracking: bought.tracking, status: "bought", createdBy: purchase.created_by, createdAt: now, cancelledAt: null,
-      priceCents: bought.priceCents, refund: null,
+      practice: false, priceCents: bought.priceCents, refund: null,
     };
     this.sql.exec(`INSERT INTO labels (label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, pdf, status, created_by, created_at, price_cents, shipment_id, pdf_url)
-      VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?, 'bought', ?, ?, ?, ?, ?)`,
-      label.labelId, label.orderId, label.version, label.service, purchase.box, label.weightOz, label.carrier, label.tracking, pdf,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'bought', ?, ?, ?, ?, ?)`,
+      label.labelId, label.orderId, label.version, purchase.test, label.service, purchase.box, label.weightOz, label.carrier, label.tracking, pdf,
       label.createdBy, now, label.priceCents, bought.shipmentId, bought.pdfUrl);
     this.queueLabel({ orderId: label.orderId, version: label.version, carrier: label.carrier, tracking: label.tracking });
     return label;
@@ -457,7 +489,8 @@ export class StoreShipping extends DurableObject<Env> {
 
   /**
    * Cancelling a label never changes the Commerce order (order-and-shipping-decisions answer 8).
-   * A real label is voided with Pitney Bowes first, and USPS refunds the store's postage account.
+   * A label from Pitney Bowes (sandbox ones too) is voided there first, and USPS refunds
+   * the store's postage account. A practice label has nothing to void.
    */
   async cancelLabel(labelId: string): Promise<Outcome> {
     try {
@@ -465,7 +498,7 @@ export class StoreShipping extends DurableObject<Env> {
         "SELECT test, shipment_id FROM labels WHERE label_id = ? AND status = 'bought'", labelId).toArray()[0];
       if (!row) refuse("NOT_FOUND", "No label to cancel.", 404);
       let refund: string | null = null;
-      if (!row.test) {
+      if (row.shipment_id || !row.test) {
         const config = pitneyConfig(this.env);
         if (!config || !row.shipment_id) refuse("POSTAGE_NOT_CONNECTED", "Pitney Bowes is not connected to Ship right now, so the label cannot be cancelled yet.", 503);
         refund = await voidLabel(config, row.shipment_id);
