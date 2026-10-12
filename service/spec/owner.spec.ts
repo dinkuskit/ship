@@ -81,7 +81,9 @@ beforeEach(async () => {
   envOverrides = {};
   tokenAnswer = async () => Response.json({ access_token: await pass(ownerClaims), token_type: "Bearer", expires_in: 300, refresh_token: `refresh-${++refreshes}-${"r".repeat(40)}` });
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = new URL(String(input)).href;
+    // Validate options with workerd itself; a pure fetch stub hides unsupported modes.
+    const nativeRequest = new Request(input, init);
+    const url = nativeRequest.url;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
     if (url === `${issuer}/jwks-down`) return new Response("busy", { status: 503 });
     if (url === `${issuer}/token`) return tokenAnswer(JSON.parse(String(init?.body)));
@@ -696,4 +698,13 @@ test("a real order gets no label until the owner connects their own Pitney Bowes
   expect(creates()[0]!.body.shipmentOptions).toEqual([{ name: "SHIPPER_ID", value: "synthetic-shipper" }]);
   expect((await request("POST", `${orderPath}/labels`, { cookie, form })).status).toBe(303);
   expect(creates()[1]!.body.shipmentOptions).toEqual([{ name: "SHIPPER_ID", value: "SANDBOX-OWNER-SHIPPER" }]);
+});
+
+test("a token endpoint redirect is refused without forwarding the sign-in code", async () => {
+  tokenAnswer = async () => new Response(null, { status: 302, headers: { location: "https://redirect-target.example.invalid/token" } });
+  const { back } = await signIn();
+  expect(back.status).toBe(502);
+  const tokenCall = vi.mocked(globalThis.fetch).mock.calls.find(([input]) => String(input) === `${issuer}/token`);
+  expect(tokenCall?.[1]?.redirect).toBe("manual");
+  expect(vi.mocked(globalThis.fetch).mock.calls.some(([input]) => String(input).startsWith("https://redirect-target.example.invalid/"))).toBe(false);
 });

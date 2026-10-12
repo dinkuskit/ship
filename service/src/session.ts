@@ -105,7 +105,7 @@ const REFUSED_PASS_ERRORS = [errors.JWTExpired, errors.JWTClaimValidationFailed,
 async function askToken(env: Env, body: object, site: string, fetcher: typeof fetch): Promise<TokenAnswer> {
   try {
     const answer = await fetcher(env.ACCOUNT_TOKEN_URL, {
-      method: "POST", redirect: "error", cache: "no-store",
+      method: "POST", redirect: "manual", cache: "no-store",
       headers: { "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify(body),
     });
