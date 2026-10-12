@@ -33,9 +33,22 @@ const sandbox = (call: PbCall): Response => {
   if (route === "POST /shippingservices/v1/shipments") return Response.json(pbLabel(call.body.rates[0].serviceId));
   if (route === "GET /shippingservices/v1/shipments") return Response.json({ errors: [{ errorCode: "PB-SHIPMENT-NOT-FOUND", message: "not found" }] }, { status: 404 });
   if (call.method === "DELETE" && call.url.pathname.startsWith("/shippingservices/v1/shipments/")) return Response.json({ carrier: "USPS", status: "INITIATED", totalCarrierCharge: 9.35 });
+  if (route === "POST /shippingservices/v1/developers/synthetic-developer/merchants/credentials") {
+    if (call.body.username !== "owner@example.test" || call.body.password !== "not-a-real-login") {
+      return Response.json({ errors: [{ errorCode: "PB-SYNTHETIC", message: "Invalid credentials" }] }, { status: 401 });
+    }
+    return Response.json(merchant);
+  }
   if (call.url.href === LABEL_URL) return new Response("%PDF-1.4 sandbox label", { headers: { "content-type": "application/pdf" } });
   throw new Error(`unexpected Pitney Bowes call ${route}`);
 };
+/** The store owner's own PB postage account, as PB describes it after they sign up. */
+let merchant: Record<string, unknown>;
+const ownMerchant = () => ({
+  company: "Demo Store", fullName: "Demo Owner", email: "owner@example.test", developerId: "synthetic-developer",
+  merchantStatus: "ACTIVE", merchantStatusReason: null, merchantType: "INDIVIDUAL", paymentAccountNumber: "SANDBOX-ACCT-0042",
+  paymentServicesAccountId: "synthetic-payments", paymentServicesAccountIdActive: true, postalReportingNumber: "SANDBOX-OWNER-SHIPPER",
+});
 const pbLabel = (serviceId: string) => ({
   shipmentId: "SANDBOX-SHIPMENT-A", parcelTrackingNumber: "SANDBOX-TRACKING-A",
   rates: [{ carrier: "USPS", serviceId, parcelType: "PKG", totalCarrierCharge: PB_PRICES[serviceId], currencyCode: "USD" }],
@@ -64,6 +77,7 @@ beforeEach(async () => {
   refreshes = 0;
   pbCalls = [];
   pbAnswer = sandbox;
+  merchant = ownMerchant();
   envOverrides = {};
   tokenAnswer = async () => Response.json({ access_token: await pass(ownerClaims), token_type: "Bearer", expires_in: 300, refresh_token: `refresh-${++refreshes}-${"r".repeat(40)}` });
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -445,10 +459,14 @@ test("a pass DinkusKit.com did not sign ends the session at the next check", asy
 
 const creates = () => pbCalls.filter(call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments");
 
+const connect = (cookie: string, form = { username: "owner@example.test", password: "not-a-real-login" }) =>
+  request("POST", `/stores/${site}/settings/postage`, { cookie, form });
+
 async function liveOrder() {
   await sendOrder({ test: false });
   const cookie = await signedIn();
   const boxId = await setUp(cookie);
+  expect((await connect(cookie)).status).toBe(303);
   const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
   const buy = (form: Record<string, string> = {}) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", ...form } });
   return { cookie, boxId, orderPath, buy };
@@ -468,7 +486,8 @@ test("a real order's label is bought from the store's Pitney Bowes postage accou
   const [create] = creates();
   expect(create!.headers.get("x-pb-transactionid")).toMatch(/^shp[a-z0-9]{22}$/);
   expect(create!.headers.get("authorization")).toBe("Bearer synthetic-pb-pass");
-  expect(create!.body.shipmentOptions).toEqual([{ name: "SHIPPER_ID", value: "synthetic-shipper" }]);
+  // The store's own postage account pays, never the sandbox test merchant DinkusKit holds.
+  expect(create!.body.shipmentOptions).toEqual([{ name: "SHIPPER_ID", value: "SANDBOX-OWNER-SHIPPER" }]);
   expect(create!.body.rates).toEqual([{ carrier: "USPS", serviceId: "PM", parcelType: "PKG", specialServices: [{ specialServiceId: "DelCon" }] }]);
   expect(create!.body.parcel).toEqual({ weight: { unitOfMeasurement: "OZ", weight: 28 }, dimension: { unitOfMeasurement: "IN", length: 8, width: 6, height: 4 } });
   expect(create!.body.fromAddress).toMatchObject({ name: "Demo Store", stateProvince: "NY", postalCode: "10001", countryCode: "US" });
@@ -598,4 +617,83 @@ test("a store whose labels were kept before Pitney Bowes postage gets the new la
   });
   expect((await shipStore().orderSummary("order:abc"))!.labels).toMatchObject([{ test: true, practice: true, priceCents: null, refund: null }]);
   expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
+});
+
+test("an owner creates their own Pitney Bowes account from Ship's link and connects it without Ship keeping the password", async () => {
+  const cookie = await signedIn();
+  await setUp(cookie);
+  const page = await (await request("GET", `/stores/${site}/settings`, { cookie })).text();
+  expect(page).toContain("you need your own Pitney Bowes postage account");
+  const link = new URL(page.match(/href="([^"]+)" target="_blank"/)![1]!.replaceAll("&amp;", "&"));
+  expect(`${link.origin}${link.pathname}`).toBe("https://developer.pbshippingmerchant.pitneybowes.com/create/accountInfo");
+  expect(Object.fromEntries(link.searchParams)).toEqual({
+    developerID: "synthetic-developer", fName: "Demo", lName: "Store", email: "owner@example.test",
+    addressLine1: "2 Warehouse Rd", city: "Shiptown", state: "NY", postalCode: "10001",
+  });
+
+  const refused = await connect(cookie, { username: "owner@example.test", password: "wrong-login" });
+  expect(refused.status).toBe(422);
+  const refusedPage = await refused.text();
+  expect(refusedPage).toContain("did not accept that username and password");
+  expect(refusedPage).not.toContain("wrong-login");
+  expect((await shipStore().getSettings()).postageAccount).toBeNull();
+
+  expect((await connect(cookie)).status).toBe(303);
+  const call = pbCalls.filter(item => item.url.pathname.endsWith("/merchants/credentials")).at(-1)!;
+  expect(call.method).toBe("POST");
+  expect(call.headers.get("authorization")).toBe("Bearer synthetic-pb-pass");
+  expect((await shipStore().getSettings()).postageAccount).toMatchObject({
+    shipperId: "SANDBOX-OWNER-SHIPPER", company: "Demo Store", email: "owner@example.test", accountEnding: "0042", connectedBy: "user-1",
+  });
+  const connected = await (await request("GET", `/stores/${site}/settings`, { cookie })).text();
+  expect(connected).toContain("Connected to Pitney Bowes: Demo Store · postage account ending 0042 · owner@example.test");
+  expect(connected).not.toContain('name="password"');
+  await runInDurableObject(shipStore(), async (_, state) => {
+    const kept = JSON.stringify(state.storage.sql.exec("SELECT * FROM store_meta").toArray());
+    expect(kept).toContain("SANDBOX-OWNER-SHIPPER");
+    expect(kept).not.toContain("not-a-real-login");
+  });
+
+  expect((await request("POST", `/stores/${site}/settings/postage/disconnect`, { cookie })).status).toBe(303);
+  expect((await shipStore().getSettings()).postageAccount).toBeNull();
+});
+
+test("a Pitney Bowes account that is not active or cannot pay yet is not connected", async () => {
+  const cookie = await signedIn();
+  const refusals: [Record<string, unknown>, string][] = [
+    [{ merchantStatus: "INACTIVE" }, "not active yet"],
+    [{ paymentServicesAccountIdActive: false }, "no working way to pay"],
+    // PB has to say the payment account works; a missing or odd answer is not a yes.
+    [{ paymentServicesAccountIdActive: undefined }, "no working way to pay"],
+    [{ paymentServicesAccountIdActive: "true" }, "no working way to pay"],
+  ];
+  for (const [change, words] of refusals) {
+    merchant = { ...ownMerchant(), ...change };
+    const response = await connect(cookie);
+    expect(response.status).toBe(422);
+    expect(await response.text()).toContain(words);
+  }
+  expect((await shipStore().getSettings()).postageAccount).toBeNull();
+});
+
+test("a real order gets no label until the owner connects their own Pitney Bowes account, while TEST orders still use the sandbox", async () => {
+  await sendOrder({ test: false });
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  const form = { version: "1", boxId, weightOz: "28", service: "PM" };
+  expect(await (await request("GET", orderPath, { cookie })).text()).toContain("Connect your Pitney Bowes postage account in <a");
+  for (const action of ["labels", "prices"]) {
+    const refused = await request("POST", `${orderPath}/${action}`, { cookie, form });
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toContain("Connect your Pitney Bowes postage account in Settings");
+  }
+  expect(pbCalls).toEqual([]);
+
+  expect((await connect(cookie)).status).toBe(303);
+  await sendOrder({ orderId: "order:test", number: 1002 });
+  expect((await request("POST", `/stores/${site}/orders/${encodeURIComponent("order:test")}/labels`, { cookie, form })).status).toBe(303);
+  expect(creates()[0]!.body.shipmentOptions).toEqual([{ name: "SHIPPER_ID", value: "synthetic-shipper" }]);
+  expect((await request("POST", `${orderPath}/labels`, { cookie, form })).status).toBe(303);
+  expect(creates()[1]!.body.shipmentOptions).toEqual([{ name: "SHIPPER_ID", value: "SANDBOX-OWNER-SHIPPER" }]);
 });

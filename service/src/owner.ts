@@ -98,6 +98,14 @@ const ROUTES: PageRoute[] = [
     handle: async ({ site, session, store, fields }) => settingsResult(site, session, store, await outcomeOf(store.addBox(fields))),
   },
   {
+    method: "POST", pattern: new RegExp(`^/stores/${SEGMENT}/settings/postage$`),
+    handle: async ({ site, session, store, fields }) => settingsResult(site, session, store, await outcomeOf(store.connectPostage(fields, session.uid))),
+  },
+  {
+    method: "POST", pattern: new RegExp(`^/stores/${SEGMENT}/settings/postage/disconnect$`),
+    handle: async ({ site, session, store }) => settingsResult(site, session, store, await outcomeOf(store.disconnectPostage())),
+  },
+  {
     method: "POST", pattern: new RegExp(`^/stores/${SEGMENT}/settings/boxes/${SEGMENT}/remove$`),
     handle: async ({ site, session, store, params }) => settingsResult(site, session, store, await outcomeOf(store.removeBox(params[0]!))),
   },

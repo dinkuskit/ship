@@ -14,8 +14,10 @@ declare namespace Cloudflare {
     /** Secrets: DinkusKit's PB developer API key and secret. */
     PB_API_KEY?: string;
     PB_API_SECRET?: string;
-    /** Secret: the PB merchant (shipper) id whose postage account pays. In the sandbox, PB's one test merchant. */
+    /** Secret: PB's sandbox test merchant (shipper) id, which pays for TEST orders' sandbox labels. Real orders use each store's own connected account. */
     PB_SHIPPER_ID?: string;
+    /** DinkusKit's PB developer id: puts owners' new postage accounts under DinkusKit's developer account and connects them. */
+    PB_DEVELOPER_ID?: string;
     /** The shipped email's sender address (orders@dinkuskit.com). Emails wait until it is set. */
     SHIP_EMAIL_FROM?: string;
     /** Cloudflare Email Service binding that sends the shipped email. */
