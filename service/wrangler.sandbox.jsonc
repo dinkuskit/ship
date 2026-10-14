@@ -1,0 +1,32 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // Preparation only. Activation requires separate owner approval and a fresh namespace/secrets.
+  "name": "dinkus-ship-sandbox",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-29",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "ship.sm0ky.dev", "custom_domain": true }],
+  "observability": { "enabled": true, "head_sampling_rate": 0.1 },
+  "durable_objects": { "bindings": [{ "name": "SHIP_STORES", "class_name": "StoreShipping" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StoreShipping"] }],
+  "vars": {
+    "ACCOUNT_ISSUER": "https://dinkuskit.com/account",
+    "ACCOUNT_AUDIENCE": "dinkus-ship-sandbox",
+    "ACCOUNT_JWKS_URL": "https://dinkuskit.com/account/.well-known/jwks.json",
+    "ACCOUNT_SIGNIN_URL": "https://dinkuskit.com/account/ship-sign-in",
+    "ACCOUNT_TOKEN_URL": "https://dinkuskit.com/api/ship-sign-in/token",
+    "PB_ENVIRONMENT": "sandbox",
+    "SHIP_RECIPIENT": "ship-sandbox",
+    // Set exact site, immutable generation, and protected historical canonical ID at future activation.
+    "SHIP_SITE_ID": "",
+    "SHIP_GENERATION": "",
+    "SHIP_EXCLUDED_ORDER_ID": "",
+    // Intentionally empty until a separately authorized fresh paid TEST order is proved.
+    "SHIP_ALLOWED_ORDER_ID": ""
+  }
+  // Intentionally no EMAIL binding or sender. Code also hard-suppresses isolated email.
+  // Separately provision SHIP_SESSION_SECRET, PB_API_KEY, PB_API_SECRET, PB_SHIPPER_ID.
+  // Never copy the shared Worker's namespace, session secret or PB credential tuple.
+}

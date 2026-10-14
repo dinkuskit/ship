@@ -4,11 +4,11 @@
   "current_focus": {
     "cadence": "sequential",
     "confirmed": true,
-    "confirmed_at": "2026-10-09T17:19:10+00:00",
-    "domain": "Registry-only private PDF qualification",
-    "started_at": "2026-10-09T17:19:10+00:00",
-    "status": "inspected",
-    "summary": "Bobby authorizes provider-link qualification first and reviewed Ship PR with bounded source/tests/runtime work; backup design only at original PB expiry. No live purchase, secrets, deploy, publishing or account changes. Existing trusted Commerce bindings remain unresolved."
+    "confirmed_at": "2026-10-14T15:05:56+00:00",
+    "domain": "Isolated Ship sandbox admission contract v1",
+    "started_at": "2026-10-14T15:05:55+00:00",
+    "status": "confirmed",
+    "summary": "Bobby authorized source/tests/PR/exact reviews under root frozen contract v1 on October14. No merge, deploy, runtime configuration, credentials, resources, payment, order or provider action."
   },
   "decisions": [
     {
@@ -2468,6 +2468,75 @@
       "superseded_by": null,
       "updated_at": "2026-10-09T17:28:29+00:00",
       "verification_ref": "file:.grilltrack/proof/provider-pdf-qualification-20261009.md"
+    },
+    {
+      "baseline_ref": null,
+      "candidate_refs": [],
+      "choice": "Fixed ship-sandbox recipient, distinct audience, exact site/generation and single deployment-owned fresh order gate; mandatory TEST and no email; legacy tuple rejection; source delivery only.",
+      "context_ref": null,
+      "created_at": "2026-10-14T15:05:55+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [],
+      "domain": "Isolated Ship sandbox admission contract v1",
+      "history": [
+        {
+          "at": "2026-10-14T15:05:55+00:00",
+          "choice": "Fixed ship-sandbox recipient, distinct audience, exact site/generation and single deployment-owned fresh order gate; mandatory TEST and no email; legacy tuple rejection; source delivery only.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-14T15:16:38+00:00",
+          "choice": "Fixed ship-sandbox recipient, distinct audience, exact site/generation and single deployment-owned fresh order gate; mandatory TEST and no email; legacy tuple rejection; source delivery only.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-14T15:16:38+00:00",
+          "choice": "Fixed ship-sandbox recipient, distinct audience, exact site/generation and single deployment-owned fresh order gate; mandatory TEST and no email; legacy tuple rejection; source delivery only.",
+          "from": "implemented",
+          "implementation_ref": "docs/contracts/isolated-ship-sandbox-v1.md",
+          "note": "verification recorded in cumulative context",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "verified",
+          "verification_ref": null
+        }
+      ],
+      "id": "ship-isolated-sandbox-v1",
+      "implementation_ref": "docs/contracts/isolated-ship-sandbox-v1.md",
+      "question": "What receiver boundary implements the frozen isolated sandbox contract?",
+      "rationale": "",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "verified",
+      "superseded_by": null,
+      "updated_at": "2026-10-14T15:16:38+00:00",
+      "verification_ref": "service/spec/isolation.spec.ts"
     }
   ],
   "last_activation": {
@@ -2495,5 +2564,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-09T17:28:29+00:00"
+  "updated_at": "2026-10-14T15:16:38+00:00"
 }

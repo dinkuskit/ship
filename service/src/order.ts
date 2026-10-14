@@ -1,3 +1,4 @@
+import type { ShipTuple } from "./isolation.js";
 import { ServiceError } from "./errors.js";
 
 /** The record Commerce's Orders sends for one order version (dinkuskit/commerce docs/contracts/commerce-handoffs.md). */
@@ -23,6 +24,7 @@ export interface OrderLine {
 }
 
 export interface ShipOrder {
+  recipient?: ShipTuple["recipient"]; generation?: string; mode?: "test";
   orderId: string;
   number: number | null;
   version: number;
