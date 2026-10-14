@@ -108,7 +108,7 @@ async function askToken(env: Env, body: object, site: string, fetcher: typeof fe
     const answer = await fetcher(env.ACCOUNT_TOKEN_URL, {
       method: "POST", redirect: "manual", cache: "no-store",
       headers: { "content-type": "application/json", accept: "application/json" },
-      body: JSON.stringify({ ...body, ...tuple(env) }),
+      body: JSON.stringify(body),
     });
     if (answer.status === 400 || answer.status === 401 || answer.status === 403) return { kind: "refused" };
     if (!answer.ok) return { kind: "unavailable" };
@@ -157,7 +157,6 @@ export async function startSignIn(env: Env, site: string, next: string): Promise
   const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(pending.verifier))));
   const target = new URL(env.ACCOUNT_SIGNIN_URL);
   target.search = new URLSearchParams({ site_id: site, state: pending.state, code_challenge: challenge, code_challenge_method: "S256" }).toString();
-  for (const [key, value] of Object.entries(tuple(env) ?? {})) target.searchParams.set(key, value);
   return new Response(null, {
     status: 303,
     headers: { location: target.href, "set-cookie": setCookie(SIGNIN_COOKIE, await seal(env, pending), SIGNIN_SECONDS), "cache-control": "no-store" },

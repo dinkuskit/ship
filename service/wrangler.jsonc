@@ -3,7 +3,7 @@
   // Ronald's deploy agents set the name, the ship.dinkuskit.com route and
   // the account values when they deploy; nothing here deploys anything.
   "name": "dinkus-ship-local",
-  "main": "src/worker.ts",
+  "main": "src/entry.ts",
   "compatibility_date": "2026-09-29",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": false,

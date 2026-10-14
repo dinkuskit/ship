@@ -153,11 +153,12 @@ const tokenAnswer = async (extra: Record<string, unknown> = {}) => Response.json
   access_token: await pass({ scope: "ship:labels", uid: "fixture-owner", email: "owner@example.test", ...extra }), refresh_token: "fixture-refresh-" + "x".repeat(40),
 });
 
-test("owner sign-in and refresh carry pinned tuple and sessions reject a stale generation before token calls", async () => {
+test("owner wire stays issuer-compatible while passes and sessions pin the deployment tuple", async () => {
   const start = await begin();
-  for (const [key, value] of Object.entries(admission)) expect(start.target.searchParams.get(key)).toBe(value);
+  expect([...start.target.searchParams.keys()].sort()).toEqual(["code_challenge", "code_challenge_method", "site_id", "state"]);
   const exchange = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
-    expect(JSON.parse(String(init?.body))).toMatchObject(admission);
+    const body = JSON.parse(String(init?.body));
+    expect(Object.keys(body).sort()).toEqual(body.grant_type ? ["grant_type", "refresh_token"] : ["code", "code_verifier"]);
     return tokenAnswer();
   });
   const answer = await finishSignIn(start.request, configured, exchange);

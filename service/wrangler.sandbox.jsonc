@@ -2,7 +2,7 @@
   "$schema": "./node_modules/wrangler/config-schema.json",
   // Preparation only. Activation requires separate owner approval and a fresh namespace/secrets.
   "name": "dinkus-ship-sandbox",
-  "main": "src/worker.ts",
+  "main": "src/entry.ts",
   "compatibility_date": "2026-09-29",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "workers_dev": false,

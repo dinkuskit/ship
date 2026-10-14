@@ -53,3 +53,32 @@ Generated command output is retained locally in
 `runs/isolated-test-admission-20261014/` (service-validation.txt,
 root-validation.txt and build-output.txt). The durable contract is
 [isolated-ship-sandbox-v1](../../docs/contracts/isolated-ship-sandbox-v1.md).
+
+## Integration repairs
+
+Actual issuer32febf owner wire accepts only the legacy four sign-in parameters
+and strict code/verifier or refresh fields. Ship now retains those request
+shapes while continuing to verify server-derived tuple claims and seal pending
+cookies/session cookies to the deployment tuple. The machine header wire is
+unchanged.
+
+Raw local workerd startup uncovered a pre-existing deployment-entry failure:
+primitive test-helper exports (MAX_BODY_BYTES/SERVICE_LINE) are not handlers.
+Both configs now use src/entry.ts, exporting only default and StoreShipping.
+The actual output is dist/entry.js or dist-sandbox/entry.js. No compatibility
+change or harness export shim is needed. `npm run verify:entry` tests those raw
+bundles with normal SQLite namespaces, signed requests, admission/receipt,
+public DO practice-label lifecycle, HTTP event polling and matching HTTP ack.
+CI runs this verifier after both dry builds. Isolated events and receipts are
+produced by the actual lifecycle; no raw label-table writes occur.
+
+The updated 64 service tests and both builds pass. Raw legacy and isolated
+entries start, intake persists to SQLite, and isolated protected/nonTEST
+requests deny. Public lifecycle creates and acknowledges a practice label;
+zero outbound calls beyond synthetic JWKS. The local actual-issuer owner HTTP
+fixture additionally passes code exchange, settings, label generation through
+three synthetic PB transport responses, scoped event and ack. It is not
+rendered-browser/PDF, live-provider, or Commerce completion proof. Generated
+proof scripts/results remain in the existing run root; exact final head is
+recorded there after commit. Earlier review evidence is invalidated by these
+source repairs; new exact-head review required. Native infra remains blocked.

@@ -48,8 +48,9 @@ separate Worker and SQLite namespace, separate session secret, and separate
 PB sandbox credentials. A deployment change is not a cross-DO deduplication
 mechanism. Draining cached sessions/provider work is part of activation.
 
-Owner sign-in requests and code/refresh exchanges include the deployment
-recipient/generation/mode. Signed owner passes, sealed pending sign-in and
+Owner sign-in requests and code/refresh exchanges retain the existing issuer
+wire shape; the issuer derives recipient/generation/mode from its exact site
+registration. Signed owner passes, sealed pending sign-in and
 session cookies must match that tuple. HTML forms use the verified session
 and deployment configuration; caller headers/form fields do not choose an
 admission. Existing session TTL and issuer-outage grace remain; this is not

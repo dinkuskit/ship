@@ -97,3 +97,13 @@ Commerce's "Create shipping label" opens `https://ship.dinkuskit.com/stores/{sit
 - **Shipped email:** var `SHIP_EMAIL_FROM=orders@dinkuskit.com` and the `EMAIL` send_email binding (already in `wrangler.jsonc`), with Cloudflare Email Service sending for dinkuskit.com as DinkusKit.com's own sign-in emails do. Until the var is set, completions wait and nothing is sent. Once it is set, waiting emails go out on Commerce's next call to Ship; anything waiting more than 3 days is dropped.
 - **Route:** `ship.dinkuskit.com`. Keep `global_fetch_strictly_public` enabled so token and JWKS requests reach the DinkusKit.com Worker on the same zone. Token exchange uses manual redirect handling and rejects non-2xx replies without forwarding the sign-in code.
 - **Pitney Bowes (sandbox):** var `PB_ENVIRONMENT=sandbox`, and secrets `PB_API_KEY`, `PB_API_SECRET` (DinkusKit's PB developer keys) and `PB_SHIPPER_ID` (the sandbox's test merchant), set by Ronald with `wrangler secret put`. They never go in this repository. Until all four are set, real orders cannot get labels and TEST orders get practice labels. Var `PB_DEVELOPER_ID` (DinkusKit's PB developer id, from PB Developer Hub > Profile) turns on owners' sign-up link and connect form. Live postage is not built: it needs Ronald's word and PB's live keys, and PB may charge owners a subscription fee (asked, not yet answered).
+
+## Isolated TEST recipient preparation
+
+See [the isolated sandbox contract](../docs/contracts/isolated-ship-sandbox-v1.md)
+and `wrangler.sandbox.jsonc`. Its single allowed order ID starts empty. Resource,
+secret, configuration and deployment activation remain separate owner gates.
+The deployment entry is `src/entry.ts`; `src/worker.ts` also exports test helpers
+and is not the deployment entry. After the two dry builds, `npm run verify:entry`
+starts the actual `dist/entry.js` and `dist-sandbox/entry.js` bundles with local
+SQLite Durable Objects, synthetic signed passes and blocked external network.
