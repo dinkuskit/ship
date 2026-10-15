@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
+import { assertSite, assertTuple } from "./isolation.js";
 import { ServiceError } from "./errors.js";
 
 export type ShipScope = "ship:orders";
@@ -12,7 +13,7 @@ const SITE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
  * requested scope. The store is the pass's site_id and nothing else, so a
  * request can never name another store. Returns that store id.
  */
-export function createAuthenticator(config: { issuer: string; audience: string; jwksUrl: string }, key?: JWTVerifyGetKey) {
+export function createAuthenticator(config: { issuer: string; audience: string; jwksUrl: string; env?: Env }, key?: JWTVerifyGetKey) {
   if (new URL(config.issuer).protocol !== "https:" || new URL(config.jwksUrl).protocol !== "https:" || !config.audience) {
     throw new Error("invalid_identity_configuration");
   }
@@ -33,6 +34,8 @@ export function createAuthenticator(config: { issuer: string; audience: string; 
         typeof payload.scope !== "string" || !payload.scope.split(" ").includes(scope)) {
       throw new ServiceError(403, "FORBIDDEN", "the token does not grant this scope for a store");
     }
+    assertTuple(config.env ?? {} as Env, payload, true);
+    if (config.env) assertSite(config.env, payload.site_id);
     return payload.site_id;
   };
 }

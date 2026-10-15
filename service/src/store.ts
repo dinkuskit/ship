@@ -1,3 +1,4 @@
+import { assertOrder, assertTuple, isolation, tuple } from "./isolation.js";
 import { DurableObject } from "cloudflare:workers";
 import { ok, ServiceError, toOutcome, type Outcome } from "./errors.js";
 import { labelAddress, type LabelAddress } from "./address.js";
@@ -129,6 +130,7 @@ function randomDigits(count: number): string {
 
 /** A label Ship bought, as Commerce picks it up from GET /v1/labels. */
 export interface LabelEvent {
+  recipient?: "ship-sandbox"; generation?: string; mode?: "test";
   eventId: string;
   orderId: string;
   version: number;
@@ -178,6 +180,28 @@ export class StoreShipping extends DurableObject<Env> {
       checked_at INTEGER NOT NULL, refreshing_until INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`);
   }
 
+  private checkIsolation(): void {
+    const config = isolation(this.env), kept = this.meta("isolation_tuple");
+    if (!config) { if (kept) throw new ServiceError(403, "FORBIDDEN", "isolated storage cannot serve legacy requests"); return; }
+    const expected = JSON.stringify({ recipient: config.recipient, generation: config.generation, site: config.site });
+    if (kept && kept !== expected) throw new ServiceError(403, "FORBIDDEN", "storage generation does not match");
+    if (!kept) {
+      if (this.sql.exec<{ n: number }>("SELECT (SELECT COUNT(*) FROM orders) + (SELECT COUNT(*) FROM sessions) + (SELECT COUNT(*) FROM labels) + (SELECT COUNT(*) FROM label_events) + (SELECT COUNT(*) FROM purchases) + (SELECT COUNT(*) FROM boxes) + (SELECT COUNT(*) FROM store_meta) + (SELECT COUNT(*) FROM shipped_emails) AS n").one().n) throw new ServiceError(403, "FORBIDDEN", "isolated storage must start empty");
+      this.setMeta("isolation_tuple", expected);
+    }
+  }
+  private admitStoredOrder(order: ShipOrder): void {
+    this.checkIsolation();
+    assertTuple(this.env, order as unknown as Record<string, unknown>);
+    assertOrder(this.env, order.orderId, order.test);
+  }
+  private async admitLabel(labelId: string): Promise<void> {
+    this.checkIsolation();
+    if (!isolation(this.env)) return;
+    const id = await this.labelOrder(labelId), order = id ? await this.getOrder(id) : null;
+    if (!order) throw new ServiceError(404, "NOT_FOUND", "label not found");
+    this.admitStoredOrder(order);
+  }
   private meta(key: string): string | null {
     return this.sql.exec<{ value: string }>("SELECT value FROM store_meta WHERE key = ?", key).toArray()[0]?.value ?? null;
   }
@@ -191,6 +215,7 @@ export class StoreShipping extends DurableObject<Env> {
    * the browser. The first sign-in fills the reply-to address with their email.
    */
   async startSession(uid: string, email: string, refreshToken: string): Promise<string> {
+    this.checkIsolation();
     const sessionId = crypto.randomUUID();
     this.sql.exec(`INSERT INTO sessions (session_id, uid, email, refresh_token, checked_at, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
       sessionId, uid, email, refreshToken, Math.floor(Date.now() / 1000), new Date().toISOString());
@@ -204,6 +229,7 @@ export class StoreShipping extends DurableObject<Env> {
    * second use would end the person's sign-in. The others carry on in the grace window.
    */
   async readSession(sessionId: string): Promise<{ uid: string; email: string; refreshToken?: string; withinGrace: boolean } | null> {
+    this.checkIsolation();
     const row = this.sql.exec<{ uid: string; email: string; refresh_token: string; checked_at: number; refreshing_until: number }>(
       "SELECT uid, email, refresh_token, checked_at, refreshing_until FROM sessions WHERE session_id = ?", sessionId).toArray()[0];
     if (!row) return null;
@@ -242,6 +268,7 @@ export class StoreShipping extends DurableObject<Env> {
   }
 
   async getSettings(): Promise<Settings> {
+    this.checkIsolation();
     const shipFrom = this.meta("ship_from");
     const boxes = this.sql.exec<{ box_id: string; name: string; length_in: number; width_in: number; height_in: number; weight_oz: number }>(
       "SELECT * FROM boxes ORDER BY created_at, box_id").toArray()
@@ -250,7 +277,7 @@ export class StoreShipping extends DurableObject<Env> {
       shipFrom: shipFrom ? JSON.parse(shipFrom) as ShipFrom : null, boxes, storeName: this.meta("store_name"), replyTo: this.meta("reply_to"),
       postageConnected: pitneyConfig(this.env) !== null, testSandbox: testUsesSandbox(this.env),
       postageAccount: this.postageAccount(),
-      signupDeveloperId: pitneyConfig(this.env) && this.env.PB_DEVELOPER_ID ? this.env.PB_DEVELOPER_ID : null,
+      signupDeveloperId: !isolation(this.env) && pitneyConfig(this.env) && this.env.PB_DEVELOPER_ID ? this.env.PB_DEVELOPER_ID : null,
     };
   }
 
@@ -305,6 +332,7 @@ export class StoreShipping extends DurableObject<Env> {
     try {
       const config = pitneyConfig(this.env);
       const developerId = this.env.PB_DEVELOPER_ID;
+      if (isolation(this.env)) refuse("FORBIDDEN", "owner postage connections are unavailable in the isolated test service", 403);
       if (!config || !developerId) refuse("POSTAGE_NOT_CONNECTED", "Ship cannot connect Pitney Bowes accounts yet.", 409);
       const username = formText(fields, "username", "Pitney Bowes username", 254)!;
       const password = typeof fields.password === "string" ? fields.password : "";
@@ -324,6 +352,7 @@ export class StoreShipping extends DurableObject<Env> {
 
   /** Real orders cannot get labels again until an account is connected. Labels already bought stay, and can still be cancelled. */
   async disconnectPostage(): Promise<Outcome> {
+    if (isolation(this.env)) return toOutcome(new ServiceError(403, "FORBIDDEN", "owner postage connections are unavailable in the isolated test service"));
     this.sql.exec("DELETE FROM store_meta WHERE key = 'pb_account'");
     return ok({ disconnected: true });
   }
@@ -364,12 +393,14 @@ export class StoreShipping extends DurableObject<Env> {
       `SELECT record FROM orders ORDER BY CASE WHEN json_extract(record, '$.status') = 'processing' THEN 0 ELSE 1 END, updated_at DESC LIMIT 200`).toArray();
     return rows.map(row => {
       const order = JSON.parse(row.record) as ShipOrder;
+      this.admitStoredOrder(order);
       return { order, labels: this.labelsFor(order.orderId), address: labelAddress(order.shipTo) };
     });
   }
 
   async orderSummary(orderId: string): Promise<OrderSummary | null> {
     const order = await this.getOrder(orderId);
+    if (order) this.admitStoredOrder(order);
     return order ? { order, labels: this.labelsFor(orderId), address: labelAddress(order.shipTo) } : null;
   }
 
@@ -378,6 +409,7 @@ export class StoreShipping extends DurableObject<Env> {
     const summary = await this.orderSummary(orderId);
     if (!summary) refuse("NOT_FOUND", "Ship has not received this order.", 404);
     const { order } = summary;
+    this.admitStoredOrder(order);
     if (formNumber(fields, "version", "Order version", 1, Number.MAX_SAFE_INTEGER) !== order.version) {
       refuse("ORDER_CHANGED", "The order changed in Commerce since this page opened. Reload to see the latest.", 409);
     }
@@ -554,6 +586,7 @@ export class StoreShipping extends DurableObject<Env> {
    */
   async cancelLabel(labelId: string): Promise<Outcome> {
     try {
+      await this.admitLabel(labelId);
       const row = this.sql.exec<{ test: number; shipment_id: string | null }>(
         "SELECT test, shipment_id FROM labels WHERE label_id = ? AND status = 'bought'", labelId).toArray()[0];
       if (!row) refuse("NOT_FOUND", "No label to cancel.", 404);
@@ -578,6 +611,7 @@ export class StoreShipping extends DurableObject<Env> {
 
   /** The label's PDF; "not_ready" when Pitney Bowes's copy could not be downloaded yet. */
   async labelPdf(labelId: string): Promise<ArrayBuffer | Uint8Array | "not_ready" | null> {
+    await this.admitLabel(labelId);
     const row = this.sql.exec<{ pdf: ArrayBuffer; pdf_url: string | null }>("SELECT pdf, pdf_url FROM labels WHERE label_id = ?", labelId).toArray()[0];
     if (!row) return null;
     if (row.pdf.byteLength > 0) return row.pdf;
@@ -596,12 +630,15 @@ export class StoreShipping extends DurableObject<Env> {
    * already has changes nothing (a late retry); the same or a newer version
    * replaces it, since Commerce sends each product's current weight.
    */
-  async receiveOrder(body: unknown): Promise<Outcome> {
+  async receiveOrder(body: unknown, admission: Record<string, unknown> = {}): Promise<Outcome> {
     try {
-      const order = parseShipOrder(body);
+      assertTuple(this.env, admission);
+      const order = { ...parseShipOrder(body), ...tuple(this.env) };
+      assertOrder(this.env, order.orderId, order.test);
+      this.checkIsolation();
       const now = new Date().toISOString();
       const kept = this.sql.exec<{ version: number }>("SELECT version FROM orders WHERE order_id = ?", order.orderId).toArray()[0];
-      if (kept && kept.version > order.version) return ok({ orderId: order.orderId, version: kept.version });
+      if (kept && kept.version > order.version) return ok({ orderId: order.orderId, version: kept.version, ...tuple(this.env) });
       // When the store first sent Ship anything: orders completed before then never get a shipped email.
       this.sql.exec("INSERT OR IGNORE INTO store_meta (key, value) VALUES ('connected_at', ?)", now);
       this.sql.exec(`INSERT INTO orders (order_id, version, record, first_received_at, updated_at) VALUES (?, ?, ?, ?, ?)
@@ -610,7 +647,7 @@ export class StoreShipping extends DurableObject<Env> {
       if (order.storeName) this.setMeta("store_name", order.storeName);
       await this.queueShippedEmail(order);
       await this.wakeForEmails();
-      return ok({ orderId: order.orderId, version: order.version });
+      return ok({ orderId: order.orderId, version: order.version, ...tuple(this.env) });
     } catch (error) {
       return toOutcome(error);
     }
@@ -622,7 +659,7 @@ export class StoreShipping extends DurableObject<Env> {
    * order moved back to Processing and completed again sends a new one.
    */
   private async queueShippedEmail(order: ShipOrder): Promise<void> {
-    if (order.status !== "completed" || !order.completed) return;
+    if (isolation(this.env) || order.status !== "completed" || !order.completed) return;
     const completedAt = Date.parse(order.completed.at);
     const connectedAt = Date.parse(this.meta("connected_at") ?? "");
     if (!Number.isFinite(completedAt) || completedAt < connectedAt - BEFORE_CONNECT_MS) return;
@@ -644,6 +681,7 @@ export class StoreShipping extends DurableObject<Env> {
 
   /** The email binding, once the deploy has set it up; null leaves emails waiting. */
   protected emailSender(): SendEmail | null {
+    if (isolation(this.env)) return null;
     return this.env.SHIP_EMAIL_FROM && this.env.EMAIL ? this.env.EMAIL : null;
   }
 
@@ -694,22 +732,35 @@ export class StoreShipping extends DurableObject<Env> {
   }
 
   /** Labels Commerce has not acknowledged, oldest first. */
-  async listLabels(): Promise<Outcome> {
-    await this.wakeForEmails();
-    const rows = this.sql.exec<{ event_id: string; order_id: string; version: number; carrier: string; tracking: string }>(
-      "SELECT event_id, order_id, version, carrier, tracking FROM label_events WHERE acked_at IS NULL ORDER BY seq LIMIT ?",
-      LABELS_PER_LIST).toArray();
-    return ok(rows.map(row => ({ eventId: row.event_id, orderId: row.order_id, version: row.version, carrier: row.carrier, tracking: row.tracking })));
+  async listLabels(admission: Record<string, unknown> = {}): Promise<Outcome> {
+    try {
+      assertTuple(this.env, admission);
+      this.checkIsolation();
+      await this.wakeForEmails();
+      const rows = this.sql.exec<{ event_id: string; order_id: string; version: number; carrier: string; tracking: string }>(
+        "SELECT event_id, order_id, version, carrier, tracking FROM label_events WHERE acked_at IS NULL ORDER BY seq LIMIT ?",
+        LABELS_PER_LIST).toArray();
+      if (isolation(this.env)) for (const row of rows) {
+        if (!await this.getOrder(row.order_id)) throw new ServiceError(403, "FORBIDDEN", "label order is not admitted");
+      }
+      return ok(rows.map(row => ({ eventId: row.event_id, orderId: row.order_id, version: row.version, carrier: row.carrier, tracking: row.tracking, ...tuple(this.env) })));
+    } catch (error) { return toOutcome(error); }
   }
 
-  /** Commerce picked the label up; it is not listed again. A repeat, or an id Ship never issued, is still a success. */
-  async ackLabel(body: unknown): Promise<Outcome> {
+  /** Commerce picked the label up. Legacy unknown IDs remain idempotent; isolation requires an admitted event. */
+  async ackLabel(body: unknown, admission: Record<string, unknown> = {}): Promise<Outcome> {
     try {
+      assertTuple(this.env, admission);
       if (typeof body !== "object" || body === null || Array.isArray(body)) throw new ServiceError(400, "INVALID_INPUT", "body must be a JSON object");
       const eventId = (body as Record<string, unknown>).eventId;
       if (typeof eventId !== "string" || !EVENT_ID.test(eventId)) throw new ServiceError(400, "INVALID_INPUT", "eventId must be a label event id");
+      if (isolation(this.env)) {
+        const event = this.sql.exec<{ order_id: string }>("SELECT order_id FROM label_events WHERE event_id = ?", eventId).toArray()[0];
+        if (!event || !await this.getOrder(event.order_id)) throw new ServiceError(403, "FORBIDDEN", "label event is not admitted");
+      }
+      this.checkIsolation();
       this.sql.exec("UPDATE label_events SET acked_at = ? WHERE event_id = ? AND acked_at IS NULL", new Date().toISOString(), eventId);
-      return ok({ eventId });
+      return ok({ eventId, ...tuple(this.env) });
     } catch (error) {
       return toOutcome(error);
     }
@@ -718,7 +769,9 @@ export class StoreShipping extends DurableObject<Env> {
   /** The order as Ship last received it, or null. */
   async getOrder(orderId: string): Promise<ShipOrder | null> {
     const row = this.sql.exec<{ record: string }>("SELECT record FROM orders WHERE order_id = ?", orderId).toArray()[0];
-    return row ? JSON.parse(row.record) as ShipOrder : null;
+    const order = row ? JSON.parse(row.record) as ShipOrder : null;
+    if (order) this.admitStoredOrder(order);
+    return order;
   }
 
   /**
@@ -734,7 +787,12 @@ export class StoreShipping extends DurableObject<Env> {
     for (const value of [label.carrier, label.tracking]) {
       if (!value || value.length > 64 || NOT_ONE_LINE.test(value)) throw new Error("carrier and tracking must be one line of at most 64 characters");
     }
-    const event = { eventId: `lbl_${crypto.randomUUID()}`, ...label };
+    if (isolation(this.env)) {
+      const row = this.sql.exec<{ record: string }>("SELECT record FROM orders WHERE order_id = ?", label.orderId).toArray()[0];
+      if (!row) throw new ServiceError(403, "FORBIDDEN", "label order is not admitted");
+      this.admitStoredOrder(JSON.parse(row.record) as ShipOrder);
+    }
+    const event = { eventId: `lbl_${crypto.randomUUID()}`, ...label, ...tuple(this.env) };
     this.sql.exec("INSERT INTO label_events (event_id, order_id, version, carrier, tracking, created_at) VALUES (?, ?, ?, ?, ?, ?)",
       event.eventId, event.orderId, event.version, event.carrier, event.tracking, new Date().toISOString());
     return event;

@@ -1,5 +1,11 @@
 declare namespace Cloudflare {
   interface Env {
+    /** Deployment-owned isolated sandbox admission. Empty allowed ID admits no orders. */
+    SHIP_RECIPIENT?: string;
+    SHIP_GENERATION?: string;
+    SHIP_SITE_ID?: string;
+    SHIP_ALLOWED_ORDER_ID?: string;
+    SHIP_EXCLUDED_ORDER_ID?: string;
     ACCOUNT_ISSUER: string;
     ACCOUNT_AUDIENCE: string;
     ACCOUNT_JWKS_URL: string;

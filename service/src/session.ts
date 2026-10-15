@@ -1,3 +1,4 @@
+import { assertSite, assertTuple, tuple } from "./isolation.js";
 import { createRemoteJWKSet, errors, jwtVerify, type JWTVerifyGetKey } from "jose";
 import { ServiceError } from "./errors.js";
 import { NOT_ONE_LINE } from "./order.js";
@@ -20,8 +21,8 @@ const SIGNIN_COOKIE = "__Host-ship-signin";
 
 /** Who is signed in to Ship's pages, and for which one store. */
 export interface OwnerSession { site: string; sessionId: string; uid: string; email: string }
-interface SessionCookie { site: string; sessionId: string; exp: number }
-interface PendingSignIn { site: string; state: string; verifier: string; next: string; exp: number }
+interface SessionCookie extends Partial<import("./isolation.js").ShipTuple> { site: string; sessionId: string; exp: number }
+interface PendingSignIn extends Partial<import("./isolation.js").ShipTuple> { site: string; state: string; verifier: string; next: string; exp: number }
 
 const encoder = new TextEncoder();
 
@@ -82,7 +83,7 @@ function setCookie(name: string, value: string, maxAge: number): string {
 const storeOf = (env: Env, site: string) => env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site));
 
 async function sessionCookie(env: Env, site: string, sessionId: string): Promise<string> {
-  const value: SessionCookie = { site, sessionId, exp: Math.floor(Date.now() / 1000) + COOKIE_SECONDS };
+  const value: SessionCookie = { ...tuple(env), site, sessionId, exp: Math.floor(Date.now() / 1000) + COOKIE_SECONDS };
   return setCookie(SESSION_COOKIE, await seal(env, value), COOKIE_SECONDS);
 }
 
@@ -128,6 +129,8 @@ export async function readSession(request: Request, env: Env, site: string, fetc
     Promise<{ session: OwnerSession; setCookie?: string } | null> {
   const cookieValue = await open<SessionCookie>(env, cookie(request, SESSION_COOKIE));
   if (cookieValue?.site !== site || typeof cookieValue.sessionId !== "string") return null;
+  assertSite(env, site);
+  assertTuple(env, cookieValue as unknown as Record<string, unknown>);
   const store = storeOf(env, site);
   const found = await store.readSession(cookieValue.sessionId);
   if (!found) return null;
@@ -149,7 +152,8 @@ export async function readSession(request: Request, env: Env, site: string, fetc
 
 /** Sends the browser to DinkusKit.com to prove the person may act for this store. */
 export async function startSignIn(env: Env, site: string, next: string): Promise<Response> {
-  const pending: PendingSignIn = { site, state: random(), verifier: random(), next, exp: Math.floor(Date.now() / 1000) + SIGNIN_SECONDS };
+  assertSite(env, site);
+  const pending: PendingSignIn = { ...tuple(env), site, state: random(), verifier: random(), next, exp: Math.floor(Date.now() / 1000) + SIGNIN_SECONDS };
   const challenge = base64url(new Uint8Array(await crypto.subtle.digest("SHA-256", encoder.encode(pending.verifier))));
   const target = new URL(env.ACCOUNT_SIGNIN_URL);
   target.search = new URLSearchParams({ site_id: site, state: pending.state, code_challenge: challenge, code_challenge_method: "S256" }).toString();
@@ -180,6 +184,7 @@ async function verifyOwnerPass(env: Env, token: string, site: string): Promise<O
     if (REFUSED_PASS_ERRORS.some(kind => error instanceof kind)) throw new PassRefused("owner pass refused", { cause: error });
     throw error;
   }
+  try { assertTuple(env, payload, true); assertSite(env, site); } catch { throw new PassRefused("owner recipient refused"); }
   const text = (value: unknown, max: number) => typeof value === "string" && value.length > 0 && value.length <= max && !NOT_ONE_LINE.test(value);
   if (payload.site_id !== site || typeof payload.scope !== "string" || !payload.scope.split(" ").includes("ship:labels") ||
       !text(payload.uid, 200) || !text(payload.email, 254)) {
@@ -205,6 +210,8 @@ export async function finishSignIn(request: Request, env: Env, fetcher: typeof f
   if (!pending || url.searchParams.get("state") !== pending.state) {
     return { ok: false, status: 400, message: "This sign-in expired or was started in another browser. Open the store's label page again." };
   }
+  try { assertTuple(env, pending as unknown as Record<string, unknown>); assertSite(env, pending.site); }
+  catch { return { ok: false, status: 403, message: "This sign-in belongs to another Ship generation." }; }
   const error = url.searchParams.get("error");
   if (error) return { ok: false, status: 403, message: CALLBACK_ERRORS[error] ?? "DinkusKit.com could not sign you in.", site: pending.site };
   const code = url.searchParams.get("code");
@@ -225,6 +232,8 @@ export async function finishSignIn(request: Request, env: Env, fetcher: typeof f
 export async function signOut(request: Request, env: Env): Promise<Headers> {
   const cookieValue = await open<SessionCookie>(env, cookie(request, SESSION_COOKIE));
   if (cookieValue && typeof cookieValue.site === "string" && typeof cookieValue.sessionId === "string") {
+    assertSite(env, cookieValue.site);
+    assertTuple(env, cookieValue as unknown as Record<string, unknown>);
     await storeOf(env, cookieValue.site).endSession(cookieValue.sessionId);
   }
   return signOutHeaders();
