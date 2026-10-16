@@ -286,6 +286,21 @@ test("a TEST order gets a free Pitney Bowes sandbox label that stays TEST, shows
   expect(await (await request("GET", orderPath, { cookie })).text()).not.toContain("USPS refunds your postage account");
 });
 
+test("Ground Advantage and Priority Mail ask Pitney Bowes for USPS Tracking, which Express already has", async () => {
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  // "See prices" asks Pitney Bowes about every service Ship offers.
+  expect((await request("POST", `${orderPath}/prices`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA" } })).status).toBe(200);
+  // Without a trackable service PB refuses the package ("must be trackable", error 1022026).
+  expect(pbCalls.filter(call => call.url.pathname === "/shippingservices/v1/rates").map(call => call.body.rates[0])).toEqual([
+    { carrier: "USPS", serviceId: "UGA", parcelType: "PKG", specialServices: [{ specialServiceId: "DelCon" }] },
+    { carrier: "USPS", serviceId: "PM", parcelType: "PKG", specialServices: [{ specialServiceId: "DelCon" }] },
+    { carrier: "USPS", serviceId: "EM", parcelType: "PKG" },
+  ]);
+});
+
 test("a TEST order whose sandbox answer was lost stays TEST when Ship finds the label", async () => {
   await sendOrder();
   const cookie = await signedIn();

@@ -137,8 +137,9 @@ function shipmentBody(config: PbConfig, shipment: PbShipment, withLabel: boolean
     },
     rates: [{
       carrier: "USPS", serviceId: PB_SERVICE_IDS[shipment.service], parcelType: "PKG",
-      // Priority Mail is only trackable with Delivery Confirmation, which PB adds at no charge.
-      ...(shipment.service === "PM" ? { specialServices: [{ specialServiceId: "DelCon" }] } : {}),
+      // PB refuses a package that is not trackable (error 1022026). Ground Advantage and Priority Mail
+      // are trackable only with Delivery Confirmation, which PB adds at no charge; Express is tracked already.
+      ...(shipment.service === "GA" || shipment.service === "PM" ? { specialServices: [{ specialServiceId: "DelCon" }] } : {}),
     }],
     // The store's own PB postage account pays for the label.
     shipmentOptions: [{ name: "SHIPPER_ID", value: config.shipperId }],
