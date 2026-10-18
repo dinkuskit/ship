@@ -90,7 +90,7 @@ jobs:
     needs: bind
     if: needs.bind.outputs.requested == 'true'
     permissions: {}
-    uses: dinkuskit/clawsweeper/.github/workflows/dinkuskit-native-canary.yml@9de324a3359d309cdc575274ff71d85e1e713210
+    uses: dinkuskit/clawsweeper/.github/workflows/dinkuskit-native-canary.yml@bad9d7e3204a6a93ad4da0bde97c49f4e64b6ad6
     with:
       target_repository: ship
       target_repository_id: '1388248404'
