@@ -2,13 +2,13 @@
   "closeout": null,
   "created_at": "2026-10-01T02:35:23+00:00",
   "current_focus": {
-    "cadence": "sequential",
+    "cadence": "frontier-batch",
     "confirmed": true,
-    "confirmed_at": "2026-10-14T15:05:56+00:00",
-    "domain": "Isolated Ship sandbox admission contract v1",
-    "started_at": "2026-10-14T15:05:55+00:00",
+    "confirmed_at": "2026-10-19T19:17:50+00:00",
+    "domain": "Ship Registry plugin in the store admin",
+    "started_at": "2026-10-19T19:17:46+00:00",
     "status": "confirmed",
-    "summary": "Bobby authorized source/tests/PR/exact reviews under root frozen contract v1 on October14. No merge, deploy, runtime configuration, credentials, resources, payment, order or provider action."
+    "summary": "Ronald confirmed shared understanding on 19 Oct 2026 in the Ship plugin design thread: answers 1-7 yes, then yes to the reworded question 4 and to live tracking."
   },
   "decisions": [
     {
@@ -2537,6 +2537,32 @@
       "superseded_by": null,
       "updated_at": "2026-10-14T15:16:38+00:00",
       "verification_ref": "service/spec/isolation.spec.ts"
+    },
+    {
+      "baseline_ref": null,
+      "candidate_refs": [],
+      "choice": "Yes, after go-live. A Registry plugin (dinkus-ship, plus dinkus-ship-beta) built from the Ship repo root, replacing the old sandbox test plugin there, listed next to Commerce. It is a Block Kit mirror of hosted Ship: it keeps no label data and reads, quotes, buys and cancels through ship.dinkuskit.com on every click, so the two never disagree; Pitney Bowes keys stay Ship secrets. Sign-in: the owner pastes the same store key Commerce uses into the plugin settings; the plugin trades it only at dinkuskit.com/api/store-passes for a 5-minute Ship pass; the key never reaches Ship. Who: EmDash Administrators and Editors; lower roles do not see Shipping. The DinkusKit.com tick Print shipping labels in Ship governs only Ship's own page. Screens: a Shipping menu item listing paid orders waiting for a label, each with rates, Buy label, Print label and Cancel label, and the label state (No label; Label bought, with its tracking number linked to USPS; Label cancelled). Print label opens the label PDF in a new tab through a new Ship link that opens only that label for 5 minutes, reusable within that window. Refund questions, Settings, label history and connecting the owner's Pitney Bowes postage account stay on ship.dinkuskit.com, which remains the full version and fallback. Commerce is unchanged: its Create shipping label address stays Ship's, and once the plugin journey passes on the beta store, Ship forwards that address to the store admin's Shipping page for stores whose plugin has signed in. TEST orders get sandbox labels and a TEST banner as on Ship's page. Release: a new journey, Buy a label in the store admin, must pass on the beta store before the final release. Follow-up Ship change after the plugin: live tracking from the Pitney Bowes tracking webhook on DinkusKit's developer account plus a daily Track a Parcel check for undelivered labels, adding In transit and Delivered (live labels only; Pitney Bowes does not track sandbox labels).",
+      "context_ref": "Ship plugin design thread, 19 Oct 2026",
+      "created_at": "2026-10-19T19:18:05+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [],
+      "domain": "Ship Registry plugin in the store admin",
+      "history": [],
+      "id": "ship-registry-plugin-001",
+      "implementation_ref": null,
+      "question": "Should Ship have a Registry plugin so owners buy and print labels inside the store admin, and what does it cover?",
+      "rationale": "Ronald wants labels and tracking on the order inside the admin instead of two sites and two sign-ins. v1 used Ship's own page because Registry plugins draw only Block Kit, printing inside the admin waited on emdash#4049, and Commerce's backend.js is near the 128 KiB cap; a new-tab PDF through a short-lived Ship link removes the printing blocker. Shopify Shipping buys on the order page; Pirate Ship, ShipStation, Shiptheory and Shippo keep labels on their own site and write back. The mirror gives the Shopify experience while Ship stays the only label store. Keeps Pitney Bowes 2a (the owner PB sign-in never passes through the admin), the store-pass contract and hosted Ship sign-in, Registry caps (no plugin-to-plugin calls; manifest lists ship.dinkuskit.com and dinkuskit.com) and redirect manual. USPS-direct tracking rejected: a second business account, 30-day subscription renewals, no retries.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "proposed",
+      "superseded_by": null,
+      "updated_at": "2026-10-19T19:18:05+00:00",
+      "verification_ref": null
     }
   ],
   "last_activation": {
@@ -2564,5 +2590,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-14T15:16:38+00:00"
+  "updated_at": "2026-10-19T19:18:05+00:00"
 }
