@@ -114,3 +114,5 @@
 {"action": "decision_proposed", "at": "2026-10-19T19:18:05+00:00", "data": {"decision_id": "ship-registry-plugin-001"}, "event_id": "04eb2d1a-de6a-425b-9c2d-f6a21019d513"}
 {"action": "decision_locked", "at": "2026-10-19T19:20:19+00:00", "data": {"decision_id": "ship-registry-plugin-001"}, "event_id": "9c453606-c40a-4b0a-844e-8c95efb4173e"}
 {"action": "decision_proposed", "at": "2026-10-19T23:00:50+00:00", "data": {"decision_id": "ship-plugin-contract-001"}, "event_id": "2ca2ef7f-c97a-4da7-806c-d971d213aed5"}
+{"action": "decision_locked", "at": "2026-10-19T23:47:54+00:00", "data": {"decision_id": "ship-plugin-contract-001"}, "event_id": "c192dcc9-9466-4080-ba22-08d1affdb1e2"}
+{"action": "decision_implemented", "at": "2026-10-19T23:47:54+00:00", "data": {"decision_id": "ship-plugin-contract-001"}, "event_id": "c07522b5-b678-4db3-9e59-487cb1dff399"}
