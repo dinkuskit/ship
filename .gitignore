@@ -1,5 +1,8 @@
 node_modules/
 dist/
+.tmp/
+.emdash-release/
 .artifacts/
 runs/
+service/dist/
 service/dist-sandbox/

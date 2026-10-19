@@ -8,20 +8,19 @@ mode="${1:-quick}"
 
 case "$mode" in
   quick)
+    # The Registry plugin: types, build, the 128 KiB bundle check and its tests.
+    npm run typecheck
     npm test
     ;;
   full)
     "$script_dir/verify-ship" quick
-    npm pack --dry-run --ignore-scripts
-    for file in scripts/*.mjs; do node --check "$file"; done
-    npm run verify:bundle
-    ;;
-  sandbox)
-    "$script_dir/verify-ship" full
-    npm run verify:sandbox
+    # The hosted service under service/ (install it first: cd service && npm ci --ignore-scripts).
+    (cd service && npm run typecheck && npm test && npm run build && npm run build:sandbox && npm run verify:entry)
+    # A dry release preparation, as the release workflow runs it (a beta version routes to dinkus-ship-beta).
+    node scripts/prepare-emdash-release.mjs "$(node scripts/release-selector.mjs)"
     ;;
   *)
-    echo "Usage: bin/verify-ship [quick|full|sandbox]" >&2
+    echo "Usage: bin/verify-ship [quick|full]" >&2
     exit 64
     ;;
 esac

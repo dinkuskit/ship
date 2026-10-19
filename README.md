@@ -1,24 +1,70 @@
 # DinkusKit Ship
 
-Optional Registry-enabled shipping automation for DinkusKit. The package name
-is reserved as `@dinkuskit/ship`. The manifest stays private at `0.0.0`. The local package contains an injected label workflow and a bounded PB adapter
-experiment; it has no published plugin or production provider binding.
+Shipping labels for DinkusKit stores on EmDash: the hosted Ship service at
+ship.dinkuskit.com buys USPS labels from Pitney Bowes, and the Ship plugin puts
+the everyday steps on a Shipping page in the store admin.
 
-## Status
+Two parts live here:
 
-Product locks and historical decisions are recorded below. The private local
-sandbox package now renders Ship settings through pinned EmDash 1.2.0.
-Commerce orders are unavailable until the authorized Core handoff exists;
-provider actions remain disabled. This is not a signed Registry release.
+- **The Ship plugin** (this directory, Registry names `dinkus-ship` and
+  `dinkus-ship-beta`): a sandboxed EmDash plugin with one admin page,
+  "Shipping". Editors and Administrators see the paid orders Commerce sent to
+  Ship, see USPS prices, press Buy label, Print label (the PDF opens in a new
+  tab) and Cancel label. It keeps no label data: every click reads from, or buys
+  through, hosted Ship, so the two can never disagree. GrillTrack
+  `ship-registry-plugin-001`, [the decision](docs/decisions/ship-registry-plugin.md),
+  [the wire contract](docs/contracts/ship-plugin-v1.md).
+- **The hosted Ship service** ([`service/`](service/README.md)): the Cloudflare
+  Worker behind ship.dinkuskit.com. It takes Commerce's orders, buys, keeps and
+  cancels labels, sends the shipped email, and serves the owner's own pages
+  (Sign in with DinkusKit.com): Settings, the owner's Pitney Bowes postage
+  account, refunds and label history. It is the full path and the fallback
+  when the plugin is not installed.
 
-The hosted Ship service for ship.dinkuskit.com lives in [`service/`](service/README.md).
-It is the v1 path for Commerce orders (GrillTrack `ship-hosted-service-001`, approved; its ledger record lands in a follow-up PR).
-Order intake, the owner's label page (Sign in with DinkusKit.com, settings),
-Pitney Bowes sandbox labels (prices, buy, cancel for a refund) and the shipped
-email are built. TEST orders get free PB sandbox labels while Ship runs on the
-sandbox, or practice labels; they stay TEST and never get live postage. Live
-postage follows. ship.dinkuskit.com runs the service on the PB sandbox.
+## How a label gets bought from the store admin
 
+1. The owner pastes the **Store ID** and **store key** from the Set up Commerce
+   box on DinkusKit.com into the plugin's settings (the same ones Commerce has).
+2. Each click trades the key at `https://dinkuskit.com/api/store-passes` for a
+   5-minute `ship:admin` pass. The key never goes to Ship or a store page.
+3. With the pass, the plugin asks Ship for the orders, prices, the label, a
+   print link or a cancel. Ship buys from Pitney Bowes with DinkusKit's developer
+   keys and the store's own postage account; TEST orders get free sandbox labels
+   (or practice labels) and never live postage.
+4. Commerce picks the label up from Ship within a few minutes and marks the
+   order Completed with the tracking number, exactly as from Ship's own page.
+
+## Develop
+
+Node 22 (see `.nvmrc`).
+
+```sh
+npm ci --ignore-scripts
+npm run typecheck
+npm test            # builds the plugin, runs the 128 KiB Registry bundle check, then the tests
+bin/verify-ship full   # the above plus the hosted service's checks and a dry release preparation
+```
+
+`src/plugin.ts` is the Registry entry; `src/admin.ts` routes the Shipping
+page's clicks, `src/pages.ts` draws the Block Kit pages and `src/ship.ts` talks
+to DinkusKit.com and Ship. The manifest is `emdash-plugin.jsonc`. The plugin
+CLI's declaration build needs TypeScript's JavaScript API, so this directory
+pins TypeScript 6; the service under `service/` type-checks on TypeScript 7.
+
+Releases go through Changesets and the EmDash Registry: see
+[RELEASING.md](RELEASING.md).
+
+## Install type
+
+DinkusKit plugins ship as EmDash Registry plugins: sandboxed and installed from
+the plugin Registry. The Registry build is the supported product. The old
+local sandbox test plugin that used to live in this directory was removed when
+the real plugin was built (decision 7 of `ship-registry-plugin-001`); its dated
+proofs stay under `proof/` as history.
+
+## Decisions and history
+
+- [Ship plugin in the store admin](docs/decisions/ship-registry-plugin.md)
 - [Charter](docs/CHARTER.md)
 - [USPS feasibility research, 2026-09-30](docs/research/usps-feasibility-20260930.md)
 - [Minimal Commerce–Ship contract](docs/contracts/commerce-ship-v1.md)
@@ -26,193 +72,8 @@ postage follows. ship.dinkuskit.com runs the service on the PB sandbox.
 - [Public citations](docs/CITATIONS.md)
 - GrillTrack ledger: [`.grilltrack/ledger.json`](.grilltrack/ledger.json)
 
-## Install type
-
-DinkusKit plugins ship as EmDash Registry plugins: sandboxed and installed
-from the plugin Registry, which is how most EmDash sites add plugins. The
-Registry build is the supported product, and features are designed, tested and
-documented for it first. A native entry (code a site registers in its own
-configuration or Astro routes) is a developer and test setup only. It may not
-offer features the Registry build lacks, except temporary gaps listed here with
-the work that closes them. The project owner set this rule on 2026-10-08.
-
-Ship's installable plugin is the sandboxed package described by
-`emdash-plugin.jsonc`. `src/native/` holds a local UI proof that the package
-does not use. Native-only gaps:
-
-- The `./workflow`, `./installed` and `./host-label-assets` exports need a
-  host-owned integration and an authenticated native Astro mount for stored
-  label view, download and print. A Registry path for these is not designed
-  yet, and label printing does not reach Registry installs until it exists.
-
-## Confirmed shape
-
-Commerce owns merchant-configured free or flat-rate checkout shipping charges
-and manual fulfillment. Ship owns optional automation. Usable U.S. domestic
-USPS label purchase and printing inside DinkusKit is required for coordinated
-Commerce v1 even if Ship is optional to install. The merchant reviews address,
-package, service, and price, then explicitly buys and prints a label.
-
-A third-party postage API behind the DinkusKit interface is acceptable. Pitney
-Bowes is selected, with merchant-owned and merchant-funded postage accounts.
-Ship cannot depend on Inventory. Paid Commerce totals stay
-immutable and distinct from postage.
-
-## What this is not
-
-- Not Inventory.
-- Not Payments. Payments does not own shipping rates or postage.
-- Provider connection and account setup remain separate work.
-- Not authorization to buy postage, install a printer client, or change
-  devices.
-
-## Bounded PB sandbox interface experiment
-
-This branch contains a local, package-private merchant lab for the explicitly
-scoped Pitney Bowes USPS sandbox experiment. It is not a product-shape lock or
-production implementation. The browser can request a synthetic domestic US
-Priority Mail quote, review its service and price, and create a clearly marked
-sandbox test label whose PDF is proxied by the server.
-
-The server owns credentials and uses only these fixed origins:
-
-- `https://shipping-api-sandbox.pitneybowes.com` for OAuth and shipping calls
-- `https://stg-labels-cls.gcs.pitneybowes.com` only for validated label PDFs
-
-Custom origins, production URLs, redirects, and missing credentials fail closed.
-No credential values, provider responses, or private URLs are written to
-errors or proof. Runtime task state belongs under the ignored
-`runs/pb-sandbox-interface-runs/20260930/` directory.
-
-### Local launch
-
-Credentials must be injected by an approved local wrapper or selector; do not
-put them in this repository, shell history, or chat. The current approved
-wrapper is missing, so the normal server intentionally starts unconfigured:
-
-```sh
-npm run dev
-```
-
-Open `http://127.0.0.1:4317/`; it will show `Credentials not configured` and
-mutation endpoints fail closed. A future approved wrapper must provide
-`PB_SANDBOX_API_KEY`, `PB_SANDBOX_API_SECRET`, and `PB_SANDBOX_SHIPPER_ID`
-without exposing their values to this project.
-
-Run the canonical local gate with `npm run verify:full` (or
-`npm run verify:quick` during edits). See
-[Ship verification](skills/ship-verification/SKILL.md) for modes and installed-host
-prerequisites. Run deterministic contract/state tests alone with `npm test`. They use fake transport
-only and are labelled fixture verification, not live API proof. The adapter
-factory accepts an injected adapter for a test-only harness; no fake fallback
-is used by the main server.
-
-For attended CUA proof of quote → review → test label, run the opt-in fixture
-server separately on port 4328:
-
-```sh
-npm run fixture:proof
-```
-
-This serves a synthetic $8.60 USPS PM result and a generated PDF marked
-`FIXTURE PROOF - NO LIVE PB API`. It exercises the same UI routes, including
-separate View PDF and Download PDF links. To prove the unresolved path instead,
-run `FIXTURE_MODE=unknown npm run fixture:proof`; this records no live call and
-leaves the operation blocked as `unknown`. The ordinary development server
-never enables either fixture mode.
-
-The value-free credential packet is in
-[docs/credentials-setup.md](docs/credentials-setup.md). The exact live blocker
-is the absent approved wrapper.
-
-### Local EmDash package seam
-
-`emdash-plugin.jsonc` and `src/plugin.js` are the smallest package seam for a
-future EmDash host. The package export is the supported local package path:
-
-```sh
-node --input-type=module -e 'import("@dinkuskit/ship").then(({ default: plugin }) => console.log(Object.keys(plugin.routes)))'
-```
-
-The private POST/JSON routes `admin`, `settings`, and `status` do not call
-Pitney Bowes. The Block Kit admin settings action persists display preferences
-and one merchant-managed U.S. ship-from address in plugin-scoped storage.
-The address requires a name or company, street, city, recognized U.S. postal
-region, five-digit ZIP or ZIP+4, and country `US`. Each text field is limited
-to 100 characters. Invalid submissions preserve the previously saved record.
-Saving the origin is structural local configuration only; it does not verify
-provider readiness. Merchant-owned Pitney Bowes postage accounts are the
-settled account direction; merchant payment of provider fees is preferred,
-while subsidy amounts remain unapproved. English and Arabic copy use the
-host's attested locale and direction. Unmounted orders fail closed. Synthetic order examples
-require the explicit isolated test fixture selector. The manifest pins the
-approved public publisher DID and security URL; signed Registry release and
-publication remain separate gates.
-
-The official Registry authoring entry is `src/plugin.ts`. Build and bundle it
-with the pinned CLI, without contacting Registry services:
-
-```sh
-PATH=/opt/homebrew/Cellar/node@24/24.16.0/bin:$PATH npm run build
-PATH=/opt/homebrew/Cellar/node@24/24.16.0/bin:$PATH npm run verify:registry
-```
-
-The verifier uses the published `bundlePlugin` API, reports tarball bytes and
-SHA-256, enforces the 131072-byte backend, 262144-byte total, and 20-file caps,
-and loads the generated manifest/backend through EmDash’s Registry-source
-cold-start path in a fresh disposable host. It checks settings, origin and
-fixture persistence, language behavior, denied access and a host restart.
-The local post-install state is seeded for this unsigned fixture; signatures,
-Registry listing/install consent and publication are not covered. Artifacts
-and receipts are retained in the reported ignored `runs/registry-artifact-*`
-directory. `npm run verify:bundle` runs just the offline bundle checks.
-
-`npm test` checks route contracts and deterministic fixtures. To prepare a
-config-managed sandbox host from a fresh packed package:
-
-```sh
-npm run prepare:sandbox
-cd runs/sandbox-host-local/host
-npm run dev
-```
-
-The loopback host runs on port 4343. Stop an existing task-owned host before
-starting another on that port. Use the installed runner, host directory, and
-URL with `verify:sandbox`:
-
-```sh
-EMDASH_SANDBOX_RUNNER_MODULE=file:///absolute/host/node_modules/@emdash-cms/sandbox-workerd/dist/sandbox/index.mjs \
-EMDASH_SANDBOX_HOST_DIR=/absolute/host \
-EMDASH_SANDBOX_HOST_URL=http://127.0.0.1:4343 npm run verify:sandbox
-```
-
-Run that command from this repository. Verification compares the current
-packed package with the host-installed files, exercises the actual private
-admin dispatcher, checks origin and preference storage independently, validates
-invalid-origin preservation, and checks Arabic RTL responses.
-This proves local config-managed sandbox execution, not signed Registry
-installation or Commerce/provider integration. See the dated proof under
-`proof/2026-10-03-emdash-sandbox-host/`.
-
-Historical native preparation files remain in source, but no native package
-subpath is supported or exported. The installed sandbox entry is the current
-package contract.
-
-Part of [Dinkus](https://github.com/dinkuskit). MIT.
-
-## October 8 installed workflow candidate
-
-Additive `./workflow` and `./installed` exports support a host-owned private
-workflow with trusted paid-order/actor ports and durable CAS label operations.
-The default sandbox export still has no Commerce/provider connection. The
-[installed contract](docs/contracts/installed-ship-workflow.md) specifies route
-schemas, fixture boundaries and missing production authority. The optional
-`./host-label-assets` export provides `createHostLabelAssets` and
-`createLabelLinks` for an explicitly configured, authenticated native Astro
-mount. It exposes only operation-bound stored PDF view/download and an explicit
-browser print attempt; it cannot buy, reconcile or fetch missing provider bytes.
-Installing the default sandbox entry does not mount this native route.
-Independent local fixture proof covers Chrome rendering, exact stored-byte
-download and the print-attempt status; no print dialog or physical printing is
-confirmed. No real postage, production Commerce integration, deployment or
-Registry mounting is proven by these exports.
+Commerce owns merchant-configured checkout shipping charges and manual
+fulfillment. Ship owns labels. Ship cannot depend on Inventory. Paid Commerce
+totals stay immutable and distinct from postage. Pitney Bowes is the postage
+provider: one DinkusKit developer account, each owner their own postage account
+(decision 2a).

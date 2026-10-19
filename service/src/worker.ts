@@ -1,7 +1,8 @@
 import { assertRequestOrigin, assertTuple, requestTuple } from "./isolation.js";
 import { createAuthenticator, type ShipScope } from "./auth.js";
 import { ServiceError, toOutcome, type Outcome } from "./errors.js";
-import { handlePage } from "./owner.js";
+import { handlePage, handlePrint } from "./owner.js";
+import { ADMIN_SCOPE, buyAdminLabel, cancelAdminLabel, listAdminOrders, printLink, quoteAdminLabel, showAdminOrder } from "./admin.js";
 import type { StoreShipping } from "./store.js";
 
 export { StoreShipping } from "./store.js";
@@ -10,15 +11,35 @@ export const SERVICE_LINE = "DinkusKit Ship service";
 // Commerce's largest possible order (100 lines of long multi-byte names) is about 66 KiB.
 export const MAX_BODY_BYTES = 256 * 1024;
 
-type Handler = (store: DurableObjectStub<StoreShipping>, body: unknown, admission: Record<string, unknown>) => Promise<Outcome>;
-interface Route { method: string; path: string; scope: ShipScope; handle: Handler }
+interface Call { store: DurableObjectStub<StoreShipping>; body: unknown; admission: Record<string, unknown>; params: string[]; site: string; origin: string; env: Env }
+type Handler = (call: Call) => Promise<Outcome>;
+interface Route { method: string; pattern: RegExp; scope: ShipScope; handle: Handler }
+/** Order ids and label ids as they appear in a path segment (URL-encoded by the caller). */
+const SEGMENT = "([A-Za-z0-9._:%-]{1,600})";
+const route = (method: string, path: string, scope: ShipScope, handle: Handler): Route =>
+  ({ method, pattern: new RegExp(`^${path.replaceAll("/", "\\/").replaceAll(":id", SEGMENT)}$`), scope, handle });
 
-/** What Commerce's Orders calls (dinkuskit/commerce docs/implementation/registry-ship-sync.md). */
 const ROUTES: Route[] = [
-  { method: "POST", path: "/v1/orders", scope: "ship:orders", handle: (s, body, admission) => s.receiveOrder(body, admission) },
-  { method: "GET", path: "/v1/labels", scope: "ship:orders", handle: (s, _body, admission) => s.listLabels(admission) },
-  { method: "POST", path: "/v1/labels/ack", scope: "ship:orders", handle: (s, body, admission) => s.ackLabel(body, admission) },
+  // What Commerce's Orders calls (dinkuskit/commerce docs/implementation/registry-ship-sync.md).
+  route("POST", "/v1/orders", "ship:orders", ({ store, body, admission }) => store.receiveOrder(body, admission)),
+  route("GET", "/v1/labels", "ship:orders", ({ store, admission }) => store.listLabels(admission)),
+  route("POST", "/v1/labels/ack", "ship:orders", ({ store, body, admission }) => store.ackLabel(body, admission)),
+  // What the Ship Registry plugin calls (docs/contracts/ship-plugin-v1.md).
+  route("GET", "/v1/admin/orders", ADMIN_SCOPE, ({ store }) => listAdminOrders(store)),
+  route("GET", "/v1/admin/orders/:id", ADMIN_SCOPE, ({ store, params }) => showAdminOrder(store, params[0]!)),
+  route("POST", "/v1/admin/orders/:id/prices", ADMIN_SCOPE, ({ store, params, body }) => quoteAdminLabel(store, params[0]!, body)),
+  route("POST", "/v1/admin/orders/:id/labels", ADMIN_SCOPE, ({ store, params, body }) => buyAdminLabel(store, params[0]!, body)),
+  route("POST", "/v1/admin/labels/:id/cancel", ADMIN_SCOPE, ({ store, params }) => cancelAdminLabel(store, params[0]!)),
+  route("POST", "/v1/admin/labels/:id/print-link", ADMIN_SCOPE, ({ store, params, env, origin, site }) => printLink(env, origin, store, site, params[0]!)),
 ];
+
+function decode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    throw new ServiceError(404, "NOT_FOUND", "not found");
+  }
+}
 
 const NO_STORE = { "cache-control": "no-store" };
 
@@ -47,6 +68,8 @@ async function readBody(request: Request): Promise<unknown> {
     bytes.set(value, length);
     length += value.byteLength;
   }
+  // The plugin's cancel and print-link calls carry no body.
+  if (length === 0) return undefined;
   try {
     return JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes.subarray(0, length)));
   } catch {
@@ -78,11 +101,13 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     return new Response(`${SERVICE_LINE}\n`, { headers: { "content-type": "text/plain; charset=utf-8", ...NO_STORE } });
   }
   if (url.pathname.startsWith("/stores/") || url.pathname.startsWith("/auth/")) return handlePage(request, env);
+  if (url.pathname.startsWith("/print/")) return handlePrint(request, env);
   try {
-    const matches = ROUTES.filter(route => route.path === url.pathname);
+    const matches = ROUTES.map(candidate => ({ candidate, found: candidate.pattern.exec(url.pathname) })).filter(match => match.found);
     if (matches.length === 0) throw new ServiceError(404, "NOT_FOUND", "not found");
-    const route = matches.find(candidate => candidate.method === request.method);
-    if (!route) throw new ServiceError(405, "METHOD_NOT_ALLOWED", "method not allowed");
+    const match = matches.find(({ candidate }) => candidate.method === request.method);
+    if (!match) throw new ServiceError(405, "METHOD_NOT_ALLOWED", "method not allowed");
+    const route = match.candidate, params = match.found!.slice(1).map(decode);
     if (!env.ACCOUNT_ISSUER || !env.ACCOUNT_AUDIENCE || !env.ACCOUNT_JWKS_URL) {
       throw new ServiceError(503, "NOT_CONFIGURED", "the Ship service is not configured");
     }
@@ -95,7 +120,8 @@ export async function handle(request: Request, env: Env): Promise<Response> {
         throw new ServiceError(403, "FORBIDDEN", "Ship admission must use request headers");
       }
     }
-    return respond(await route.handle(env.SHIP_STORES.get(env.SHIP_STORES.idFromName(siteId)), body, admission));
+    const store = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(siteId));
+    return respond(await route.handle({ store, body, admission, params, site: siteId, origin: url.origin, env }));
   } catch (error) {
     return respond(toOutcome(error));
   }

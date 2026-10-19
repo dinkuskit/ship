@@ -1,9 +1,0 @@
-{
-  "name": "@dinkuskit/private-asset-qualification-fixture",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "dependencies": {
-    "emdash": "1.2.0"
-  }
-}

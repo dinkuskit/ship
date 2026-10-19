@@ -2578,6 +2578,65 @@
       "superseded_by": null,
       "updated_at": "2026-10-19T19:20:19+00:00",
       "verification_ref": null
+    },
+    {
+      "baseline_ref": null,
+      "candidate_refs": [
+        "e811875"
+      ],
+      "choice": "A new store-pass scope ship:admin (audience dinkus-ship), issued by dinkuskit.com/api/store-passes under the store's existing Ship grant exactly like ship:orders; Commerce's ship:orders routes refuse it and it refuses theirs. The plugin's settings are the Store ID (siteId) and the store key, both from the Set up Commerce box, because store-passes needs the site_id in the body. Hosted Ship routes for the plugin: GET /v1/admin/orders, GET /v1/admin/orders/{id}, POST /v1/admin/orders/{id}/prices, POST /v1/admin/orders/{id}/labels (with by, the admin's email, kept as createdBy admin:<email>), POST /v1/admin/labels/{id}/cancel, POST /v1/admin/labels/{id}/print-link. The print link is GET /print/{token}: the session secret's HMAC seal over kind print, site, labelId and a five-minute exp, opening one label's PDF with no sign-in; a session cookie's payload can never open a label. The plugin's route is content:edit_any (Editors and Administrators), checked again in the handler. Nothing about the owner's Pitney Bowes account crosses to the plugin. Full table: docs/contracts/ship-plugin-v1.md.",
+      "context_ref": "Ship plugin buildout thread, 19 Oct 2026",
+      "created_at": "2026-10-19T23:00:50+00:00",
+      "deferred_reason": null,
+      "delivery_ref": null,
+      "dependencies": [
+        "ship-registry-plugin-001"
+      ],
+      "domain": "Ship Registry plugin in the store admin",
+      "history": [
+        {
+          "at": "2026-10-19T23:47:54+00:00",
+          "choice": "A new store-pass scope ship:admin (audience dinkus-ship), issued by dinkuskit.com/api/store-passes under the store's existing Ship grant exactly like ship:orders; Commerce's ship:orders routes refuse it and it refuses theirs. The plugin's settings are the Store ID (siteId) and the store key, both from the Set up Commerce box, because store-passes needs the site_id in the body. Hosted Ship routes for the plugin: GET /v1/admin/orders, GET /v1/admin/orders/{id}, POST /v1/admin/orders/{id}/prices, POST /v1/admin/orders/{id}/labels (with by, the admin's email, kept as createdBy admin:<email>), POST /v1/admin/labels/{id}/cancel, POST /v1/admin/labels/{id}/print-link. The print link is GET /print/{token}: the session secret's HMAC seal over kind print, site, labelId and a five-minute exp, opening one label's PDF with no sign-in; a session cookie's payload can never open a label. The plugin's route is content:edit_any (Editors and Administrators), checked again in the handler. Nothing about the owner's Pitney Bowes account crosses to the plugin. Full table: docs/contracts/ship-plugin-v1.md.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        },
+        {
+          "at": "2026-10-19T23:47:54+00:00",
+          "choice": "A new store-pass scope ship:admin (audience dinkus-ship), issued by dinkuskit.com/api/store-passes under the store's existing Ship grant exactly like ship:orders; Commerce's ship:orders routes refuse it and it refuses theirs. The plugin's settings are the Store ID (siteId) and the store key, both from the Set up Commerce box, because store-passes needs the site_id in the body. Hosted Ship routes for the plugin: GET /v1/admin/orders, GET /v1/admin/orders/{id}, POST /v1/admin/orders/{id}/prices, POST /v1/admin/orders/{id}/labels (with by, the admin's email, kept as createdBy admin:<email>), POST /v1/admin/labels/{id}/cancel, POST /v1/admin/labels/{id}/print-link. The print link is GET /print/{token}: the session secret's HMAC seal over kind print, site, labelId and a five-minute exp, opening one label's PDF with no sign-in; a session cookie's payload can never open a label. The plugin's route is content:edit_any (Editors and Administrators), checked again in the handler. Nothing about the owner's Pitney Bowes account crosses to the plugin. Full table: docs/contracts/ship-plugin-v1.md.",
+          "from": "locked",
+          "implementation_ref": null,
+          "note": "bounded implementation recorded",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "implemented",
+          "verification_ref": null
+        }
+      ],
+      "id": "ship-plugin-contract-001",
+      "implementation_ref": "3a5fdd7",
+      "question": "What exactly do the Ship plugin and hosted Ship say to each other, and what does DinkusKit.com have to issue, to deliver ship-registry-plugin-001?",
+      "rationale": "Ronald approved in the Ship plugin buildout thread, 19 Oct 2026 23:47 UTC ('lock it; merge 44'), after ClawSweeper cleared ship#44 head 3a5fdd7 with no findings.",
+      "repair_required": false,
+      "review_classifications": [],
+      "review_history": [],
+      "review_ref": null,
+      "review_result": null,
+      "review_source_identity": null,
+      "status": "implemented",
+      "superseded_by": null,
+      "updated_at": "2026-10-19T23:47:54+00:00",
+      "verification_ref": null
     }
   ],
   "last_activation": {
@@ -2605,5 +2664,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-19T19:20:19+00:00"
+  "updated_at": "2026-10-19T23:47:54+00:00"
 }
