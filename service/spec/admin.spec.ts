@@ -80,9 +80,11 @@ async function sendOrder(overrides: Record<string, unknown> = {}) {
 
 /** The owner's one-time setup on Ship's own page: a ship-from address and a box. */
 async function setUp(): Promise<string> {
-  expect((await shipStore().saveShipFrom({ name: "Demo Store", line1: "2 Warehouse Rd", city: "Shiptown", region: "ny", postalCode: "10001" })).ok).toBe(true);
-  expect((await shipStore().addBox({ name: "Small", lengthIn: "8", widthIn: "6", heightIn: "4", weightOz: "3" })).ok).toBe(true);
-  return (await shipStore().getSettings()).boxes[0]!.boxId;
+  await shipStore().saveShipFrom({ name: "Demo Store", line1: "2 Warehouse Rd", city: "Shiptown", region: "ny", postalCode: "10001" });
+  await shipStore().addBox({ name: "Small", lengthIn: "8", widthIn: "6", heightIn: "4", weightOz: "3" });
+  const settings = await shipStore().getSettings();
+  expect(settings.boxes).toHaveLength(1);
+  return settings.boxes[0]!.boxId;
 }
 
 test("the admin routes take only a ship:admin pass, and Commerce's routes still take only ship:orders", async () => {
