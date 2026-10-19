@@ -1,6 +1,6 @@
 # Ship plugin in the store admin
 
-GrillTrack: `ship-registry-plugin-001`, locked 19 Oct 2026 on Ronald's approval. Build waits until after go-live. The ledger entry is held outside this repo until ClawSweeper's input scanner stops refusing changes to `.grilltrack/events.jsonl` (an old unverified match on main), like Ship's other held records.
+GrillTrack: `ship-registry-plugin-001`, locked 19 Oct 2026 on Ronald's approval. Build waits until after go-live.
 
 Ronald answered the design questions on 19 Oct 2026.
 
