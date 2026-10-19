@@ -53,7 +53,8 @@ jobs:
             node --check "$file"
           done
       # The release workflow's preparation step, dry: the bundle is built and thrown away.
-      - run: node scripts/prepare-emdash-release.mjs "dinkus-ship@$(node -p 'require("./package.json").version')"
+      # A prerelease version routes to dinkus-ship-beta, as the publish does.
+      - run: node scripts/prepare-emdash-release.mjs "$(node scripts/release-selector.mjs)"
 
   service:
     name: Hosted service

@@ -42,7 +42,7 @@ function labelRequest(version: number, values: Record<string, unknown>, by: stri
   const weight = typeof values.weightOz === "number" ? values.weightOz : typeof values.weightOz === "string" ? Number(values.weightOz) : NaN;
   const weightOz = Number.isFinite(weight) ? Math.round(weight * 10) / 10 : NaN;
   const service = text(values.service), kind = text(values.kind);
-  const typed = { boxId, weightOz: Number.isFinite(weightOz) ? weightOz : undefined, service, kind };
+  const typed = { boxId, weightOz: Number.isFinite(weightOz) ? weightOz : undefined, service, kind, buyAgain: values.buyAgain === true };
   if (!boxId) throw new ShipError("INPUT", "Pick a box.");
   if (!(weightOz >= 0.1 && weightOz <= MAX_WEIGHT_OZ)) throw new ShipError("INPUT", `Enter the package weight in ounces, from 0.1 to ${MAX_WEIGHT_OZ} (70 lb).`);
   if (service !== undefined && !(service in SERVICES)) throw new ShipError("INPUT", "Pick a USPS service.");
@@ -110,6 +110,8 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
         const form = labelRequest(found.version, input.values, by);
         typed = form.typed;
         if (input.action_id.startsWith("prices:")) {
+          // A practice label asks Pitney Bowes nothing, so there is nothing to quote: straight to the buy step.
+          if (form.request.kind === "practice") return await openOrder(hosted, found.orderId, { typed });
           const prices = await hosted.prices(found.orderId, form.request);
           return await openOrder(hosted, found.orderId, { prices, typed });
         }

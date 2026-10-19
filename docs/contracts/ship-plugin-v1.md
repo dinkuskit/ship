@@ -48,7 +48,7 @@ give; the plugin shows `message` as it is.
 
 | Call | Answer |
 | --- | --- |
-| `GET /v1/admin/orders` | `200 { orders: Order[], settings: Settings }`: every order Ship has for the store, Processing first, newest first, at most 200. |
+| `GET /v1/admin/orders` | `200 { orders: Row[], settings: Settings }`: every order Ship has for the store, Processing first, newest first, at most 200, as short rows (below) so the answer stays small whatever the orders hold. |
 | `GET /v1/admin/orders/{orderId}` | `200 { order: Order, settings: Settings }`; `404 NOT_FOUND` when Commerce has not sent the order. |
 | `POST /v1/admin/orders/{orderId}/prices` with `{ version, boxId, weightOz }` | `200 { prices: { GA, PM, EM } }` in cents, `null` for a service Pitney Bowes refused for this package. Refusals as on Ship's page: `409 ORDER_CHANGED`, `ALREADY_COMPLETED`, `ALREADY_LABELED`, `ADDRESS_PROBLEM`, `NO_SHIP_FROM`, `TEST_ORDER`; `503 POSTAGE_NOT_CONNECTED`. |
 | `POST /v1/admin/orders/{orderId}/labels` with `{ version, boxId, weightOz, service, by, kind?: "practice", buyAgain?: true }` | `201 { label: Label }`. `by` is who pressed the button (the admin's email, kept as `admin:<email>` in `createdBy`). The same refusals as prices, plus `409 LABEL_IN_PROGRESS`, `409 CHECK_PITNEY_BOWES` (send `buyAgain: true` after the owner ticks the box), `502 PITNEY_BOWES_NO_ANSWER`. |
@@ -56,6 +56,9 @@ give; the plugin shows `message` as it is.
 | `POST /v1/admin/labels/{labelId}/print-link` | `200 { url, expiresAt }`: `https://ship.dinkuskit.com/print/{token}` opens this one label's PDF for 5 minutes with no sign-in. `404 NOT_FOUND` for a label the store does not have. |
 | `GET /print/{token}` (no pass) | The PDF inline (`application/pdf`, `private, no-store`, `referrer-policy: no-referrer`); `410` for an expired, foreign or altered link; `503` while Pitney Bowes's copy cannot be fetched. |
 
+`Row`: `orderId`, `number`, `version`, `status`, `test`, `shipTo`, `addressProblem`,
+`items` (one short line, "2 × Demo Mug, 1 × Hat, +3 more") , `itemCount` and `labelStatus`
+(`bought` for a live label on this version, `cancelled` when the last one was, else null).
 `Order`: `orderId`, `number`, `version`, `status` (`processing` or `completed`),
 `test`, `shipTo { name, lines[], city, region, postalCode }`, `addressProblem`
 (text to show, or null), `lines[] { name, quantity, weightOz }`, `itemsWeightOz`,

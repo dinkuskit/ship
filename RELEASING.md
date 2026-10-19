@@ -42,7 +42,9 @@ A prerelease version (`x.y.z-beta.N`) publishes under the separate
 has no prerelease filter, so a beta under the real name would become the
 latest version for every store. `scripts/prepare-emdash-release.mjs` rewrites
 only the slug and display name for a beta; code and declared access are
-byte-identical to the stable build. One beta store runs every plugin's newest
+byte-identical to the stable build. `scripts/release-selector.mjs` prints the
+selector for the checkout's version the way the publish routes it, so CI's dry
+preparation and `bin/verify-ship full` check a beta version as it is published. One beta store runs every plugin's newest
 beta; the journey "Buy a label in the store admin" must pass there before a
 final release.
 

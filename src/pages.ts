@@ -1,5 +1,5 @@
 import type { Block, BlockResponse, FormField, LinkElement } from "@emdash-cms/blocks/server";
-import { shipPages, type Box, type Label, type Prices, type ServiceCode, type ShipOrder, type ShipSettings } from "./ship.js";
+import { shipPages, type Box, type Label, type Prices, type ServiceCode, type ShipOrder, type ShipOrderRow, type ShipSettings } from "./ship.js";
 
 /** The Shipping pages, drawn fresh from hosted Ship's answers; nothing here is kept. */
 export const SERVICES: Record<ServiceCode, string> = { GA: "USPS Ground Advantage", PM: "USPS Priority Mail", EM: "USPS Priority Mail Express" };
@@ -12,7 +12,7 @@ export interface OrderView {
   /** Prices Ship quoted for the typed box and weight, when "See prices" was pressed. */
   prices?: Prices;
   /** What the owner typed, kept across a refusal or a quote. */
-  typed?: { boxId?: string; weightOz?: number; service?: string; kind?: string };
+  typed?: { boxId?: string; weightOz?: number; service?: string; kind?: string; buyAgain?: boolean };
   /** Why the last press was refused, shown as it came from Ship. */
   failure?: string;
   /** Ship has no record of its last purchase for this order: offer to buy a new label. */
@@ -22,16 +22,18 @@ export interface OrderView {
 }
 
 export const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-const orderName = (order: ShipOrder) => (order.number === null ? order.orderId : `#${order.number}`) + (order.test ? " (TEST)" : "");
+const orderName = (order: ShipOrder | ShipOrderRow) => (order.number === null ? order.orderId : `#${order.number}`) + (order.test ? " (TEST)" : "");
 const link = (label: string, url: string, appearance: LinkElement["appearance"] = "secondary"): LinkElement =>
   ({ type: "link", label, target: { kind: "external", url }, appearance });
 const header = (text: string): Block => ({ type: "header", text });
 const context = (text: string): Block => ({ type: "context", text });
 const banner = (variant: "default" | "alert" | "error", title: string, description: string): Block => ({ type: "banner", variant, title, description });
 const fields = (...pairs: [string, string][]): Block => ({ type: "fields", fields: pairs.map(([label, value]) => ({ label, value })) });
-const oneLine = (order: ShipOrder) => [order.shipTo.name, ...order.shipTo.lines, `${order.shipTo.city}${order.shipTo.region ? `, ${order.shipTo.region}` : ""} ${order.shipTo.postalCode}`].join(", ");
+const oneLine = (order: ShipOrder | ShipOrderRow) => [order.shipTo.name, ...order.shipTo.lines, `${order.shipTo.city}${order.shipTo.region ? `, ${order.shipTo.region}` : ""} ${order.shipTo.postalCode}`].join(", ");
 const items = (order: ShipOrder) => order.lines.map(line => `${line.quantity} × ${line.name}`).join(", ") || "No items";
 const tracking = (label: Label) => label.test ? `${label.tracking} (test, not trackable)` : label.tracking;
+/** A live label's tracking number links to USPS; a sandbox or practice label's is not trackable. */
+const trackingLink = (label: Label): Block[] => label.test ? [] : [{ type: "actions", elements: [link("Track on USPS", `${USPS_TRACKING}${encodeURIComponent(label.tracking)}`)] }];
 
 /** One line on what a label costs: nothing in the sandbox or on a practice label, else what Pitney Bowes charged. */
 function price(label: Label): string {
@@ -40,10 +42,11 @@ function price(label: Label): string {
   return label.priceCents === null ? "Charged to your Pitney Bowes postage account" : `${money(label.priceCents)} from your Pitney Bowes postage account`;
 }
 
-function status(order: ShipOrder): string {
-  if (order.label) return "Label bought";
+function status(order: ShipOrder | ShipOrderRow): string {
+  const labelStatus = "labelStatus" in order ? order.labelStatus : order.label ? "bought" : order.labels.some(label => label.status === "cancelled") ? "cancelled" : null;
+  if (labelStatus === "bought") return "Label bought";
   if (order.addressProblem && order.status === "processing") return "Fix address";
-  if (order.labels.some(label => label.status === "cancelled")) return "Label cancelled";
+  if (labelStatus === "cancelled") return "Label cancelled";
   return order.status === "completed" ? "Completed" : "No label";
 }
 
@@ -69,7 +72,7 @@ export function problemPage(siteId: string, title: string, message: string): Blo
 }
 
 /** Paid orders waiting to ship, newest first within each status, as hosted Ship lists them. */
-export function listPage(siteId: string, orders: ShipOrder[], settings: ShipSettings, toast?: Toast): BlockResponse {
+export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipSettings, toast?: Toast): BlockResponse {
   const pages = shipPages(siteId);
   const blocks: Block[] = [header("Shipping")];
   if (!settings.shipFrom || settings.boxes.length === 0) {
@@ -83,8 +86,8 @@ export function listPage(siteId: string, orders: ShipOrder[], settings: ShipSett
       { key: "status", label: "Status", format: "badge" }, { key: "open", label: "", format: "element" },
     ],
     rows: orders.map(order => ({
-      order: orderName(order), to: oneLine(order), items: items(order), status: status(order),
-      open: { type: "button", label: "Open", action_id: "open", value: order.orderId, style: order.label || order.status === "completed" ? "secondary" : "primary" },
+      order: orderName(order), to: oneLine(order), items: order.items, status: status(order),
+      open: { type: "button", label: "Open", action_id: "open", value: order.orderId, style: order.labelStatus === "bought" || order.status === "completed" ? "secondary" : "primary" },
     })),
   });
   blocks.push(context("Refunds, label history, Settings and your Pitney Bowes account are on Ship's own page."), { type: "actions", elements: [
@@ -101,7 +104,12 @@ function labelFields(label: Label): Block {
     ...(label.status === "cancelled" ? [["Cancelled", `${(label.cancelledAt ?? "").replace("T", " ").slice(0, 16)}${label.refund ? `, refund ${label.refund.toLowerCase()}` : ""}`] as [string, string]] : []));
 }
 
-/** The label form: box and weight, then once Ship has quoted them, the service with its price and "Buy label". */
+/**
+ * The label form: box and weight, then once Ship has quoted them, the service with its
+ * price and "Buy label". A practice label needs no quote (Pitney Bowes is not asked), so
+ * picking it goes straight to the buy step; so does Ship's "tick Buy a new label" refusal,
+ * which must be answered on the buy step, with the service kept and no new quote.
+ */
 function labelForm(view: OrderView): Block[] {
   const { order, settings, typed = {}, prices } = view;
   const box = settings.boxes.find(candidate => candidate.boxId === typed.boxId) ?? settings.boxes[0]!;
@@ -109,7 +117,9 @@ function labelForm(view: OrderView): Block[] {
   const id = `${order.version}:${encodeURIComponent(order.orderId)}`;
   const boxOption = (candidate: Box) => ({ label: `${candidate.name}: ${candidate.lengthIn} × ${candidate.widthIn} × ${candidate.heightIn} in, ${candidate.weightOz} oz empty`, value: candidate.boxId });
   const practiceOnly = order.test && !settings.testSandbox;
-  const quoted = prices !== undefined || practiceOnly;
+  const practice = practiceOnly || (order.test && typed.kind === "practice");
+  const buyAgain = view.askBuyAgain === true || typed.buyAgain === true;
+  const quoted = prices !== undefined || practice || buyAgain;
   const form: FormField[] = [
     { type: "select", action_id: "boxId", label: "Box", options: settings.boxes.map(boxOption), initial_value: box.boxId },
     { type: "number_input", action_id: "weightOz", label: "Package weight (oz), items plus box", initial_value: Math.max(0.1, Math.min(MAX_WEIGHT_OZ, weight)), min: 0.1, max: MAX_WEIGHT_OZ },
@@ -124,11 +134,13 @@ function labelForm(view: OrderView): Block[] {
       options: [...(practiceOnly ? [] : [{ label: "Free Pitney Bowes sandbox label (real sandbox price, nothing charged)", value: "sandbox" }]),
         { label: "Practice label (no Pitney Bowes, marked TEST - NOT POSTAGE)", value: "practice" }] });
   }
-  if (view.askBuyAgain) form.push({ type: "toggle", action_id: "buyAgain", label: "Buy a new label", description: "Pitney Bowes has no record of the last one Ship bought for this order.", initial_value: false });
+  if (buyAgain) form.push({ type: "toggle", action_id: "buyAgain", label: "Buy a new label", description: "Pitney Bowes has no record of the last one Ship bought for this order.", initial_value: typed.buyAgain === true });
   const blocks: Block[] = [{ type: "form", block_id: `label-${order.orderId}-${quoted ? "buy" : "prices"}`, fields: form,
-    submit: quoted ? { label: practiceOnly ? "Make practice label" : "Buy label", action_id: `buy:${id}` } : { label: "See prices", action_id: `prices:${id}` } }];
-  if (prices !== undefined) blocks.push(context("Prices are for the box and weight above. Changed them? Press See prices again."),
-    { type: "actions", elements: [{ type: "button", label: "See prices again", action_id: "open", value: order.orderId }] });
+    submit: quoted ? { label: practice ? "Make practice label" : "Buy label", action_id: `buy:${id}` } : { label: "See prices", action_id: `prices:${id}` } }];
+  if (prices !== undefined) blocks.push(context("Prices are for the box and weight above. Changed them? Press See prices again."));
+  else if (practice && !practiceOnly) blocks.push(context("A practice label is free and asks Pitney Bowes nothing, so there are no prices to see. Want a sandbox label instead? Press See prices."));
+  else if (buyAgain) blocks.push(context("Pitney Bowes has no record of the last label Ship bought for this order. Tick Buy a new label and press Buy label to buy one, with the service you chose."));
+  if (quoted && !practiceOnly) blocks.push({ type: "actions", elements: [{ type: "button", label: "See prices again", action_id: "open", value: order.orderId }] });
   return blocks;
 }
 
@@ -147,6 +159,7 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
     blocks.push(header("Label"), labelFields(label));
     const elements: Block & { type: "actions" } = { type: "actions", elements: [] };
     if (view.printUrl) elements.elements.push(link("Print label", view.printUrl, "primary"));
+    if (!label.test) elements.elements.push(link("Track on USPS", `${USPS_TRACKING}${encodeURIComponent(label.tracking)}`));
     elements.elements.push({ type: "button", label: "Cancel label", action_id: `cancel:${encodeURIComponent(order.orderId)}`, value: label.labelId, style: "danger",
       confirm: { title: "Cancel this label?", text: label.practice ? "The practice label is thrown away. The order stays as it is in Commerce." :
         label.test ? "The sandbox label is voided with Pitney Bowes. The order stays as it is in Commerce." :
@@ -165,7 +178,7 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
     }
   }
   const earlier = order.labels.filter(candidate => candidate.labelId !== label?.labelId);
-  if (earlier.length) blocks.push({ type: "accordion", label: `Earlier labels (${earlier.length})`, blocks: earlier.map(labelFields) });
+  if (earlier.length) blocks.push({ type: "accordion", label: `Earlier labels (${earlier.length})`, blocks: earlier.flatMap(candidate => [labelFields(candidate), ...trackingLink(candidate)]) });
   blocks.push({ type: "actions", elements: [link("Open in Ship", pages.order(order.orderId)), link("Ship Settings", pages.settings)] });
   return { blocks, ...(toast ? { toast } : {}) };
 }

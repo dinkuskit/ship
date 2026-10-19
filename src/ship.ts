@@ -11,7 +11,8 @@ export const ISSUER = "https://dinkuskit.com/account";
 export const SHIP_ORIGIN = "https://ship.dinkuskit.com";
 export const AUDIENCE = "dinkus-ship";
 export const SCOPE = "ship:admin";
-const MAX_ANSWER_BYTES = 256 * 1024;
+/** Ship's biggest answer is one order with its 500 lines and label history, far below this; the list is bounded rows. */
+const MAX_ANSWER_BYTES = 1024 * 1024;
 const SITE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
 
 export type ServiceCode = "GA" | "PM" | "EM";
@@ -29,6 +30,15 @@ export interface ShipOrder {
   itemsWeightOz: number;
   label: Label | null;
   labels: Label[];
+}
+/** One row of the Shipping list: short on purpose, the items and labels come with the one order. */
+export interface ShipOrderRow {
+  orderId: string; number: number | null; version: number; status: "processing" | "completed"; test: boolean;
+  shipTo: ShipOrder["shipTo"];
+  addressProblem: string | null;
+  items: string;
+  itemCount: number;
+  labelStatus: "bought" | "cancelled" | null;
 }
 export interface ShipSettings { shipFrom: boolean; boxes: Box[]; postageConnected: boolean; testSandbox: boolean }
 export type Prices = Partial<Record<ServiceCode, number | null>>;
@@ -118,7 +128,7 @@ export async function tradeStoreKey(ctx: PluginContext, siteId: string, key: str
 
 export interface Ship {
   siteId: string;
-  orders(): Promise<{ orders: ShipOrder[]; settings: ShipSettings }>;
+  orders(): Promise<{ orders: ShipOrderRow[]; settings: ShipSettings }>;
   order(orderId: string): Promise<{ order: ShipOrder; settings: ShipSettings }>;
   prices(orderId: string, request: LabelRequest): Promise<Prices>;
   buy(orderId: string, request: LabelRequest): Promise<Label>;
@@ -151,7 +161,7 @@ export function ship(ctx: PluginContext, siteId: string, key: string): Ship {
   const segment = (id: string) => encodeURIComponent(id);
   return {
     siteId,
-    orders: () => call("GET", "/v1/admin/orders") as Promise<{ orders: ShipOrder[]; settings: ShipSettings }>,
+    orders: () => call("GET", "/v1/admin/orders") as Promise<{ orders: ShipOrderRow[]; settings: ShipSettings }>,
     order: id => call("GET", `/v1/admin/orders/${segment(id)}`) as Promise<{ order: ShipOrder; settings: ShipSettings }>,
     prices: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/prices`, request)) as { prices: Prices }).prices,
     buy: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels`, request)) as { label: Label }).label,

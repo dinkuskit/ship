@@ -11,6 +11,11 @@ const KEY = "dk_store_" + "k".repeat(43);
 const admin = plugin.routes.admin.handler;
 const box = { boxId: "box_small", name: "Small", lengthIn: 8, widthIn: 6, heightIn: 4, weightOz: 3 };
 const settings = { shipFrom: true, boxes: [box], postageConnected: true, testSandbox: true };
+const row = (extra = {}) => ({
+  orderId: "order:abc", number: 1001, version: 1, status: "processing", test: true,
+  shipTo: { name: "Demo Shopper", lines: ["1 Example Way"], city: "Testville", region: "CA", postalCode: "90000" },
+  addressProblem: null, items: "2 × Demo Mug", itemCount: 1, labelStatus: null, ...extra,
+});
 const order = (extra = {}) => ({
   orderId: "order:abc", number: 1001, version: 1, status: "processing", test: true,
   shipTo: { name: "Demo Shopper", lines: ["1 Example Way"], city: "Testville", region: "CA", postalCode: "90000" },
@@ -75,10 +80,11 @@ test("until both settings are pasted the page asks for them, and a malformed one
 });
 
 test("the store key goes only to DinkusKit.com, and the pass goes only to Ship", async () => {
-  const h = host({ ship: { "GET /v1/admin/orders": { orders: [order()], settings } } });
+  const h = host({ ship: { "GET /v1/admin/orders": { orders: [row(), row({ orderId: "order:def", number: 1002, labelStatus: "bought", items: "1 × Hat, +3 more" })], settings } } });
   const page = text(await h.page(load));
   assert.match(page, /#1001 \(TEST\)/);
   assert.match(page, /"status":"No label"/);
+  assert.match(page, /"items":"1 × Hat, \+3 more","status":"Label bought"/);
   assert.equal(h.calls.length, 2);
   assert.deepEqual(h.calls[0], { url: "https://dinkuskit.com/api/store-passes", method: "POST", authorization: `Bearer ${KEY}`, body: { site_id: SITE, scope: "ship:admin", audience: "dinkus-ship" } });
   assert.equal(h.calls[1].url, "https://ship.dinkuskit.com/v1/admin/orders");
@@ -144,11 +150,68 @@ test("a labelled order shows the label with a five-minute print link and a guard
   assert.equal(cancel.confirm.style, "danger");
   assert.match(text(page), /"label":"Status","value":"Label bought"/);
   assert.match(text(page), /SANDBOX-TRACKING-A \(test, not trackable\)/);
+  assert.ok(!actions.some(element => element.label === "Track on USPS"));
   assert.ok(!page.blocks.some(block => block.type === "form"));
 
   const cancelled = await h.page({ type: "block_action", action_id: "cancel:order%3Aabc", value: "label_1" });
   assert.equal(h.calls.filter(call => call.url.endsWith("/cancel")).length, 1);
   assert.match(cancelled.toast.message, /Label cancelled/);
+});
+
+test("a live label's tracking number links to USPS, for the live label and the earlier ones", async () => {
+  const live = label({ labelId: "label_2", test: false, tracking: "9400100000000000000002" });
+  const old = label({ labelId: "label_1", test: false, tracking: "9400100000000000000001", status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z", refund: "INITIATED" });
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false, label: live, labels: [old, live] }), settings },
+    "POST /v1/admin/labels/label_2/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
+  } });
+  const page = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  const links = text(page).match(/https:\/\/tools\.usps\.com\/go\/TrackConfirmAction\?tLabels=[0-9]+/g);
+  assert.deepEqual(links, ["https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000002", "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000001"]);
+  assert.match(text(page), /\$9\.35 from your Pitney Bowes postage account/);
+});
+
+test("after \"tick Buy a new label\" the form stays on the buy step and the next buy carries the confirmation", async () => {
+  const sent = [];
+  let answers = 0;
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false }), settings },
+    "POST /v1/admin/orders/order%3Aabc/labels": body => { sent.push(body); return answers++ === 0
+      ? Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer the last time." } }, { status: 409 })
+      : Response.json({ label: label({ test: false, service: body.service, tracking: "9400100000000000000003" }) }, { status: 201 }); },
+    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
+  } });
+  const refused = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31, service: "PM" } });
+  const form = refused.blocks.find(block => block.type === "form");
+  assert.equal(form.submit.action_id, "buy:1:order%3Aabc");
+  assert.equal(form.submit.label, "Buy label");
+  assert.equal(form.fields.find(field => field.action_id === "service").initial_value, "PM");
+  const toggle = form.fields.find(field => field.action_id === "buyAgain");
+  assert.equal(toggle.initial_value, false);
+  const bought = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31, service: "PM", buyAgain: true } });
+  assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 31, service: "PM", buyAgain: true, by: "staff@example.test" });
+  assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 0);
+  assert.match(bought.toast.message, /Label bought, \$9\.35\. Tracking 9400100000000000000003/);
+});
+
+test("a practice label skips the prices step, since Pitney Bowes is not asked", async () => {
+  const sent = [];
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+    "POST /v1/admin/orders/order%3Aabc/labels": body => { sent.push(body); return Response.json({ label: label({ practice: true, priceCents: null, tracking: "TEST000000000000000001" }) }, { status: 201 }); },
+    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
+  } });
+  const chosen = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, kind: "practice" } });
+  assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 0);
+  const form = chosen.blocks.find(block => block.type === "form");
+  assert.equal(form.submit.action_id, "buy:1:order%3Aabc");
+  assert.equal(form.submit.label, "Make practice label");
+  assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, "practice");
+  assert.deepEqual(form.fields.find(field => field.action_id === "service").options.map(option => option.label), ["USPS Ground Advantage", "USPS Priority Mail", "USPS Priority Mail Express"]);
+  assert.match(text(chosen), /no prices to see/);
+  const made = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, service: "GA", kind: "practice" } });
+  assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, service: "GA", kind: "practice", by: "staff@example.test" });
+  assert.equal(made.toast.message, "Practice label made.");
 });
 
 test("Ship's refusals keep the order page, with the reason and what was typed", async () => {

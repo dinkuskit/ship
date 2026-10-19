@@ -31,6 +31,22 @@ export interface AdminOrder {
   /** Every label this order ever had, oldest first. */
   labels: Label[];
 }
+/**
+ * One row of the plugin's Shipping list. The list is bounded on purpose: at most 200
+ * rows, each a few short lines (every address field is at most 200 characters and
+ * the items are summed up), so the whole answer stays well inside what the
+ * plugin's sandbox reads; the items and label history come with the one order.
+ */
+export interface AdminOrderRow {
+  orderId: string; number: number | null; version: number; status: "processing" | "completed"; test: boolean;
+  shipTo: AdminOrder["shipTo"];
+  addressProblem: string | null;
+  /** "2 × Demo Mug, 1 × Hat, +3 more", or "No items". */
+  items: string;
+  itemCount: number;
+  /** The live label's tracking number for this version, a cancelled one's absence, or nothing yet. */
+  labelStatus: "bought" | "cancelled" | null;
+}
 /** The store's Ship settings as far as the plugin needs them; the PB account stays on Ship's page. */
 export interface AdminSettings { shipFrom: boolean; boxes: Box[]; postageConnected: boolean; testSandbox: boolean }
 
@@ -47,6 +63,20 @@ function adminOrder(summary: OrderSummary): AdminOrder {
     itemsWeightOz: order.lines.reduce((total, line) => total + (line.weightOz ?? 0) * line.quantity, 0),
     label: labels.find(label => label.status === "bought" && label.version === order.version) ?? null,
     labels,
+  };
+}
+
+const ITEMS_SHOWN = 3, ITEM_NAME_CHARS = 40;
+
+function adminOrderRow(summary: OrderSummary): AdminOrderRow {
+  const full = adminOrder(summary);
+  const shown = full.lines.slice(0, ITEMS_SHOWN).map(line => `${line.quantity} × ${line.name.length > ITEM_NAME_CHARS ? `${line.name.slice(0, ITEM_NAME_CHARS - 1)}…` : line.name}`);
+  const more = full.lines.length - shown.length;
+  return {
+    orderId: full.orderId, number: full.number, version: full.version, status: full.status, test: full.test, shipTo: full.shipTo, addressProblem: full.addressProblem,
+    items: shown.length === 0 ? "No items" : `${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`,
+    itemCount: full.lines.length,
+    labelStatus: full.label ? "bought" : full.labels.some(label => label.status === "cancelled") ? "cancelled" : null,
   };
 }
 
@@ -81,7 +111,7 @@ function actor(input: Body): string {
 
 export async function listAdminOrders(store: Store): Promise<Outcome> {
   const [orders, settings] = await Promise.all([store.listOrders(), store.getSettings()]);
-  return ok({ orders: orders.map(adminOrder), settings: adminSettings(settings) });
+  return ok({ orders: orders.map(adminOrderRow), settings: adminSettings(settings) });
 }
 
 export async function showAdminOrder(store: Store, orderId: string): Promise<Outcome> {

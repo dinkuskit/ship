@@ -62,7 +62,8 @@ async function call(method: string, path: string, options: { body?: unknown; sco
   const response = await worker.fetch(new Request(`${ORIGIN}${path}`, {
     method, headers, ...(options.body === undefined ? {} : { body: JSON.stringify(options.body) }),
   }), configured());
-  return { status: response.status, json: await response.json() as any };
+  const text = await response.text();
+  return { status: response.status, text, json: JSON.parse(text) as any };
 }
 
 const shipStore = () => env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site));
@@ -101,7 +102,9 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   const before = await call("GET", "/v1/admin/orders");
   expect(before.json.orders).toMatchObject([{ orderId: "order:abc", number: 1001, version: 1, status: "processing", test: true,
     shipTo: { name: "Demo Shopper", lines: ["1 Example Way"], city: "Testville", region: "California", postalCode: "90000" },
-    addressProblem: null, lines: [{ name: "Demo Mug", quantity: 2, weightOz: 12.5 }], itemsWeightOz: 25, label: null, labels: [] }]);
+    addressProblem: null, items: "2 × Demo Mug", itemCount: 1, labelStatus: null }]);
+  // The list is rows, not whole orders: the items and label history come with the one order.
+  expect(Object.keys(before.json.orders[0]).sort()).toEqual(["addressProblem", "itemCount", "items", "labelStatus", "number", "orderId", "shipTo", "status", "test", "version"]);
   expect(before.json.settings.shipFrom).toBe(false);
   // Nothing from the owner's PB account crosses to the plugin.
   expect(Object.keys(before.json.settings).sort()).toEqual(["boxes", "postageConnected", "shipFrom", "testSandbox"]);
@@ -119,6 +122,7 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(1);
   // Commerce picks the label up exactly as it does from Ship's own page.
   expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toMatchObject([{ orderId: "order:abc", version: 1, carrier: "USPS", tracking: "SANDBOX-TRACKING-A" }]);
+  expect((await call("GET", "/v1/admin/orders")).json.orders[0].labelStatus).toBe("bought");
   const shown = await call("GET", "/v1/admin/orders/order%3Aabc");
   expect(shown.json.order.label.labelId).toBe(bought.json.label.labelId);
   expect((await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { ...form, service: "PM", by: "staff@example.test" } })).json.error.code).toBe("ALREADY_LABELED");
@@ -139,6 +143,7 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   const after = await call("GET", "/v1/admin/orders/order%3Aabc");
   expect(after.json.order.label).toBeNull();
   expect(after.json.order.labels).toMatchObject([{ status: "cancelled", refund: "INITIATED" }]);
+  expect((await call("GET", "/v1/admin/orders")).json.orders[0].labelStatus).toBe("cancelled");
   expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).json.error.code).toBe("NOT_FOUND");
 });
 
@@ -183,4 +188,15 @@ test("bad label input is refused before Pitney Bowes hears of it", async () => {
   }
   expect((await call("POST", "/v1/admin/orders/order%3Aabc/prices", { body: { version: 2, boxId, weightOz: 28 } })).json.error.code).toBe("ORDER_CHANGED");
   expect(pbCalls).toEqual([]);
+});
+
+test("the order list stays small however big the orders are: the items come with the one order", async () => {
+  const lines = Array.from({ length: 100 }, (_, index) => ({ catalogItemId: `item_${index}`, name: `${index} `.padEnd(200, "x"), quantity: 1, weightOz: 1, unitPrice: { currency: "USD", minor: "100" } }));
+  for (let index = 0; index < 20; index++) await sendOrder({ orderId: `order:big-${index}`, number: 2000 + index, lines });
+  const { text, json } = await call("GET", "/v1/admin/orders");
+  expect(json.orders).toHaveLength(20);
+  expect(json.orders[0].items).toMatch(/^1 × 0 x{37}…, 1 × 1 x{37}…, 1 × 2 x{37}…, \+97 more$/);
+  expect(json.orders[0].itemCount).toBe(100);
+  expect(text.length).toBeLessThan(64 * 1024);
+  expect((await call("GET", "/v1/admin/orders/order%3Abig-0")).json.order.lines).toHaveLength(100);
 });
