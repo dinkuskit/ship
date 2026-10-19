@@ -249,3 +249,26 @@ export function requireSameOrigin(request: Request): void {
     throw new ServiceError(403, "FORBIDDEN", "forms must be sent from Ship's own pages");
   }
 }
+
+/** What a print link names: one label of one store, until exp (seconds). */
+export interface PrintLink extends Partial<import("./isolation.js").ShipTuple> { kind: "print"; site: string; labelId: string; exp: number }
+
+/**
+ * A short-lived link that opens one label's PDF without a Ship sign-in, for the
+ * store admin's "Print label" tab (ship-registry-plugin-001). Signed with the
+ * session secret; it names the label and nothing more, so it can open nothing else.
+ */
+export async function mintPrintLink(env: Env, link: Omit<PrintLink, "kind">): Promise<string> {
+  if (!env.SHIP_SESSION_SECRET || env.SHIP_SESSION_SECRET.length < 32) throw new ServiceError(503, "NOT_CONFIGURED", "the Ship service is not configured");
+  return seal(env, { kind: "print", ...link, ...tuple(env) });
+}
+
+/** The label a print link opens, or null when the link is not Ship's, is for another kind of thing, or has expired. */
+export async function openPrintLink(env: Env, token: string): Promise<PrintLink | null> {
+  if (!env.SHIP_SESSION_SECRET || env.SHIP_SESSION_SECRET.length < 32) return null;
+  const link = await open<PrintLink>(env, token);
+  if (!link || link.kind !== "print" || typeof link.site !== "string" || typeof link.labelId !== "string") return null;
+  assertTuple(env, link as unknown as Record<string, unknown>);
+  assertSite(env, link.site);
+  return link;
+}

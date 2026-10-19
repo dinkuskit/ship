@@ -2,7 +2,8 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from "jose";
 import { assertSite, assertTuple } from "./isolation.js";
 import { ServiceError } from "./errors.js";
 
-export type ShipScope = "ship:orders";
+/** ship:orders is Commerce's; ship:admin is the Ship Registry plugin's (both store passes from DinkusKit.com). */
+export type ShipScope = "ship:orders" | "ship:admin";
 
 /** The longest store id Ship keeps; DinkusKit.com's ids are far shorter. */
 const SITE_ID = /^[A-Za-z0-9._:-]{1,200}$/;

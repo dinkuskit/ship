@@ -47,6 +47,10 @@ The latest version of each order wins. An older version arriving late is answere
 
 Ship keeps an address that a label can't use yet, such as one with no state, and the label page will ask the owner to fix it in Commerce. Fixing it sends Ship a new version.
 
+## What the Ship plugin calls
+
+The Registry plugin `dinkus-ship` (this repository's root) gives the store admin a Shipping page that reads from and buys through this service with a `ship:admin` store pass from DinkusKit.com, the same way Commerce uses `ship:orders`. The routes, the five-minute print link (`GET /print/{token}`, no sign-in, one label) and the scope DinkusKit.com must issue are in [docs/contracts/ship-plugin-v1.md](../docs/contracts/ship-plugin-v1.md). The plugin keeps no label data; this service stays the one place labels live, and its pages below stay the full path and the fallback.
+
 ## Run it
 
 Node 22.

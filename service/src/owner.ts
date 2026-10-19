@@ -1,6 +1,6 @@
 import { ServiceError, type Outcome } from "./errors.js";
 import { html, messagePage, orderPage, ordersPage, settingsPage } from "./pages.js";
-import { finishSignIn, readSession, requireSameOrigin, signInConfigured, signOut, startSignIn, type OwnerSession } from "./session.js";
+import { finishSignIn, openPrintLink, readSession, requireSameOrigin, signInConfigured, signOut, startSignIn, type OwnerSession } from "./session.js";
 import type { Quotes, StoreShipping } from "./store.js";
 
 /** Store ids, order ids and record ids as they appear in a path segment. */
@@ -59,15 +59,7 @@ const ROUTES: PageRoute[] = [
   },
   {
     method: "GET", pattern: new RegExp(`^/stores/${SEGMENT}/labels/${SEGMENT}\\.pdf$`),
-    handle: async ({ store, params }) => {
-      const pdf = await store.labelPdf(params[0]!);
-      if (!pdf) return messagePage("Label not found", "This store has no such label.", undefined, 404);
-      if (pdf === "not_ready") return messagePage("Label PDF not ready", "The label is bought, but Ship could not download its PDF from Pitney Bowes yet. Try again in a minute.", undefined, 503);
-      return new Response(pdf, { headers: {
-        "content-type": "application/pdf", "content-disposition": `inline; filename="label-${params[0]!.replace(/[^A-Za-z0-9_-]/g, "")}.pdf"`,
-        "cache-control": "private, no-store", "x-content-type-options": "nosniff",
-      } });
-    },
+    handle: async ({ store, params }) => labelPdf(store, params[0]!),
   },
   {
     method: "POST", pattern: new RegExp(`^/stores/${SEGMENT}/labels/${SEGMENT}/cancel$`),
@@ -110,6 +102,36 @@ const ROUTES: PageRoute[] = [
     handle: async ({ site, session, store, params }) => settingsResult(site, session, store, await outcomeOf(store.removeBox(params[0]!))),
   },
 ];
+
+/** The label's PDF, for printing; the owner's page and the plugin's print link both end here. */
+async function labelPdf(store: Store, labelId: string): Promise<Response> {
+  const pdf = await store.labelPdf(labelId);
+  if (!pdf) return messagePage("Label not found", "This store has no such label.", undefined, 404);
+  if (pdf === "not_ready") return messagePage("Label PDF not ready", "The label is bought, but Ship could not download its PDF from Pitney Bowes yet. Try again in a minute.", undefined, 503);
+  return new Response(pdf, { headers: {
+    "content-type": "application/pdf", "content-disposition": `inline; filename="label-${labelId.replace(/[^A-Za-z0-9_-]/g, "")}.pdf"`,
+    "cache-control": "private, no-store", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
+  } });
+}
+
+/**
+ * GET /print/{token}: the one label a print link from the Ship Registry plugin
+ * names, for five minutes, with no sign-in (ship-registry-plugin-001). An expired
+ * or foreign link opens nothing; "Print label" in the store admin makes a new one.
+ */
+export async function handlePrint(request: Request, env: Env): Promise<Response> {
+  const url = new URL(request.url);
+  if (request.method !== "GET") return messagePage("Not found", "There is no such page.", undefined, 404);
+  try {
+    const link = await openPrintLink(env, url.pathname.slice("/print/".length));
+    if (!link) return messagePage("Print link expired", "This print link has expired or is not one Ship made. Press Print label in your store admin for a new one.", undefined, 410);
+    return await labelPdf(env.SHIP_STORES.get(env.SHIP_STORES.idFromName(link.site)), link.labelId);
+  } catch (error) {
+    if (error instanceof ServiceError) return messagePage("Something went wrong", error.message, undefined, error.status);
+    console.error("ship print error", error);
+    return messagePage("Something went wrong", "Ship could not open the label. Try again.", undefined, 500);
+  }
+}
 
 async function settingsResult(site: string, session: OwnerSession, store: Store, outcome: Outcome): Promise<Response> {
   if (outcome.ok) return see(`${storePath(site)}/settings`);

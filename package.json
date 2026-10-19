@@ -1,49 +1,48 @@
 {
   "name": "@dinkuskit/ship",
   "version": "0.0.0",
-  "description": "Optional DinkusKit shipping automation. Merchant-owned Pitney Bowes postage accounts; provider actions remain disabled.",
+  "description": "Buy, print and cancel USPS labels in the EmDash store admin, through the hosted DinkusKit Ship service",
   "type": "module",
-  "private": true,
+  "engines": {
+    "node": ">=22.16.0 <23"
+  },
   "files": [
-    "src",
+    "dist",
     "emdash-plugin.jsonc",
     "README.md",
     "LICENSE"
   ],
-  "exports": {
-    ".": "./src/plugin.js",
-    "./plugin": "./src/plugin.js",
-    "./workflow": "./src/shipping-workflow.js",
-    "./installed": "./src/installed-workflow.js",
-    "./host-label-assets": "./src/host-label-assets.js",
-    "./provider-pdf-link": "./src/provider-pdf-link.js"
-  },
   "scripts": {
-    "test": "node --test",
-    "build": "emdash-plugin build",
-    "verify:registry": "node scripts/verify-registry-artifact.mjs",
-    "verify:bundle": "node scripts/verify-registry-artifact.mjs --bundle-only",
-    "verify:private-assets": "node scripts/verify-private-assets.mjs",
-    "verify:provider-pdf-link": "node scripts/verify-provider-pdf-link.mjs",
-    "verify:provider-pdf-link:registry": "node scripts/verify-private-assets.mjs --provider-link",
-    "verify:local-registry-auth": "npx --yes --package=node@22 node scripts/verify-local-registry-auth.mjs",
-    "verify:provider-pdf-link:runtime": "node scripts/verify-ship-journey.mjs --workerd",
-    "dev": "node src/server.js",
-    "fixture:proof": "PORT=4328 node test-support/fixture-server.js",
-    "verify:sandbox": "node scripts/verify-sandbox-package.mjs",
-    "prepare:sandbox": "node scripts/prepare-sandbox-host.mjs",
+    "build": "emdash-plugin validate && emdash-plugin build && node scripts/check-registry-bundle.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test tests/*.test.mjs",
+    "changeset": "changeset",
     "verify:quick": "bin/verify-ship quick",
     "verify:full": "bin/verify-ship full"
   },
   "devDependencies": {
+    "@changesets/changelog-github": "^1.0.1",
+    "@changesets/cli": "^3.0.3",
+    "@emdash-cms/blocks": "1.2.0",
     "@emdash-cms/plugin-cli": "0.13.3",
     "@emdash-cms/plugin-types": "0.6.0",
-    "@emdash-cms/registry-verification": "0.3.4",
+    "emdash": "1.2.0",
     "typescript": "6.0.3"
   },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/dinkuskit/ship.git"
+  },
+  "main": "./dist/index.mjs",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.mts",
+      "default": "./dist/index.mjs"
+    },
+    "./sandbox": "./dist/plugin.mjs"
+  },
+  "peerDependencies": {
+    "emdash": "1.2.0"
   }
 }

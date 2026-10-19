@@ -1,6 +1,16 @@
-// Official Registry entry shares the tested npm sandbox implementation.
-import type { RouteOptions } from "@emdash-cms/plugin-types";
-import plugin from "./plugin.js";
+import type { SandboxedPlugin } from "emdash/plugin";
+import { shippingAdmin } from "./admin.js";
 
-const registryEntry: { routes: Record<string, RouteOptions & { handler: unknown }> } = plugin;
-export default registryEntry;
+/**
+ * DinkusKit Ship for the EmDash store admin (GrillTrack ship-registry-plugin-001):
+ * a Shipping page that buys, prints and cancels USPS labels through the hosted
+ * Ship service at ship.dinkuskit.com. It keeps no label data of its own.
+ */
+const plugin: SandboxedPlugin = {
+  routes: {
+    // Editors and Administrators; lower roles do not see Shipping.
+    admin: { public: false, permission: "content:edit_any", methods: ["POST"], handler: shippingAdmin },
+  },
+};
+
+export default plugin;

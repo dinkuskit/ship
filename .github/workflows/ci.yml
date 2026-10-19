@@ -30,9 +30,10 @@ jobs:
           tar -xzf "$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color -shellcheck='' -pyflakes=''
 
-  test:
+  plugin:
+    name: Registry plugin
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
@@ -40,15 +41,19 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version: 22
+          node-version-file: .nvmrc
+          cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      # Builds the plugin, runs the 128 KiB Registry bundle check, then the tests.
       - run: npm test
-      - run: npm run verify:bundle
       - run: |
           set -euo pipefail
-          for file in src/*.js scripts/*.mjs test-support/*.js test/*.js; do
+          for file in scripts/*.mjs .github/scripts/*.mjs; do
             node --check "$file"
           done
+      # The release workflow's preparation step, dry: the bundle is built and thrown away.
+      - run: node scripts/prepare-emdash-release.mjs "dinkus-ship@$(node -p 'require("./package.json").version')"
 
   service:
     name: Hosted service

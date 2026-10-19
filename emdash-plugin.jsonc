@@ -1,25 +1,42 @@
 {
   "$schema": "./node_modules/@emdash-cms/plugin-cli/schemas/emdash-plugin.schema.json",
-  "slug": "ship",
+  "slug": "dinkus-ship",
+  "version": "0.0.0",
   "publisher": "did:plc:ekk4pjmkh3k3ql2kfoex3qt4",
+  "name": "Ship",
+  "description": "Buy, print and cancel USPS shipping labels for paid orders in EmDash, through the hosted DinkusKit Ship service.",
   "license": "MIT",
-  "author": { "name": "DinkusKit" },
-  "securityContacts": [{ "url": "https://github.com/dinkuskit/ship/security" }],
-  "name": "DinkusKit Ship",
-  "description": "Ship settings and an unavailable-order state for a private local EmDash sandbox. Provider actions remain disabled.",
-  "capabilities": [],
-  "allowedHosts": [],
-  "storage": {
-    "preferences": { "indexes": ["locale"] },
-    "operations": { "indexes": [] }
+  "author": {
+    "name": "DinkusKit",
+    "url": "https://github.com/dinkuskit"
   },
+  "security": {
+    "url": "https://github.com/dinkuskit/ship/security"
+  },
+  "repo": "https://github.com/dinkuskit/ship",
+  "capabilities": [
+    "network:request"
+  ],
+  "allowedHosts": [
+    "dinkuskit.com",
+    "ship.dinkuskit.com"
+  ],
+  "storage": {},
   "admin": {
+    "settingsSchema": {
+      "siteId": {
+        "type": "string",
+        "label": "Store ID",
+        "description": "The siteId line from the Set up Commerce box on DinkusKit.com, the same one Commerce uses."
+      },
+      "storeKey": {
+        "type": "secret",
+        "label": "Store key",
+        "description": "Paste the store key from the Set up Commerce box on DinkusKit.com, the same one pasted into Commerce. Ship trades it there for short passes; it is never sent to Ship itself. Replace key on DinkusKit.com stops this one."
+      }
+    },
     "pages": [
-      { "path": "/orders", "label": "Orders", "icon": "receipt" },
-      { "path": "/order-detail", "label": "Order detail", "icon": "receipt" },
-      { "path": "/shipping", "label": "Shipping", "icon": "truck" },
-      { "path": "/settings", "label": "Ship settings", "icon": "settings" },
-      { "path": "/proof-fixture", "label": "Synthetic package proof", "icon": "flask" }
+      { "path": "/shipping", "label": "Shipping", "icon": "truck" }
     ]
   }
 }
