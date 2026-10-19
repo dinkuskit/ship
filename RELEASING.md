@@ -37,6 +37,13 @@ gh workflow run release.yml --repo dinkuskit/ship --ref main -f publish-only=tru
 
 ## Beta status
 
+**Ship is in beta pre mode**: `.changeset/pre.json` is committed, so every
+`ci: release` PR proposes `x.y.z-beta.N` and publishes to `dinkus-ship-beta`
+only. Once the journey "Buy a label in the store admin" passes on the beta
+store, a PR that runs `npx changeset pre exit` (with an empty changeset) ends
+it, and the next release PR proposes the final version for `dinkus-ship`.
+`tests/release.test.mjs` proves the next version is a beta that routes there.
+
 A prerelease version (`x.y.z-beta.N`) publishes under the separate
 `dinkus-ship-beta` Registry package, never under `dinkus-ship`: the Registry
 has no prerelease filter, so a beta under the real name would become the
