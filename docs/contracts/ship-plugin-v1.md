@@ -46,9 +46,15 @@ Every call carries `Authorization: Bearer <pass>`, JSON in and out, `cache-contr
 Errors are `{ error: { code, message } }` with the status Ship's own page would
 give; the plugin shows `message` as it is.
 
+Every call also carries `x-ship-admin-page: https://<store>/_emdash/admin/plugins/<pluginId>/shipping`,
+the store admin's Shipping page, which the plugin derives from the admin API URL
+EmDash calls it on. Ship keeps it only when the page is on the origin DinkusKit.com
+signed into the pass (`site_origin`) and has that exact path, with no query string.
+It is what the forward below lands on.
+
 | Call | Answer |
 | --- | --- |
-| `GET /v1/admin/orders` | `200 { orders: Row[], settings: Settings }`: every order Ship has for the store, Processing first, newest first, at most 200, as short rows (below) so the answer stays small whatever the orders hold. |
+| `GET /v1/admin/orders` | `200 { orders: Row[], settings: Settings, open: string \| null }`: every order Ship has for the store, Processing first, newest first, at most 200, as short rows (below) so the answer stays small whatever the orders hold. `open` is the `orderId` Ship just forwarded the owner here for (below), given once and then forgotten; the plugin opens that order instead of the list. |
 | `GET /v1/admin/orders/{orderId}` | `200 { order: Order, settings: Settings }`; `404 NOT_FOUND` when Commerce has not sent the order. |
 | `POST /v1/admin/orders/{orderId}/prices` with `{ version, boxId, weightOz }` | `200 { prices: { GA, PM, EM } }` in cents, `null` for a service Pitney Bowes refused for this package. Refusals as on Ship's page: `409 ORDER_CHANGED`, `ALREADY_COMPLETED`, `ALREADY_LABELED`, `ADDRESS_PROBLEM`, `NO_SHIP_FROM`, `TEST_ORDER`; `503 POSTAGE_NOT_CONNECTED`. |
 | `POST /v1/admin/orders/{orderId}/labels` with `{ version, boxId, weightOz, service, by, kind?: "practice", buyAgain?: true }` | `201 { label: Label }`. `by` is who pressed the button (the admin's email, kept as `admin:<email>` in `createdBy`). The same refusals as prices, plus `409 LABEL_IN_PROGRESS`, `409 CHECK_PITNEY_BOWES` (send `buyAgain: true` after the owner ticks the box), `502 PITNEY_BOWES_NO_ANSWER`. |
@@ -83,6 +89,17 @@ open a label and a print link can never act as a session. Ship mints one per
 "open the order" in the plugin; the admin's "Print label" is an ordinary link
 that opens it in a new tab. After five minutes the page says to open the order
 again, which mints a fresh one.
+
+## The forward from Commerce's "Create shipping label"
+
+Commerce's button opens `https://ship.dinkuskit.com/stores/{site}/orders/{orderId}`.
+Once the store's Ship plugin has called with `x-ship-admin-page`, that page answers
+`303` to the store admin's Shipping page, before Ship's own sign-in, and queues the
+order for the next `GET /v1/admin/orders` (`open`, kept for two minutes and only
+for an order Ship has). Stores without the plugin keep landing on Ship's own page.
+The plugin's "Open in Ship" links add `?view=full`, which always shows Ship's own
+page, so the two never bounce. The list and settings pages are never forwarded
+(ship-registry-plugin-001, question 4).
 
 ## What stays on ship.dinkuskit.com
 

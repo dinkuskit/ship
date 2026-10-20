@@ -723,3 +723,28 @@ test("a token endpoint redirect is refused without forwarding the sign-in code",
   expect(tokenCall?.[1]?.redirect).toBe("manual");
   expect(vi.mocked(globalThis.fetch).mock.calls.some(([input]) => String(input).startsWith("https://redirect-target.example.invalid/"))).toBe(false);
 });
+
+test("once the store's Ship plugin has called, Commerce's label button lands on the store admin's Shipping page", async () => {
+  await sendOrder();
+  const adminPage = "https://shop.example.invalid/_emdash/admin/plugins/dinkus-ship-1/shipping";
+  // Before the plugin has called, Ship's own order page is the only page: sign-in first.
+  const before = await request("GET", `/stores/${site}/orders/order%3Aabc`);
+  expect(before.status).toBe(303);
+  expect(before.headers.get("location")).toContain("/ship-sign-in");
+  await env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site)).rememberAdminPage(adminPage);
+  // Now the forward comes before sign-in, so the owner never sees Ship's sign-in on the way to the store admin.
+  const forwarded = await request("GET", `/stores/${site}/orders/order%3Aabc`);
+  expect(forwarded.status).toBe(303);
+  expect(forwarded.headers.get("location")).toBe(adminPage);
+  expect(forwarded.headers.get("cache-control")).toBe("no-store");
+  expect(await env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site)).takeAdminOpen()).toBe("order:abc");
+  // The plugin's own "Open in Ship" link asks for the full version and gets Ship's page, so the two never bounce.
+  const full = await request("GET", `/stores/${site}/orders/order%3Aabc?view=full`);
+  expect(full.status).toBe(303);
+  expect(full.headers.get("location")).toContain("/ship-sign-in");
+  const cookie = await signedIn();
+  expect((await request("GET", `/stores/${site}/orders/order%3Aabc?view=full`, { cookie })).status).toBe(200);
+  // The list and settings pages stay Ship's own.
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
+  expect((await request("GET", `/stores/${site}/settings`, { cookie })).status).toBe(200);
+});

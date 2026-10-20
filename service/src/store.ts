@@ -58,6 +58,8 @@ type Purchase = { transaction_id: string; order_id: string; version: number; tes
 const NOT_CONNECTED = "Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels: practice labels with no postage.";
 /** How long a purchase counts as still in flight before another page may check on it. */
 const IN_FLIGHT_MS = 60_000;
+/** How long a forwarded "Create shipping label" waits for the store admin's Shipping page to open it. */
+const ADMIN_OPEN_MS = 2 * 60_000;
 
 /** Orders completed this long before the store first sent Ship anything get no email (clock differences aside). */
 const BEFORE_CONNECT_MS = 15 * 60_000;
@@ -722,6 +724,49 @@ export class StoreShipping extends DurableObject<Env> {
     }
     const next = this.sql.exec<{ next_at: number | null }>("SELECT MIN(next_at) AS next_at FROM shipped_emails WHERE state = 'pending'").one().next_at;
     if (next !== null) await this.ctx.storage.setAlarm(Math.max(next, Date.now() + 1000));
+  }
+
+  /**
+   * The store admin's Shipping page, learned from the Ship plugin's calls
+   * (ship-registry-plugin-001, question 4): once known, Commerce's "Create
+   * shipping label" lands there instead of on Ship's own page.
+   */
+  async rememberAdminPage(url: string): Promise<void> {
+    this.checkIsolation();
+    if (this.meta("admin_page") === url) return;
+    this.setMeta("admin_page", url);
+    this.setMeta("admin_page_at", new Date().toISOString());
+  }
+
+  /**
+   * Which order the next Shipping page load in the store admin should open:
+   * set when Ship forwards Commerce's "Create shipping label" there, read once
+   * by the plugin's next list call, and forgotten after two minutes.
+   */
+  async queueAdminOpen(orderId: string): Promise<void> {
+    this.checkIsolation();
+    this.setMeta("admin_open", JSON.stringify({ orderId, at: Date.now() }));
+  }
+
+  /** The queued order to open, once; null when none is waiting or it has gone stale. */
+  async takeAdminOpen(): Promise<string | null> {
+    this.checkIsolation();
+    const raw = this.meta("admin_open");
+    if (!raw) return null;
+    this.sql.exec("DELETE FROM store_meta WHERE key = 'admin_open'");
+    try {
+      const queued = JSON.parse(raw) as { orderId?: unknown; at?: unknown };
+      if (typeof queued.orderId !== "string" || typeof queued.at !== "number" || Date.now() - queued.at > ADMIN_OPEN_MS) return null;
+      return this.sql.exec("SELECT 1 FROM orders WHERE order_id = ?", queued.orderId).toArray().length ? queued.orderId : null;
+    } catch {
+      return null;
+    }
+  }
+
+  /** The store admin's Shipping page, or null while no Ship plugin has called for this store. */
+  async adminPage(): Promise<string | null> {
+    this.checkIsolation();
+    return this.meta("admin_page");
   }
 
   /** Where each completion's shipped email stands, for the owner's order page. */

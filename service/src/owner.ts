@@ -155,6 +155,29 @@ function decode(segment: string): string | null {
   }
 }
 
+const ORDER_PAGE = new RegExp(`^/stores/${SEGMENT}/orders/${SEGMENT}$`);
+
+/**
+ * Commerce's "Create shipping label" opens Ship's order page. Once the store's
+ * Ship plugin has called Ship (ship-registry-plugin-001, question 4), that
+ * address goes on to the store admin's Shipping page, which opens the order;
+ * `?view=full` (the plugin's own "Open in Ship" links) still shows Ship's page,
+ * and a store without the plugin never leaves it.
+ */
+async function forwardToAdmin(request: Request, env: Env): Promise<Response | null> {
+  const url = new URL(request.url);
+  if (request.method !== "GET" || url.searchParams.get("view") === "full") return null;
+  const found = ORDER_PAGE.exec(url.pathname);
+  if (!found) return null;
+  const site = decode(found[1]!), orderId = decode(found[2]!);
+  if (site === null || orderId === null) return null;
+  const store = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site));
+  const adminPage = await store.adminPage();
+  if (!adminPage) return null;
+  await store.queueAdminOpen(orderId);
+  return new Response(null, { status: 303, headers: { location: adminPage, "cache-control": "no-store" } });
+}
+
 /** The owner's pages: sign-in with DinkusKit.com, orders, labels and settings for one store at a time. */
 export async function handlePage(request: Request, env: Env): Promise<Response> {
   const url = new URL(request.url);
@@ -175,6 +198,8 @@ export async function handlePage(request: Request, env: Env): Promise<Response> 
       (await signOut(request, env)).forEach((value, key) => key === "set-cookie" ? signedOut.headers.append(key, value) : signedOut.headers.set(key, value));
       return signedOut;
     }
+    const forwarded = await forwardToAdmin(request, env);
+    if (forwarded) return forwarded;
     for (const route of ROUTES) {
       const found = route.pattern.exec(url.pathname);
       if (!found) continue;

@@ -43,6 +43,27 @@ function decode(segment: string): string {
 
 const NO_STORE = { "cache-control": "no-store" };
 
+/** The header the Ship plugin sends with its own Shipping page's address (docs/contracts/ship-plugin-v1.md). */
+export const ADMIN_PAGE_HEADER = "x-ship-admin-page";
+
+/**
+ * The store admin's Shipping page as the plugin names it, accepted only when it
+ * sits on the store's own origin from the pass and under EmDash's plugin admin
+ * path, so a store can never be forwarded anywhere but its own admin.
+ */
+export function adminPageFrom(request: Request, siteOrigin: string | null): string | null {
+  const value = request.headers.get(ADMIN_PAGE_HEADER);
+  if (!value || !siteOrigin || value.length > 600) return null;
+  try {
+    const url = new URL(value);
+    if (url.origin !== siteOrigin || url.username || url.password || url.search || url.hash) return null;
+    if (!/^\/_emdash\/admin\/plugins\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9._\/-]{1,120}$/.test(url.pathname)) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
 function respond(outcome: Outcome): Response {
   return outcome.ok
     ? Response.json(outcome.body, { status: outcome.status, headers: NO_STORE })
@@ -111,7 +132,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     if (!env.ACCOUNT_ISSUER || !env.ACCOUNT_AUDIENCE || !env.ACCOUNT_JWKS_URL) {
       throw new ServiceError(503, "NOT_CONFIGURED", "the Ship service is not configured");
     }
-    const siteId = await authenticator(env)(request, route.scope);
+    const { siteId, siteOrigin } = await authenticator(env)(request, route.scope);
     const body = await readBody(request);
     const admission = requestTuple(request);
     assertTuple(env, admission);
@@ -121,6 +142,10 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       }
     }
     const store = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(siteId));
+    if (route.scope === ADMIN_SCOPE) {
+      const adminPage = adminPageFrom(request, siteOrigin);
+      if (adminPage) await store.rememberAdminPage(adminPage);
+    }
     return respond(await route.handle({ store, body, admission, params, site: siteId, origin: url.origin, env }));
   } catch (error) {
     return respond(toOutcome(error));

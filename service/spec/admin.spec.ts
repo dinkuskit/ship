@@ -91,7 +91,7 @@ async function setUp(): Promise<string> {
 test("the admin routes take only a ship:admin pass, and Commerce's routes still take only ship:orders", async () => {
   expect((await call("GET", "/v1/admin/orders", { scope: "ship:orders" })).status).toBe(403);
   expect((await call("GET", "/v1/labels", { scope: "ship:admin" })).status).toBe(403);
-  expect((await call("GET", "/v1/admin/orders")).json).toEqual({ orders: [], settings: { shipFrom: false, boxes: [], postageConnected: true, testSandbox: true } });
+  expect((await call("GET", "/v1/admin/orders")).json).toEqual({ orders: [], settings: { shipFrom: false, boxes: [], postageConnected: true, testSandbox: true }, open: null });
   expect((await call("DELETE", "/v1/admin/orders")).status).toBe(405);
   expect((await call("GET", "/v1/admin/orders/nope")).json.error.code).toBe("NOT_FOUND");
   expect((await call("POST", "/v1/admin/labels/nope/print-link")).json.error.code).toBe("NOT_FOUND");
@@ -218,4 +218,61 @@ test("the order list stays small however big the orders are: the items come with
   expect(json.orders[0].itemCount).toBe(100);
   expect(text.length).toBeLessThan(64 * 1024);
   expect((await call("GET", "/v1/admin/orders/order%3Abig-0")).json.order.lines).toHaveLength(100);
+});
+
+// The forward (ship-registry-plugin-001, question 4): the plugin tells Ship where the
+// store admin's Shipping page is, and Ship's own order page sends the owner there.
+
+const STORE = "https://shop.example.invalid";
+const ADMIN_PAGE = `${STORE}/_emdash/admin/plugins/dinkus-ship-1/shipping`;
+
+/** A ship:admin pass as DinkusKit.com signs it for a store, with the store's origin, plus a header the plugin sends. */
+async function callFrom(adminPage: string | null, siteOrigin: string | null = STORE, path = "/v1/admin/orders") {
+  const token = await new SignJWT({ site_id: site, scope: "ship:admin", ...(siteOrigin === null ? {} : { site_origin: siteOrigin }) })
+    .setProtectedHeader({ alg: "ES256", kid: "synthetic" }).setIssuer(issuer).setAudience("dinkus-ship")
+    .setSubject("synthetic-business").setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+  if (adminPage !== null) headers["x-ship-admin-page"] = adminPage;
+  const response = await worker.fetch(new Request(`${ORIGIN}${path}`, { headers }), configured());
+  return { status: response.status, json: await response.json() as any };
+}
+
+test("Ship remembers the store's Shipping page only from a page on the store the pass was signed for", async () => {
+  expect(await shipStore().adminPage()).toBeNull();
+  // Other origins, other admin paths, query strings and passes without the store's origin are ignored.
+  for (const [page, origin] of [
+    [`https://elsewhere.example.invalid/_emdash/admin/plugins/dinkus-ship-1/shipping`, STORE],
+    [`${STORE}/_emdash/admin/plugins/dinkus-ship-1/shipping?x=1`, STORE],
+    [`${STORE}/admin/plugins/dinkus-ship-1/shipping`, STORE],
+    [`${STORE}/_emdash/admin/plugins/../shipping`, STORE],
+    [ADMIN_PAGE, null],
+    [ADMIN_PAGE, "not a url"],
+    [ADMIN_PAGE, `${STORE}/path`],
+  ] as [string, string | null][]) {
+    expect((await callFrom(page, origin)).status).toBe(200);
+    expect(await shipStore().adminPage(), `${page} from ${origin}`).toBeNull();
+  }
+  expect((await callFrom(ADMIN_PAGE)).status).toBe(200);
+  expect(await shipStore().adminPage()).toBe(ADMIN_PAGE);
+  // A list without a forward waiting carries open: null, and a Commerce call never carries the header's meaning.
+  expect((await callFrom(ADMIN_PAGE)).json.open).toBeNull();
+});
+
+test("the order Ship forwarded the owner from opens once in the store admin, and only while it is fresh", async () => {
+  await sendOrder();
+  await callFrom(ADMIN_PAGE);
+  await shipStore().queueAdminOpen("order:abc");
+  expect((await callFrom(ADMIN_PAGE)).json.open).toBe("order:abc");
+  expect((await callFrom(ADMIN_PAGE)).json.open).toBeNull();
+  // An order Ship never saw, or a stale forward, opens nothing.
+  await shipStore().queueAdminOpen("order:nope");
+  expect((await callFrom(ADMIN_PAGE)).json.open).toBeNull();
+  vi.useFakeTimers();
+  try {
+    await shipStore().queueAdminOpen("order:abc");
+    vi.setSystemTime(Date.now() + 3 * 60_000);
+    expect((await callFrom(ADMIN_PAGE)).json.open).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });

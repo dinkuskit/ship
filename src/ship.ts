@@ -128,7 +128,7 @@ export async function tradeStoreKey(ctx: PluginContext, siteId: string, key: str
 
 export interface Ship {
   siteId: string;
-  orders(): Promise<{ orders: ShipOrderRow[]; settings: ShipSettings }>;
+  orders(): Promise<ShipList>;
   order(orderId: string): Promise<{ order: ShipOrder; settings: ShipSettings }>;
   prices(orderId: string, request: LabelRequest): Promise<Prices>;
   buy(orderId: string, request: LabelRequest): Promise<Label>;
@@ -136,8 +136,30 @@ export interface Ship {
   printLink(labelId: string): Promise<{ url: string; expiresAt: string }>;
 }
 
+/** The Shipping page's rows, plus the order Ship's own page just forwarded here, consumed on read. */
+export interface ShipList { orders: ShipOrderRow[]; settings: ShipSettings; open: string | null }
+
+/** The header that tells hosted Ship where this store's Shipping page lives, so its own order page can forward here. */
+export const ADMIN_PAGE_HEADER = "x-ship-admin-page";
+
+/**
+ * This store's Shipping page, derived from the admin API URL EmDash called us on
+ * (https://store/_emdash/api/plugins/<id>/admin): the same origin, the admin SPA's plugin page path.
+ */
+export function adminPageFrom(requestUrl: string | undefined): string | null {
+  if (!requestUrl) return null;
+  try {
+    const url = new URL(requestUrl);
+    const found = /^\/_emdash\/api\/plugins\/([A-Za-z0-9_-]{1,64})\/admin$/.exec(url.pathname);
+    if (url.protocol !== "https:" || !found) return null;
+    return `${url.origin}/_emdash/admin/plugins/${found[1]}/shipping`;
+  } catch {
+    return null;
+  }
+}
+
 /** Hosted Ship for this store, trading one pass per invocation and reusing it while it lasts. */
-export function ship(ctx: PluginContext, siteId: string, key: string): Ship {
+export function ship(ctx: PluginContext, siteId: string, key: string, adminPage: string | null = null): Ship {
   let pass: Promise<string> | undefined;
   const credential = () => pass ??= tradeStoreKey(ctx, siteId, key);
   async function call(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
@@ -146,7 +168,11 @@ export function ship(ctx: PluginContext, siteId: string, key: string): Ship {
     try {
       response = await ctx.http!.fetch(`${SHIP_ORIGIN}${path}`, {
         method, cache: "no-store", redirect: "error",
-        headers: { accept: "application/json", authorization: `Bearer ${token}`, ...(body === undefined ? {} : { "content-type": "application/json" }) },
+        headers: {
+          accept: "application/json", authorization: `Bearer ${token}`,
+          ...(adminPage === null ? {} : { [ADMIN_PAGE_HEADER]: adminPage }),
+          ...(body === undefined ? {} : { "content-type": "application/json" }),
+        },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       });
     } catch {
@@ -161,7 +187,10 @@ export function ship(ctx: PluginContext, siteId: string, key: string): Ship {
   const segment = (id: string) => encodeURIComponent(id);
   return {
     siteId,
-    orders: () => call("GET", "/v1/admin/orders") as Promise<{ orders: ShipOrderRow[]; settings: ShipSettings }>,
+    orders: async () => {
+      const list = (await call("GET", "/v1/admin/orders")) as { orders: ShipOrderRow[]; settings: ShipSettings; open?: unknown };
+      return { orders: list.orders, settings: list.settings, open: typeof list.open === "string" && list.open ? list.open : null };
+    },
     order: id => call("GET", `/v1/admin/orders/${segment(id)}`) as Promise<{ order: ShipOrder; settings: ShipSettings }>,
     prices: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/prices`, request)) as { prices: Prices }).prices,
     buy: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels`, request)) as { label: Label }).label,
@@ -170,9 +199,13 @@ export function ship(ctx: PluginContext, siteId: string, key: string): Ship {
   };
 }
 
-/** Ship's own pages for this store: the full path and the fallback. */
+/**
+ * Ship's own pages for this store: the full path and the fallback. An order link asks for the
+ * full version (?view=full), since Ship otherwise forwards that page back to the Shipping page
+ * once this plugin has called it.
+ */
 export const shipPages = (siteId: string) => ({
   orders: `${SHIP_ORIGIN}/stores/${encodeURIComponent(siteId)}/orders`,
-  order: (orderId: string) => `${SHIP_ORIGIN}/stores/${encodeURIComponent(siteId)}/orders/${encodeURIComponent(orderId)}`,
+  order: (orderId: string) => `${SHIP_ORIGIN}/stores/${encodeURIComponent(siteId)}/orders/${encodeURIComponent(orderId)}?view=full`,
   settings: `${SHIP_ORIGIN}/stores/${encodeURIComponent(siteId)}/settings`,
 });

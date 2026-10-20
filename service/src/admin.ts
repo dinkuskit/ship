@@ -122,8 +122,8 @@ function actor(input: Body): string {
 }
 
 export async function listAdminOrders(store: Store): Promise<Outcome> {
-  const [orders, settings] = await Promise.all([store.listOrders(), store.getSettings()]);
-  return ok({ orders: orders.map(adminOrderRow), settings: adminSettings(settings) });
+  const [orders, settings, open] = await Promise.all([store.listOrders(), store.getSettings(), store.takeAdminOpen()]);
+  return ok({ orders: orders.map(adminOrderRow), settings: adminSettings(settings), open });
 }
 
 export async function showAdminOrder(store: Store, orderId: string): Promise<Outcome> {
