@@ -4,7 +4,7 @@
   "description": "Buy, print and cancel USPS labels in the EmDash store admin, through the hosted DinkusKit Ship service",
   "type": "module",
   "engines": {
-    "node": ">=22.16.0 <23"
+    "node": ">=24.0.0 <25"
   },
   "files": [
     "dist",

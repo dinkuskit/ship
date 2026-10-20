@@ -53,7 +53,7 @@ The Registry plugin `dinkus-ship` (this repository's root) gives the store admin
 
 ## Run it
 
-Node 22.
+Node 24.
 
 ```sh
 npm ci --ignore-scripts

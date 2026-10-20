@@ -36,7 +36,7 @@ Two parts live here:
 
 ## Develop
 
-Node 22 (see `.nvmrc`).
+Node 24 (see `.nvmrc`).
 
 ```sh
 npm ci --ignore-scripts

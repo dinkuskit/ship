@@ -4,6 +4,9 @@
   "description": "Hosted DinkusKit Ship service (ship.dinkuskit.com): takes Commerce orders and reports USPS labels",
   "type": "module",
   "private": true,
+  "engines": {
+    "node": ">=24.0.0 <25"
+  },
   "license": "MIT",
   "scripts": {
     "test": "vitest run",
