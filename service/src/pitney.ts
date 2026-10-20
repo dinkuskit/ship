@@ -1,4 +1,5 @@
 import { NOT_ONE_LINE } from "./order.js";
+import { deliveryFromScan, scanTime, type Delivery } from "./delivery.js";
 
 /**
  * Pitney Bowes Shipping API calls for USPS labels (PB Expedited, carrier "USPS").
@@ -6,6 +7,8 @@ import { NOT_ONE_LINE } from "./order.js";
  * PB merchant sign-up link. Ported from the plugin's src/pb-sandbox.js.
  */
 export const PB_SANDBOX_ORIGIN = "https://shipping-api-sandbox.pitneybowes.com";
+/** Pitney Bowes's production API; nothing calls it until live postage is turned on. */
+export const PB_PRODUCTION_ORIGIN = "https://shipping-api.pitneybowes.com";
 /**
  * Pitney Bowes's sandbox Merchant Portal, where a store owner signs up for their own PB
  * postage account under DinkusKit's developer account (production is www.pbshippingmerchant.pitneybowes.com).
@@ -22,7 +25,7 @@ const MAX_JSON_BYTES = 1_000_000;
 /** A Durable Object SQLite row holds at most 2 MB; a letter-size label is far smaller. */
 const MAX_PDF_BYTES = 1_500_000;
 
-export interface PbConfig { apiKey: string; apiSecret: string; shipperId: string }
+export interface PbConfig { apiKey: string; apiSecret: string; shipperId: string; origin: string }
 export interface PbAddress { name: string; company?: string; lines: string[]; city: string; state: string; zip: string }
 export interface PbShipment {
   from: PbAddress; to: PbAddress; service: PbService;
@@ -54,7 +57,7 @@ export class PitneyError extends Error {
 export function pitneyConfig(env: Env): PbConfig | null {
   if (env.PB_ENVIRONMENT !== "sandbox") return null;
   const { PB_API_KEY: apiKey, PB_API_SECRET: apiSecret, PB_SHIPPER_ID: shipperId } = env;
-  return apiKey && apiSecret && shipperId ? { apiKey, apiSecret, shipperId } : null;
+  return apiKey && apiSecret && shipperId ? { apiKey, apiSecret, shipperId, origin: PB_SANDBOX_ORIGIN } : null;
 }
 
 async function readBytes(response: Response, max: number): Promise<Uint8Array> {
@@ -103,7 +106,7 @@ async function accessToken(config: PbConfig): Promise<string> {
   if (cachedToken?.key === config.apiKey && cachedToken.expiresAt > Date.now() + 60_000) return cachedToken.token;
   let response: Response;
   try {
-    response = await fetch(`${PB_SANDBOX_ORIGIN}/oauth/token`, {
+    response = await fetch(`${config.origin}/oauth/token`, {
       method: "POST",
       headers: { authorization: `Basic ${btoa(`${config.apiKey}:${config.apiSecret}`)}`, "content-type": "application/x-www-form-urlencoded" },
       body: "grant_type=client_credentials", redirect: "manual", signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -181,7 +184,7 @@ function readLabel(body: unknown): PbLabel | null {
 
 async function call(config: PbConfig, method: string, path: string, options: { body?: unknown; transactionId?: string } = {}): Promise<Response> {
   const token = await accessToken(config);
-  return fetch(`${PB_SANDBOX_ORIGIN}/shippingservices${path}`, {
+  return fetch(`${config.origin}/shippingservices${path}`, {
     method,
     headers: {
       authorization: `Bearer ${token}`, "content-type": "application/json", "x-pb-unifiederrorstructure": "true",
@@ -331,4 +334,28 @@ export async function authorizeMerchant(config: PbConfig, developerId: string, u
     shipperId, company: oneLine(answer?.company, 200), email: oneLine(answer?.email, 254),
     accountNumber: oneLine(answer?.paymentAccountNumber, 100),
   };
+}
+
+/**
+ * Track a Parcel: where one label is now, as the carrier's latest scan says, or null
+ * when PB has nothing (a label not yet scanned, or one its sandbox never tracks).
+ * Throws a PitneyError when PB cannot be asked, so the daily check tries again tomorrow.
+ */
+export async function trackParcel(config: PbConfig, tracking: string): Promise<Delivery | null> {
+  let response: Response;
+  try {
+    response = await call(config, "GET", `/v1/tracking/${encodeURIComponent(tracking)}?packageIdentifierType=TrackingNumber`);
+  } catch {
+    throw new PitneyError("not_started", "Ship could not reach Pitney Bowes.");
+  }
+  if (response.status === 404 || response.status === 400) return null;
+  const body = await readJson(response) as Record<string, unknown> | undefined;
+  if (!response.ok || !body) throw new PitneyError("not_started", `Pitney Bowes answered ${response.status}.`);
+  const scans = Array.isArray(body.scanDetailsList) ? body.scanDetailsList as Record<string, unknown>[] : [];
+  const latest = scans.map(scan => ({ scan, at: scanTime(scan.eventDate, scan.eventTime, scan.eventTimeOffset) })).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+  // PB names the package's current status beside the scans; a Delivered status with its delivery time wins over any scan.
+  const status = typeof body.status === "string" ? body.status : typeof body.currentStatus === "string" ? body.currentStatus : null;
+  if (status === "Delivered") return deliveryFromScan("Delivered", latest?.scan.scanDescription, scanTime(body.deliveryDate, body.deliveryTime, undefined, latest ? new Date(latest.at) : undefined));
+  if (!latest) return status ? deliveryFromScan(status, null, new Date().toISOString()) : null;
+  return deliveryFromScan(latest.scan.packageStatus ?? status, latest.scan.scanDescription, latest.at);
 }

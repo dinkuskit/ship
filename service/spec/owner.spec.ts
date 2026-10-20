@@ -3,6 +3,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
+import { trackingIndex } from "../src/tracking";
 import { pitneyConfig } from "../src/pitney";
 import { addLabelColumns, addPurchaseColumns } from "../src/store";
 
@@ -512,7 +513,9 @@ test("a real order's label is bought from the store's Pitney Bowes postage accou
   expect(await labels()).toMatchObject([{ orderId: "order:abc", version: 1, carrier: "USPS", tracking: "SANDBOX-TRACKING-A" }]);
 
   const label = (await shipStore().orderSummary("order:abc"))!.labels[0]!;
-  expect(label).toMatchObject({ test: false, priceCents: 935, status: "bought" });
+  expect(label).toMatchObject({ test: false, priceCents: 935, status: "bought", delivery: null });
+  // A live label's number is in the tracking index, so Pitney Bowes's updates find this store.
+  expect(await trackingIndex(env as unknown as Env).find("SANDBOX-TRACKING-A")).toEqual({ tracking: "SANDBOX-TRACKING-A", site, labelId: label.labelId });
   const pdf = await request("GET", `/stores/${site}/labels/${label.labelId}.pdf`, { cookie });
   expect(await pdf.text()).toBe("%PDF-1.4 sandbox label");
   expect(pbCalls.filter(call => call.url.href === LABEL_URL)).toHaveLength(1);
@@ -524,6 +527,7 @@ test("a real order's label is bought from the store's Pitney Bowes postage accou
   expect(cancel.url.pathname).toBe("/shippingservices/v1/shipments/SANDBOX-SHIPMENT-A");
   expect(cancel.url.searchParams.get("cancelInitiator")).toBe("SHIPPER");
   expect((await shipStore().orderSummary("order:abc"))!.labels[0]).toMatchObject({ status: "cancelled", refund: "INITIATED" });
+  expect(await trackingIndex(env as unknown as Env).find("SANDBOX-TRACKING-A")).toBeNull();
   expect(await (await request("GET", orderPath, { cookie })).text()).toContain("USPS refunds your postage account");
 });
 
@@ -594,7 +598,7 @@ test("a label whose PDF Pitney Bowes could not hand over yet is fetched when ope
 
 test("postage stays off until the Pitney Bowes sandbox keys are all set", () => {
   const keys = { PB_ENVIRONMENT: "sandbox", PB_API_KEY: "k", PB_API_SECRET: "s", PB_SHIPPER_ID: "m" };
-  expect(pitneyConfig(keys as unknown as Env)).toEqual({ apiKey: "k", apiSecret: "s", shipperId: "m" });
+  expect(pitneyConfig(keys as unknown as Env)).toEqual({ apiKey: "k", apiSecret: "s", shipperId: "m", origin: "https://shipping-api-sandbox.pitneybowes.com" });
   for (const off of [{ PB_ENVIRONMENT: "" }, { PB_ENVIRONMENT: "live" }, { PB_SHIPPER_ID: "" }, { PB_API_SECRET: undefined }]) {
     expect(pitneyConfig({ ...keys, ...off } as unknown as Env)).toBeNull();
   }

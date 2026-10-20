@@ -2,6 +2,7 @@ import { ServiceError, ok, type Outcome } from "./errors.js";
 import { NOT_ONE_LINE } from "./order.js";
 import { mintPrintLink } from "./session.js";
 import type { Box, Label, OrderSummary, Settings, StoreShipping } from "./store.js";
+import type { Delivery } from "./delivery.js";
 
 /**
  * What the Ship Registry plugin calls (GrillTrack ship-registry-plugin-001). Every
@@ -51,6 +52,8 @@ export interface AdminOrderRow {
   itemCount: number;
   /** The live label's tracking number for this version, a cancelled one's absence, or nothing yet. */
   labelStatus: "bought" | "cancelled" | null;
+  /** Where the carrier says the bought label is (ship-tracking-001); null until a scan, and always for sandbox and practice labels. */
+  delivery: Delivery | null;
 }
 /** The store's Ship settings as far as the plugin needs them; the PB account stays on Ship's page. */
 export interface AdminSettings { shipFrom: boolean; boxes: Box[]; postageConnected: boolean; testSandbox: boolean }
@@ -89,6 +92,7 @@ function adminOrderRow(summary: OrderSummary): AdminOrderRow {
     items: shown.length === 0 ? "No items" : `${shown.join(", ")}${more > 0 ? `, +${more} more` : ""}`,
     itemCount: full.lines.length,
     labelStatus: full.label ? "bought" : full.labels.some(label => label.status === "cancelled") ? "cancelled" : null,
+    delivery: full.label?.delivery ?? null,
   };
 }
 

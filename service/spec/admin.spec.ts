@@ -104,7 +104,7 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
     shipTo: { name: "Demo Shopper", lines: ["1 Example Way"], city: "Testville", region: "California", postalCode: "90000" },
     addressProblem: null, items: "2 × Demo Mug", itemCount: 1, labelStatus: null }]);
   // The list is rows, not whole orders: the items and label history come with the one order.
-  expect(Object.keys(before.json.orders[0]).sort()).toEqual(["addressProblem", "itemCount", "items", "labelStatus", "number", "orderId", "shipTo", "status", "test", "version"]);
+  expect(Object.keys(before.json.orders[0]).sort()).toEqual(["addressProblem", "delivery", "itemCount", "items", "labelStatus", "number", "orderId", "shipTo", "status", "test", "version"]);
   expect(before.json.settings.shipFrom).toBe(false);
   // Nothing from the owner's PB account crosses to the plugin.
   expect(Object.keys(before.json.settings).sort()).toEqual(["boxes", "postageConnected", "shipFrom", "testSandbox"]);

@@ -16,11 +16,14 @@ const MAX_ANSWER_BYTES = 1024 * 1024;
 const SITE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
 
 export type ServiceCode = "GA" | "PM" | "EM";
+/** Where the carrier says a live label is; sandbox and practice labels never move. */
+export interface Delivery { state: "in_transit" | "out_for_delivery" | "delivered" | "problem"; at: string; note: string | null }
 export interface Box { boxId: string; name: string; lengthIn: number; widthIn: number; heightIn: number; weightOz: number }
 export interface Label {
   labelId: string; orderId: string; version: number; test: boolean; service: ServiceCode; box: Box; weightOz: number;
   carrier: string; tracking: string; status: "bought" | "cancelled"; createdAt: string; cancelledAt: string | null;
   practice: boolean; priceCents: number | null; refund: string | null;
+  delivery?: Delivery | null;
 }
 export interface ShipOrder {
   orderId: string; number: number | null; version: number; status: "processing" | "completed"; test: boolean;
@@ -39,6 +42,7 @@ export interface ShipOrderRow {
   items: string;
   itemCount: number;
   labelStatus: "bought" | "cancelled" | null;
+  delivery?: Delivery | null;
 }
 export interface ShipSettings { shipFrom: boolean; boxes: Box[]; postageConnected: boolean; testSandbox: boolean }
 export type Prices = Partial<Record<ServiceCode, number | null>>;

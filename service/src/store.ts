@@ -7,6 +7,8 @@ import { authorizeMerchant, buy, downloadPdf, findPurchase, newTransactionId, Pi
 import { practiceLabelPdf } from "./practice-pdf.js";
 import { DEFAULT_FROM, shippedEmail } from "./shipped-email.js";
 import { GRACE_SECONDS, REFRESH_SECONDS } from "./session.js";
+import type { Delivery } from "./delivery.js";
+import { trackingIndex } from "./tracking.js";
 
 /** Commerce reads at most this many labels per call (dinkuskit/commerce src/features/orders/ship.ts). */
 export const LABELS_PER_LIST = 100;
@@ -32,6 +34,8 @@ export interface Label {
   priceCents: number | null;
   /** PB's refund state after a cancel ("INITIATED" or "APPROVED"); null otherwise. */
   refund: string | null;
+  /** Where the carrier says a live label is (ship-tracking-001); null until its first scan, and always for sandbox and practice labels. */
+  delivery: Delivery | null;
 }
 export interface Settings {
   shipFrom: ShipFrom | null; boxes: Box[]; storeName: string | null; replyTo: string | null;
@@ -91,7 +95,7 @@ function formNumber(fields: Fields, key: string, label: string, min: number, max
 }
 
 /** Columns labels gained with Pitney Bowes postage; a store made before then gets them added once. */
-const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT" } as const;
+const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT", delivery_state: "TEXT", delivery_at: "TEXT", delivery_note: "TEXT" } as const;
 
 /** Columns purchases gained when TEST orders got Pitney Bowes sandbox labels. */
 const PURCHASE_COLUMNS = { test: "INTEGER NOT NULL DEFAULT 0" } as const;
@@ -379,14 +383,32 @@ export class StoreShipping extends DurableObject<Env> {
 
   private labelsFor(orderId: string): Label[] {
     return this.sql.exec<Record<string, string | number | null>>(
-      "SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at, price_cents, refund, shipment_id FROM labels WHERE order_id = ? ORDER BY created_at",
+      "SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at, price_cents, refund, shipment_id, delivery_state, delivery_at, delivery_note FROM labels WHERE order_id = ? ORDER BY created_at",
       orderId).toArray().map(row => ({
         labelId: row.label_id as string, orderId: row.order_id as string, version: row.version as number, test: row.test === 1,
         service: row.service as ServiceCode, box: JSON.parse(row.box as string) as Box, weightOz: row.weight_oz as number,
         carrier: row.carrier as string, tracking: row.tracking as string, status: row.status as Label["status"],
         createdBy: row.created_by as string, createdAt: row.created_at as string, cancelledAt: row.cancelled_at as string | null,
         practice: row.test === 1 && row.shipment_id === null, priceCents: row.price_cents as number | null, refund: row.refund as string | null,
+        delivery: row.delivery_state && row.delivery_at ? { state: row.delivery_state as Delivery["state"], at: row.delivery_at as string, note: row.delivery_note as string | null } : null,
       }));
+  }
+
+  /**
+   * The carrier's latest word on a live label, from Pitney Bowes's update or the
+   * daily check. Updates can arrive out of order: a delivered label stays delivered,
+   * and an older scan never replaces a newer one. False for a label this store
+   * does not have, or a sandbox or practice one, which never moves.
+   */
+  async recordDelivery(labelId: string, delivery: Delivery): Promise<boolean> {
+    this.checkIsolation();
+    const row = this.sql.exec<{ delivery_state: string | null; delivery_at: string | null }>(
+      "SELECT delivery_state, delivery_at FROM labels WHERE label_id = ? AND test = 0", labelId).toArray()[0];
+    if (!row) return false;
+    if (row.delivery_state === "delivered" && delivery.state !== "delivered") return true;
+    if (row.delivery_state && row.delivery_at && row.delivery_at > delivery.at) return true;
+    this.sql.exec("UPDATE labels SET delivery_state = ?, delivery_at = ?, delivery_note = ? WHERE label_id = ?", delivery.state, delivery.at, delivery.note, labelId);
+    return true;
   }
 
   /** Orders waiting to ship first, then the most recently changed; at most 200. */
@@ -493,7 +515,7 @@ export class StoreShipping extends DurableObject<Env> {
     const label: Label = {
       labelId: `label_${crypto.randomUUID()}`, orderId: order.orderId, version: order.version, test: true,
       service, box, weightOz, carrier: "USPS", tracking: `TEST${randomDigits(18)}`,
-      status: "bought", createdBy: uid, createdAt: now, cancelledAt: null, practice: true, priceCents: null, refund: null,
+      status: "bought", createdBy: uid, createdAt: now, cancelledAt: null, practice: true, priceCents: null, refund: null, delivery: null,
     };
     const pdf = practiceLabelPdf([
       `ORDER: ${order.number === null ? order.orderId : `#${order.number}`}   SERVICE: ${SERVICES[label.service]}`,
@@ -571,13 +593,15 @@ export class StoreShipping extends DurableObject<Env> {
       labelId: `label_${crypto.randomUUID()}`, orderId: purchase.order_id, version: purchase.version, test: purchase.test === 1,
       service: purchase.service as ServiceCode, box: JSON.parse(purchase.box) as Box, weightOz: purchase.weight_oz, carrier: "USPS",
       tracking: bought.tracking, status: "bought", createdBy: purchase.created_by, createdAt: now, cancelledAt: null,
-      practice: false, priceCents: bought.priceCents, refund: null,
+      practice: false, priceCents: bought.priceCents, refund: null, delivery: null,
     };
     this.sql.exec(`INSERT INTO labels (label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, pdf, status, created_by, created_at, price_cents, shipment_id, pdf_url)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'bought', ?, ?, ?, ?, ?)`,
       label.labelId, label.orderId, label.version, purchase.test, label.service, purchase.box, label.weightOz, label.carrier, label.tracking, pdf,
       label.createdBy, now, label.priceCents, bought.shipmentId, bought.pdfUrl);
     this.queueLabel({ orderId: label.orderId, version: label.version, carrier: label.carrier, tracking: label.tracking });
+    // A live label's number goes in the tracking index, so the carrier's updates find this store (ship-tracking-001).
+    if (!label.test) await trackingIndex(this.env).add({ tracking: label.tracking, site: this.ctx.id.name ?? "", labelId: label.labelId });
     return label;
   }
 
@@ -589,8 +613,8 @@ export class StoreShipping extends DurableObject<Env> {
   async cancelLabel(labelId: string): Promise<Outcome> {
     try {
       await this.admitLabel(labelId);
-      const row = this.sql.exec<{ test: number; shipment_id: string | null }>(
-        "SELECT test, shipment_id FROM labels WHERE label_id = ? AND status = 'bought'", labelId).toArray()[0];
+      const row = this.sql.exec<{ test: number; shipment_id: string | null; tracking: string }>(
+        "SELECT test, shipment_id, tracking FROM labels WHERE label_id = ? AND status = 'bought'", labelId).toArray()[0];
       if (!row) refuse("NOT_FOUND", "No label to cancel.", 404);
       let refund: string | null = null;
       if (row.shipment_id || !row.test) {
@@ -600,6 +624,7 @@ export class StoreShipping extends DurableObject<Env> {
       }
       this.sql.exec("UPDATE labels SET status = 'cancelled', cancelled_at = ?, refund = ? WHERE label_id = ? AND status = 'bought'",
         new Date().toISOString(), refund, labelId);
+      if (!row.test) await trackingIndex(this.env).remove(row.tracking);
       return ok({ labelId, refund });
     } catch (error) {
       return toOutcome(asServiceError(error));

@@ -28,7 +28,12 @@ declare namespace Cloudflare {
     SHIP_EMAIL_FROM?: string;
     /** Cloudflare Email Service binding that sends the shipped email. */
     EMAIL?: SendEmail;
+    /** Secrets: the username and password Pitney Bowes sends with each tracking update (ship-tracking-001). Updates answer 503 until both are set. */
+    PB_TRACKING_USER?: string;
+    PB_TRACKING_PASSWORD?: string;
     SHIP_STORES: DurableObjectNamespace<import("./store").StoreShipping>;
+    /** One index from tracking number to store and label, for Pitney Bowes's updates and the daily check. */
+    SHIP_TRACKING: DurableObjectNamespace<import("./tracking").TrackingIndex>;
   }
 }
 interface Env extends Cloudflare.Env {}

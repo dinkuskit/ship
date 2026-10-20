@@ -3,9 +3,11 @@ import { createAuthenticator, type ShipScope } from "./auth.js";
 import { ServiceError, toOutcome, type Outcome } from "./errors.js";
 import { handlePage, handlePrint } from "./owner.js";
 import { ADMIN_SCOPE, buyAdminLabel, cancelAdminLabel, listAdminOrders, printLink, quoteAdminLabel, showAdminOrder } from "./admin.js";
+import { checkDeliveries, handleTrackingWebhook, PB_TRACKING_PATH } from "./tracking.js";
 import type { StoreShipping } from "./store.js";
 
 export { StoreShipping } from "./store.js";
+export { TrackingIndex } from "./tracking.js";
 
 export const SERVICE_LINE = "DinkusKit Ship service";
 // Commerce's largest possible order (100 lines of long multi-byte names) is about 66 KiB.
@@ -123,6 +125,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
   }
   if (url.pathname.startsWith("/stores/") || url.pathname.startsWith("/auth/")) return handlePage(request, env);
   if (url.pathname.startsWith("/print/")) return handlePrint(request, env);
+  if (url.pathname === PB_TRACKING_PATH) return handleTrackingWebhook(request, env);
   try {
     const matches = ROUTES.map(candidate => ({ candidate, found: candidate.pattern.exec(url.pathname) })).filter(match => match.found);
     if (matches.length === 0) throw new ServiceError(404, "NOT_FOUND", "not found");
@@ -152,4 +155,8 @@ export async function handle(request: Request, env: Env): Promise<Response> {
   }
 }
 
-export default { fetch: handle } satisfies ExportedHandler<Env>;
+export default {
+  fetch: handle,
+  /** The daily tracking check (wrangler.jsonc triggers.crons). */
+  scheduled: (_event, env, ctx) => ctx.waitUntil(checkDeliveries(env)),
+} satisfies ExportedHandler<Env>;

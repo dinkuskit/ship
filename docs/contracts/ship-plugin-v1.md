@@ -63,8 +63,9 @@ It is what the forward below lands on.
 | `GET /print/{token}` (no pass) | The PDF inline (`application/pdf`, `private, no-store`, `referrer-policy: no-referrer`); `410` for an expired, foreign or altered link; `503` while Pitney Bowes's copy cannot be fetched. |
 
 `Row`: `orderId`, `number`, `version`, `status`, `test`, `shipTo`, `addressProblem`,
-`items` (one short line, "2 × Demo Mug, 1 × Hat, +3 more") , `itemCount` and `labelStatus`
-(`bought` for a live label on this version, `cancelled` when the last one was, else null).
+`items` (one short line, "2 × Demo Mug, 1 × Hat, +3 more") , `itemCount`, `labelStatus`
+(`bought` for a live label on this version, `cancelled` when the last one was, else null)
+and `delivery` (the bought label's, below, or null).
 `Order`: `orderId`, `number`, `version`, `status` (`processing` or `completed`),
 `test`, `shipTo { name, lines[], city, region, postalCode }`, `addressProblem`
 (text to show, or null), `lines[] { name, quantity, weightOz }`, `itemsWeightOz`,
@@ -73,7 +74,14 @@ which bumps its version, the bought label it completed with, so Print and Cancel
 stay available; else null) and `labels[]` (every label, oldest first). `Label` is Ship's label record without the PDF: `labelId`,
 `orderId`, `version`, `test`, `service` (`GA`, `PM`, `EM`), `box`, `weightOz`,
 `carrier`, `tracking`, `status` (`bought` or `cancelled`), `createdBy`,
-`createdAt`, `cancelledAt`, `practice`, `priceCents`, `refund`.
+`createdAt`, `cancelledAt`, `practice`, `priceCents`, `refund` and `delivery`
+(ship-tracking-001): `null` until the carrier's first scan, and always for sandbox
+and practice labels, which never move; else `{ state, at, note }` with `state` one of
+`in_transit`, `out_for_delivery`, `delivered`, `problem` (delivery attempted,
+exception, return to sender, ready for pickup, pickup missed, delayed), `at` the
+scan's time as UTC ISO and `note` the carrier's one line on it or null. The plugin
+shows `state` as "In transit", "Out for delivery", "Delivered" or "Problem", with the
+note on the order's page.
 `Settings`: `shipFrom` (boolean), `boxes[]`, `postageConnected`, `testSandbox`.
 Nothing about the owner's Pitney Bowes account crosses to the plugin.
 
@@ -100,6 +108,20 @@ for an order Ship has). Stores without the plugin keep landing on Ship's own pag
 The plugin's "Open in Ship" links add `?view=full`, which always shows Ship's own
 page, so the two never bounce. The list and settings pages are never forwarded
 (ship-registry-plugin-001, question 4).
+
+## Tracking updates (no pass)
+
+`POST /v1/tracking/pitney` is where Pitney Bowes sends its tracking updates for
+every label bought under DinkusKit's developer account (one address per account),
+signed in with Basic username and password (Worker secrets `PB_TRACKING_USER` and
+`PB_TRACKING_PASSWORD`; 503 until both are set, 401 otherwise). The body is PB's
+`{ trackingEvents: [...] }`; Ship answers `200 { responses: [{ statusCode, errors }] }`
+per event, echoing `X-PB-ReferenceId`, so PB resends nothing (it retries other
+statuses for 16 hours). Each event's tracking number is looked up in Ship's one
+index from tracking number to store and label, written when a live label is bought
+and dropped when it is cancelled; unknown numbers answer 404 in their row. A daily
+cron (14:00 UTC) asks PB's Track a Parcel about every live label not yet delivered,
+for 60 days, to catch a missed update. Neither the plugin nor Commerce calls this.
 
 ## What stays on ship.dinkuskit.com
 

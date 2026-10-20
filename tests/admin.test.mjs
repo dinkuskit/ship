@@ -324,3 +324,22 @@ test("without a usable request URL no page is sent, and a list without an open o
     assert.ok(h.calls.every(call => call.adminPage === undefined), requestUrl);
   }
 });
+
+test("a live label's delivery shows in the list and on the order, and a label without one reads Label bought", async () => {
+  const delivered = { state: "delivered", at: "2026-10-22T18:02:00.000Z", note: "Delivered, In/At Mailbox" };
+  const problem = { state: "problem", at: "2026-10-23T12:00:00.000Z", note: "Delivery attempted" };
+  const live = label({ test: false, tracking: "9400100000000000000001", delivery: delivered });
+  const h = host({ ship: {
+    "GET /v1/admin/orders": { orders: [row({ labelStatus: "bought", delivery: delivered }), row({ orderId: "order:def", number: 1002, labelStatus: "bought", delivery: problem }), row({ orderId: "order:ghi", number: 1003, labelStatus: "bought", delivery: null })], settings },
+    "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false, label: live, labels: [live] }), settings },
+    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/t", expiresAt: "2026-10-19T22:05:00.000Z" },
+  } });
+  const list = text(await h.page(load));
+  assert.match(list, /"Delivered"/);
+  assert.match(list, /"Problem"/);
+  assert.doesNotMatch(list, /Delivery attempted/, "the list keeps the one word; the order page has the reason");
+  assert.match(list, /"Label bought"/);
+  const page = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc", page: "/shipping" }));
+  assert.match(page, /"label":"Delivery","value":"Delivered, 2026-10-22 18:02 UTC"/);
+  assert.match(page, /"label":"Status","value":"Delivered"/);
+});
