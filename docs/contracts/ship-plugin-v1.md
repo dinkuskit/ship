@@ -101,13 +101,17 @@ again, which mints a fresh one.
 ## The forward from Commerce's "Create shipping label"
 
 Commerce's button opens `https://ship.dinkuskit.com/stores/{site}/orders/{orderId}`.
-Once the store's Ship plugin has called with `x-ship-admin-page`, that page answers
-`303` to the store admin's Shipping page, before Ship's own sign-in, and queues the
-order for the next `GET /v1/admin/orders` (`open`, kept for two minutes and only
-for an order Ship has). Stores without the plugin keep landing on Ship's own page.
-The plugin's "Open in Ship" links add `?view=full`, which always shows Ship's own
-page, so the two never bounce. The list and settings pages are never forwarded
-(ship-registry-plugin-001, question 4).
+Once the store's Ship plugin has called with `x-ship-admin-page` in the last 7 days,
+that page answers `303` to the store admin's Shipping page for a signed-in Ship
+owner arriving from outside Ship (`Sec-Fetch-Site` cross-site, same-site or none:
+Commerce's button, or the way back from sign-in), and queues the order for the
+next `GET /v1/admin/orders` (`open`, kept for one minute and only for an order Ship
+has). Anyone not signed in to Ship signs in first, as for any of Ship's pages, and
+queues nothing. Ship's own links and redirects (same-origin), browsers that do not
+say where they came from, `?view=full` (the plugin's "Open in Ship" links) and
+stores whose plugin has not called in a week all get Ship's own page, so the two
+never bounce and a removed plugin falls back within a week. The list and settings
+pages are never forwarded (ship-registry-plugin-001, question 4).
 
 ## Tracking updates (no pass)
 

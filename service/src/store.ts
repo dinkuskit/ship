@@ -63,7 +63,12 @@ const NOT_CONNECTED = "Pitney Bowes is not connected to Ship yet, so only TEST o
 /** How long a purchase counts as still in flight before another page may check on it. */
 const IN_FLIGHT_MS = 60_000;
 /** How long a forwarded "Create shipping label" waits for the store admin's Shipping page to open it. */
-const ADMIN_OPEN_MS = 2 * 60_000;
+/** How long a forwarded order waits for the Shipping page to open it. */
+const ADMIN_OPEN_MS = 60_000;
+/** A Shipping page the plugin has not called from in this long is forgotten: Commerce's button goes back to Ship's own page. */
+const ADMIN_PAGE_FRESH_MS = 7 * 86_400_000;
+/** Refresh the page's last-seen time at most this often, so the plugin's every call does not write. */
+const ADMIN_PAGE_TOUCH_MS = 60 * 60_000;
 
 /** Orders completed this long before the store first sent Ship anything get no email (clock differences aside). */
 const BEFORE_CONNECT_MS = 15 * 60_000;
@@ -758,9 +763,11 @@ export class StoreShipping extends DurableObject<Env> {
    */
   async rememberAdminPage(url: string): Promise<void> {
     this.checkIsolation();
-    if (this.meta("admin_page") === url) return;
+    const now = Date.now();
+    const seen = Date.parse(this.meta("admin_page_at") ?? "");
+    if (this.meta("admin_page") === url && Number.isFinite(seen) && now - seen < ADMIN_PAGE_TOUCH_MS) return;
     this.setMeta("admin_page", url);
-    this.setMeta("admin_page_at", new Date().toISOString());
+    this.setMeta("admin_page_at", new Date(now).toISOString());
   }
 
   /**
@@ -788,10 +795,11 @@ export class StoreShipping extends DurableObject<Env> {
     }
   }
 
-  /** The store admin's Shipping page, or null while no Ship plugin has called for this store. */
+  /** The store admin's Shipping page, or null while no Ship plugin has called for this store in the last week. */
   async adminPage(): Promise<string | null> {
     this.checkIsolation();
-    return this.meta("admin_page");
+    const seen = Date.parse(this.meta("admin_page_at") ?? "");
+    return Number.isFinite(seen) && Date.now() - seen < ADMIN_PAGE_FRESH_MS ? this.meta("admin_page") : null;
   }
 
   /** Where each completion's shipped email stands, for the owner's order page. */

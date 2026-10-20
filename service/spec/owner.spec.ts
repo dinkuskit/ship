@@ -103,9 +103,10 @@ function cookies(response: Response): string {
   return response.headers.getSetCookie().map(value => value.split(";")[0]).filter(value => !value.endsWith("=")).join("; ");
 }
 
-async function request(method: string, path: string, options: { cookie?: string; form?: Record<string, string>; origin?: string | null } = {}) {
+async function request(method: string, path: string, options: { cookie?: string; form?: Record<string, string>; origin?: string | null; from?: string } = {}) {
   const headers: Record<string, string> = {};
   if (options.cookie) headers.cookie = options.cookie;
+  if (options.from) headers["sec-fetch-site"] = options.from;
   if (options.form) headers["content-type"] = "application/x-www-form-urlencoded";
   if (method === "POST" && options.origin !== null) headers.origin = options.origin ?? ORIGIN;
   return worker.fetch(new Request(`${ORIGIN}${path}`, {
@@ -731,29 +732,43 @@ test("a token endpoint redirect is refused without forwarding the sign-in code",
   expect(vi.mocked(globalThis.fetch).mock.calls.some(([input]) => String(input).startsWith("https://redirect-target.example.invalid/"))).toBe(false);
 });
 
-test("once the store's Ship plugin has called, Commerce's label button lands on the store admin's Shipping page", async () => {
+test("once the store's Ship plugin has called, Commerce's label button lands a signed-in owner on the store admin's Shipping page", async () => {
   await sendOrder();
   const adminPage = "https://shop.example.invalid/_emdash/admin/plugins/dinkus-ship-1/shipping";
+  const orderPath = `/stores/${site}/orders/order%3Aabc`;
+  const store = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site));
   // Before the plugin has called, Ship's own order page is the only page: sign-in first.
-  const before = await request("GET", `/stores/${site}/orders/order%3Aabc`);
+  const before = await request("GET", orderPath, { from: "cross-site" });
   expect(before.status).toBe(303);
   expect(before.headers.get("location")).toContain("/ship-sign-in");
-  await env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site)).rememberAdminPage(adminPage);
-  // Now the forward comes before sign-in, so the owner never sees Ship's sign-in on the way to the store admin.
-  const forwarded = await request("GET", `/stores/${site}/orders/order%3Aabc`);
+  await store.rememberAdminPage(adminPage);
+  // Anyone not signed in to Ship still signs in first, and queues nothing.
+  const anonymous = await request("GET", orderPath, { from: "cross-site" });
+  expect(anonymous.headers.get("location")).toContain("/ship-sign-in");
+  expect(await store.takeAdminOpen()).toBeNull();
+  // The signed-in owner arriving from Commerce (another site) is forwarded, and the order waits for the Shipping page.
+  const cookie = await signedIn();
+  const forwarded = await request("GET", orderPath, { cookie, from: "cross-site" });
   expect(forwarded.status).toBe(303);
   expect(forwarded.headers.get("location")).toBe(adminPage);
   expect(forwarded.headers.get("cache-control")).toBe("no-store");
-  expect(await env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site)).takeAdminOpen()).toBe("order:abc");
+  expect(await store.takeAdminOpen()).toBe("order:abc");
+  // The way back from DinkusKit.com's sign-in counts as from outside Ship too.
+  expect((await request("GET", orderPath, { cookie, from: "same-site" })).headers.get("location")).toBe(adminPage);
+  // Ship's own links and redirects, and a browser that does not say where it came from, keep Ship's page.
+  for (const from of ["same-origin", undefined]) expect((await request("GET", orderPath, { cookie, from })).status).toBe(200);
   // The plugin's own "Open in Ship" link asks for the full version and gets Ship's page, so the two never bounce.
-  const full = await request("GET", `/stores/${site}/orders/order%3Aabc?view=full`);
-  expect(full.status).toBe(303);
-  expect(full.headers.get("location")).toContain("/ship-sign-in");
-  const cookie = await signedIn();
-  expect((await request("GET", `/stores/${site}/orders/order%3Aabc?view=full`, { cookie })).status).toBe(200);
-  // The list and settings pages stay Ship's own.
-  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
-  expect((await request("GET", `/stores/${site}/settings`, { cookie })).status).toBe(200);
+  expect((await request("GET", `${orderPath}?view=full`, { cookie, from: "cross-site" })).status).toBe(200);
+  // The list and settings pages are never forwarded.
+  expect((await request("GET", `/stores/${site}/orders`, { cookie, from: "cross-site" })).status).toBe(200);
+  expect((await request("GET", `/stores/${site}/settings`, { cookie, from: "cross-site" })).status).toBe(200);
+  // A plugin that has not called in a week is forgotten: Commerce's button is back on Ship's own page.
+  await runInDurableObject(store, async (_, state) => state.storage.sql.exec("UPDATE store_meta SET value = ? WHERE key = 'admin_page_at'", new Date(Date.now() - 8 * 86_400_000).toISOString()));
+  expect(await store.adminPage()).toBeNull();
+  expect((await request("GET", orderPath, { cookie, from: "cross-site" })).status).toBe(200);
+  // The plugin's next call brings it back.
+  await store.rememberAdminPage(adminPage);
+  expect((await request("GET", orderPath, { cookie, from: "cross-site" })).headers.get("location")).toBe(adminPage);
 });
 
 test("an answer Ship cannot read as a label says which part was missing, in plain words and never a link", async () => {

@@ -157,16 +157,23 @@ function decode(segment: string): string | null {
 
 const ORDER_PAGE = new RegExp(`^/stores/${SEGMENT}/orders/${SEGMENT}$`);
 
+/** Where a navigation came from: Commerce's button is another site, and so is the way back from DinkusKit.com's sign-in. */
+const FROM_ELSEWHERE = new Set(["cross-site", "same-site", "none"]);
+
 /**
  * Commerce's "Create shipping label" opens Ship's order page. Once the store's
- * Ship plugin has called Ship (ship-registry-plugin-001, question 4), that
- * address goes on to the store admin's Shipping page, which opens the order;
- * `?view=full` (the plugin's own "Open in Ship" links) still shows Ship's page,
- * and a store without the plugin never leaves it.
+ * Ship plugin has called Ship lately (ship-registry-plugin-001, question 4), that
+ * address goes on to the store admin's Shipping page, which opens the order.
+ * Only a signed-in owner arriving from outside Ship is forwarded: Ship's own
+ * links and redirects (same-origin), a browser that does not say where it came
+ * from, `?view=full` (the plugin's "Open in Ship" links) and a store without a
+ * plugin that called in the last week all get Ship's own page, and an anonymous
+ * visitor signs in first, as for any of Ship's pages.
  */
 async function forwardToAdmin(request: Request, env: Env): Promise<Response | null> {
   const url = new URL(request.url);
   if (request.method !== "GET" || url.searchParams.get("view") === "full") return null;
+  if (!FROM_ELSEWHERE.has(request.headers.get("sec-fetch-site") ?? "")) return null;
   const found = ORDER_PAGE.exec(url.pathname);
   if (!found) return null;
   const site = decode(found[1]!), orderId = decode(found[2]!);
@@ -174,8 +181,12 @@ async function forwardToAdmin(request: Request, env: Env): Promise<Response | nu
   const store = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site));
   const adminPage = await store.adminPage();
   if (!adminPage) return null;
+  const signedIn = await readSession(request, env, site);
+  if (!signedIn) return null;
   await store.queueAdminOpen(orderId);
-  return new Response(null, { status: 303, headers: { location: adminPage, "cache-control": "no-store" } });
+  const response = new Response(null, { status: 303, headers: { location: adminPage, "cache-control": "no-store" } });
+  if (signedIn.setCookie) response.headers.append("set-cookie", signedIn.setCookie);
+  return response;
 }
 
 /** The owner's pages: sign-in with DinkusKit.com, orders, labels and settings for one store at a time. */
