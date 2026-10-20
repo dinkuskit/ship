@@ -101,7 +101,7 @@ function labelFields(label: Label): Block {
   return fields(["Service", SERVICES[label.service] ?? label.service], ["Tracking number", tracking(label)],
     ["Box", `${label.box.name}: ${label.box.lengthIn} × ${label.box.widthIn} × ${label.box.heightIn} in`], ["Weight", `${label.weightOz} oz`],
     ["Postage", price(label)], ["Bought", label.createdAt.replace("T", " ").slice(0, 16)],
-    ...(label.status === "cancelled" ? [["Cancelled", `${(label.cancelledAt ?? "").replace("T", " ").slice(0, 16)}${label.refund ? `, refund ${label.refund.toLowerCase()}` : ""}`] as [string, string]] : []));
+    ...(label.status === "cancelled" ? [["Cancelled", `${(label.cancelledAt ?? "").replace("T", " ").slice(0, 16)}${label.refund && !label.test ? `, refund ${label.refund.toLowerCase()}` : ""}`] as [string, string]] : []));
 }
 
 /**
@@ -122,7 +122,8 @@ function labelForm(view: OrderView): Block[] {
   const quoted = prices !== undefined || practice || buyAgain;
   const form: FormField[] = [
     { type: "select", action_id: "boxId", label: "Box", options: settings.boxes.map(boxOption), initial_value: box.boxId },
-    { type: "number_input", action_id: "weightOz", label: "Package weight (oz), items plus box", initial_value: Math.max(0.1, Math.min(MAX_WEIGHT_OZ, weight)), min: 0.1, max: MAX_WEIGHT_OZ },
+    // A text field: the browser's number field rejects most tenths of an ounce as "not a valid value".
+    { type: "text_input", action_id: "weightOz", label: `Package weight in ounces, items plus box (0.1 to ${MAX_WEIGHT_OZ})`, initial_value: String(Math.max(0.1, Math.min(MAX_WEIGHT_OZ, weight))), placeholder: "28.5" },
   ];
   if (quoted) {
     form.push({ type: "select", action_id: "service", label: "Service", initial_value: typed.service && typed.service in SERVICES ? typed.service : "GA",

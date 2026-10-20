@@ -116,14 +116,16 @@ test("opening an order shows the form with the items plus box weight, then price
   const form = opened.blocks.find(block => block.type === "form");
   assert.equal(form.submit.action_id, "prices:1:order%3Aabc");
   assert.deepEqual(form.fields.map(field => field.action_id), ["boxId", "weightOz", "kind"]);
-  assert.equal(form.fields[1].initial_value, 28);
+  // Weight is typed as text: a number field would refuse most tenths of an ounce.
+  assert.equal(form.fields[1].type, "text_input");
+  assert.equal(form.fields[1].initial_value, "28");
   assert.match(text(opened), /TEST order/);
 
-  const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, kind: "sandbox" } });
+  const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: " 30.0 oz", kind: "sandbox" } });
   assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, by: "staff@example.test" });
   const buy = priced.blocks.find(block => block.type === "form");
   assert.equal(buy.submit.action_id, "buy:1:order%3Aabc");
-  assert.equal(buy.fields[1].initial_value, 30);
+  assert.equal(buy.fields[1].initial_value, "30");
   const service = buy.fields.find(field => field.action_id === "service");
   assert.deepEqual(service.options.map(option => option.label), ["USPS Ground Advantage: $5.10", "USPS Priority Mail: $9.35", "USPS Priority Mail Express: not available for this package"]);
 
@@ -153,9 +155,31 @@ test("a labelled order shows the label with a five-minute print link and a guard
   assert.ok(!actions.some(element => element.label === "Track on USPS"));
   assert.ok(!page.blocks.some(block => block.type === "form"));
 
+  // Ship records a refund for the sandbox label too, but no postage comes back, so the page never promises one.
   const cancelled = await h.page({ type: "block_action", action_id: "cancel:order%3Aabc", value: "label_1" });
   assert.equal(h.calls.filter(call => call.url.endsWith("/cancel")).length, 1);
-  assert.match(cancelled.toast.message, /Label cancelled/);
+  assert.equal(cancelled.toast.message, "Label cancelled.");
+});
+
+test("cancelling a live label promises the USPS refund; a cancelled sandbox label never mentions one", async () => {
+  const live = label({ labelId: "label_2", test: false, tracking: "9400100000000000000002" });
+  const sandboxCancelled = label({ status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z", refund: "INITIATED" });
+  const liveCancelled = { ...live, status: "cancelled", cancelledAt: "2026-10-19T22:40:00.000Z", refund: "INITIATED" };
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false, label: live, labels: [sandboxCancelled, live] }), settings },
+    "POST /v1/admin/labels/label_2/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
+    "POST /v1/admin/labels/label_2/cancel": { labelId: "label_2", refund: "INITIATED" },
+  } });
+  const cancelled = await h.page({ type: "block_action", action_id: "cancel:order%3Aabc", value: "label_2" });
+  assert.equal(cancelled.toast.message, "Label cancelled. USPS refunds the postage account within about 14 days.");
+  const sandboxRow = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc" }));
+  assert.match(sandboxRow, /"label":"Cancelled","value":"2026-10-19 22:30"/);
+  assert.doesNotMatch(sandboxRow, /2026-10-19 22:30, refund/);
+
+  const after = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false, label: null, labels: [sandboxCancelled, liveCancelled] }), settings } } });
+  const page = text(await after.page({ type: "block_action", action_id: "open", value: "order:abc" }));
+  assert.match(page, /"label":"Cancelled","value":"2026-10-19 22:40, refund initiated"/);
+  assert.doesNotMatch(page, /22:30, refund/);
 });
 
 test("a live label's tracking number links to USPS, for the live label and the earlier ones", async () => {
@@ -237,13 +261,15 @@ test("Ship's refusals keep the order page, with the reason and what was typed", 
   assert.match(text(refused), /Pitney Bowes did not answer the last time/);
   const form = refused.blocks.find(block => block.type === "form");
   assert.ok(form.fields.some(field => field.action_id === "buyAgain"));
-  assert.equal(form.fields[1].initial_value, 31);
+  assert.equal(form.fields[1].initial_value, "31");
   const changed = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31 } });
   assert.match(text(changed), /order changed in Commerce/);
   // Impossible input never reaches Ship.
   const before = h.calls.length;
-  const heavy = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: 5000 } });
-  assert.match(text(heavy), /0.1 to 1120/);
+  for (const weightOz of [5000, "", "two pounds", "0"]) {
+    const heavy = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz } });
+    assert.match(text(heavy), /0.1 to 1120/);
+  }
   assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 1);
   assert.ok(h.calls.length > before); // the page itself was re-read
 });
