@@ -214,6 +214,19 @@ test("a practice label skips the prices step, since Pitney Bowes is not asked", 
   assert.equal(made.toast.message, "Practice label made.");
 });
 
+test("a Completed order keeps its label's Print and Cancel, and gets no form", async () => {
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order({ version: 2, status: "completed", label: label(), labels: [label()] }), settings },
+    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
+  } });
+  const page = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  const actions = page.blocks.filter(block => block.type === "actions").flatMap(block => block.elements);
+  assert.ok(actions.some(element => element.label === "Print label"));
+  assert.ok(actions.some(element => element.label === "Cancel label"));
+  assert.ok(!page.blocks.some(block => block.type === "form"));
+  assert.doesNotMatch(text(page), /Ship makes no label for it/);
+});
+
 test("Ship's refusals keep the order page, with the reason and what was typed", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },

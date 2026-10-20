@@ -26,7 +26,12 @@ export interface AdminOrder {
   lines: { name: string; quantity: number; weightOz: number | null }[];
   /** The items' shipping weight; the plugin adds the chosen box's empty weight. */
   itemsWeightOz: number;
-  /** The live label for the current order version, or null. */
+  /**
+   * The order's label: the bought label for the current order version, or, once
+   * Commerce has completed the order (which bumps its version), the bought label it
+   * completed with, so Print label and Cancel label stay on the Shipping page as on
+   * Ship's own page. Null when there is none.
+   */
   label: Label | null;
   /** Every label this order ever had, oldest first. */
   labels: Label[];
@@ -52,6 +57,13 @@ export interface AdminSettings { shipFrom: boolean; boxes: Box[]; postageConnect
 
 const outcomeOf = (pending: Promise<unknown>) => pending as Promise<Outcome>;
 
+function orderLabel(order: OrderSummary["order"], labels: Label[]): Label | null {
+  const bought = labels.filter(label => label.status === "bought");
+  const current = bought.find(label => label.version === order.version);
+  if (current || order.status !== "completed") return current ?? null;
+  return bought.find(label => label.tracking === order.completed?.tracking) ?? bought.at(-1) ?? null;
+}
+
 function adminOrder(summary: OrderSummary): AdminOrder {
   const { order, labels, address } = summary;
   const to = order.shipTo;
@@ -61,7 +73,7 @@ function adminOrder(summary: OrderSummary): AdminOrder {
     addressProblem: address.ok ? null : address.problem,
     lines: order.lines.map(line => ({ name: line.name, quantity: line.quantity, weightOz: line.weightOz ?? null })),
     itemsWeightOz: order.lines.reduce((total, line) => total + (line.weightOz ?? 0) * line.quantity, 0),
-    label: labels.find(label => label.status === "bought" && label.version === order.version) ?? null,
+    label: orderLabel(order, labels),
     labels,
   };
 }

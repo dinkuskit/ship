@@ -62,8 +62,9 @@ give; the plugin shows `message` as it is.
 `Order`: `orderId`, `number`, `version`, `status` (`processing` or `completed`),
 `test`, `shipTo { name, lines[], city, region, postalCode }`, `addressProblem`
 (text to show, or null), `lines[] { name, quantity, weightOz }`, `itemsWeightOz`,
-`label` (the live label for this version, or null) and `labels[]` (every label,
-oldest first). `Label` is Ship's label record without the PDF: `labelId`,
+`label` (the bought label for this version; once Commerce has completed the order,
+which bumps its version, the bought label it completed with, so Print and Cancel
+stay available; else null) and `labels[]` (every label, oldest first). `Label` is Ship's label record without the PDF: `labelId`,
 `orderId`, `version`, `test`, `service` (`GA`, `PM`, `EM`), `box`, `weightOz`,
 `carrier`, `tracking`, `status` (`bought` or `cancelled`), `createdBy`,
 `createdAt`, `cancelledAt`, `practice`, `priceCents`, `refund`.
