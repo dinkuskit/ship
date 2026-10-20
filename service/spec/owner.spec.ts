@@ -571,7 +571,10 @@ test("when Pitney Bowes has no record of a lost purchase, the owner decides whet
     if (call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments") return new Response("gateway timeout", { status: 504 });
     return sandbox(call);
   };
-  expect((await buy()).status).toBe(502);
+  const lost = await buy();
+  expect(lost.status).toBe(502);
+  // The page says what came back, so a failed journey names it without anyone reading PB's answer.
+  expect(await lost.text()).toContain("Pitney Bowes did not confirm the label (it answered 504), so Ship does not know yet");
   pbAnswer = sandbox;
   const ask = await buy();
   expect(ask.status).toBe(409);
@@ -751,4 +754,23 @@ test("once the store's Ship plugin has called, Commerce's label button lands on 
   // The list and settings pages stay Ship's own.
   expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
   expect((await request("GET", `/stores/${site}/settings`, { cookie })).status).toBe(200);
+});
+
+test("an answer Ship cannot read as a label says which part was missing, in plain words and never a link", async () => {
+  const { buy } = await liveOrder();
+  const answers: [Record<string, unknown>, string][] = [
+    [{ ...pbLabel("PM"), documents: [{ ...(pbLabel("PM").documents as Record<string, unknown>[])[0], contents: "https://labels-cls.gcs.pitneybowes.com/usps/x/label.pdf?token=secret" }] }, "(its label link was on another host, labels-cls.gcs.pitneybowes.com)"],
+    [{ ...pbLabel("PM"), documents: [] }, "(it gave no label document)"],
+    [{ ...pbLabel("PM"), parcelTrackingNumber: "" }, "(it gave no tracking number)"],
+    [{ ...pbLabel("PM"), rates: [{ carrier: "USPS", serviceId: "PM", totalCarrierCharge: 0 }] }, "(it gave no price)"],
+    [{ ...pbLabel("PM"), shipmentId: undefined }, "(it gave no shipment id)"],
+  ];
+  for (const [answer, expected] of answers) {
+    pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? Response.json(answer) : sandbox(call);
+    const page = await buy({ buyAgain: "yes" });
+    expect(page.status).toBe(502);
+    const text = await page.text();
+    expect(text).toContain(expected);
+    expect(text).not.toContain("token=secret");
+  }
 });

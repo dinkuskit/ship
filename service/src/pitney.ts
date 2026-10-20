@@ -47,7 +47,8 @@ export interface SignupPrefill {
  * - `unknown`: a purchase was sent and PB gave no usable answer, so a label may exist.
  */
 export class PitneyError extends Error {
-  constructor(readonly kind: "refused" | "not_started" | "unknown", message: string) {
+  /** For an "unknown" purchase, plain words on why PB's answer was not a label, for the owner's page. */
+  constructor(readonly kind: "refused" | "not_started" | "unknown", message: string, readonly detail: string | null = null) {
     super(message);
     this.name = "PitneyError";
   }
@@ -166,6 +167,30 @@ export function isLabelUrl(value: unknown): value is string {
   }
 }
 
+/**
+ * Why PB's shipment answer is not a label, in plain words the owner's page can show
+ * and a journey can name: the status, or the first field Ship could not read. A
+ * hostname at most, never a link, a token or PB's text.
+ */
+export function whyNotLabel(status: number, body: unknown): string {
+  if (status < 200 || status >= 300) return `it answered ${status}`;
+  const value = body as Record<string, unknown> | undefined;
+  if (!value || typeof value !== "object") return "its answer was not JSON";
+  const documents = Array.isArray(value.documents) ? value.documents as Record<string, unknown>[] : [];
+  const pdfs = documents.filter(item => typeof item === "object" && item !== null && item.contentType === "URL" && item.fileFormat === "PDF");
+  if (pdfs.length === 0) return documents.length ? "it gave no PDF label link" : "it gave no label document";
+  if (!pdfs.some(item => isLabelUrl(item.contents))) {
+    const host = pdfs.map(item => { try { return new URL(String(item.contents)).hostname; } catch { return ""; } }).find(Boolean);
+    return host ? `its label link was on another host, ${host.replace(/[^A-Za-z0-9.-]/g, "").slice(0, 80)}` : "its label link was not a web address";
+  }
+  if (typeof value.shipmentId !== "string" || !value.shipmentId || value.shipmentId.length > 100) return "it gave no shipment id";
+  const tracking = value.parcelTrackingNumber;
+  if (typeof tracking !== "string" || !tracking || tracking.length > 64 || NOT_ONE_LINE.test(tracking)) return "it gave no tracking number";
+  const rate = Array.isArray(value.rates) ? (value.rates as Record<string, unknown>[])[0] : undefined;
+  if (cents(rate?.totalCarrierCharge) === null) return "it gave no price";
+  return "its answer could not be read";
+}
+
 /** A bought label from PB's answer, or null when the answer is not one. */
 function readLabel(body: unknown): PbLabel | null {
   const value = body as Record<string, unknown> | undefined;
@@ -226,7 +251,7 @@ export async function buy(config: PbConfig, shipment: PbShipment, transactionId:
   try {
     response = await call(config, "POST", "/v1/shipments?includeDeliveryCommitment=false", { body, transactionId });
   } catch {
-    throw new PitneyError("unknown", "Pitney Bowes did not answer.");
+    throw new PitneyError("unknown", "Pitney Bowes did not answer.", "no answer came back");
   }
   const answer = await readJson(response);
   // A 4xx is PB refusing the request; a 5xx or a garbled answer may still have bought a label.
@@ -234,7 +259,11 @@ export async function buy(config: PbConfig, shipment: PbShipment, transactionId:
     throw new PitneyError("refused", refusalText(answer));
   }
   const label = response.ok ? readLabel(answer) : null;
-  if (!label) throw new PitneyError("unknown", "Pitney Bowes did not confirm the label.");
+  if (!label) {
+    const detail = whyNotLabel(response.status, answer);
+    console.error("ship pitney shipments unconfirmed", JSON.stringify({ status: response.status, detail }));
+    throw new PitneyError("unknown", "Pitney Bowes did not confirm the label.", detail);
+  }
   return label;
 }
 

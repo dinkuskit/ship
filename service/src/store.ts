@@ -568,7 +568,7 @@ export class StoreShipping extends DurableObject<Env> {
     } catch (error) {
       if (error instanceof PitneyError && error.kind === "unknown") {
         this.sql.exec("UPDATE purchases SET state = 'unknown' WHERE transaction_id = ?", purchase.transaction_id);
-        refuse("PITNEY_BOWES_NO_ANSWER", "Pitney Bowes did not confirm the label, so Ship does not know yet whether it was bought. Press Buy label again: Ship checks with Pitney Bowes first and does not buy a second label without asking.", 502);
+        refuse("PITNEY_BOWES_NO_ANSWER", `Pitney Bowes did not confirm the label${error.detail ? ` (${error.detail})` : ""}, so Ship does not know yet whether it was bought. Press Buy label again: Ship checks with Pitney Bowes first and does not buy a second label without asking.`, 502);
       }
       this.sql.exec("DELETE FROM purchases WHERE transaction_id = ?", purchase.transaction_id);
       throw error;
