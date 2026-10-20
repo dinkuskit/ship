@@ -7,9 +7,9 @@ import { fileURLToPath } from "node:url";
 const MAX_PLUGIN_BYTES = 131_072;
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const STABLE_SLUG = "dinkus-ship";
-const STABLE_NAME = "DinkusKit Ship";
+const STABLE_NAME = "Ship";
 const BETA_SLUG = "dinkus-ship-beta";
-const BETA_NAME = "DinkusKit Ship (Beta)";
+const BETA_NAME = "Ship Beta";
 
 function parseArgs(argv) {
   const options = {
