@@ -113,8 +113,10 @@ plugin has sent in `x-ship-admin-user` in the last 7 days, and queues the order 
 that person: the next `GET /v1/admin/orders` naming the same email gets it as
 `open` (kept for one minute and only for an order Ship has); a call naming anyone
 else, or nobody, gets `null` and leaves it waiting. Each admin has their own
-waiting order, so two people forwarding at once never erase each other's; the
-same person forwarding twice within the minute gets the later one. Anyone not signed in to Ship
+waiting order, so two people forwarding at once never erase each other's; a
+second order for the same person while one still waits is not forwarded (Ship's
+own page shows it), so neither is lost. Signing in on the way to a `?view=full`
+page comes back to it in full. Anyone not signed in to Ship
 signs in first, as for any of Ship's pages, and queues nothing. An owner the
 plugin has not named (a different email on DinkusKit.com than in EmDash, or
 someone who has not opened the Shipping page in a week) gets Ship's own order

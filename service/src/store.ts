@@ -872,16 +872,20 @@ export class StoreShipping extends DurableObject<Env> {
    * for whom: set when Ship forwards Commerce's "Create shipping label" there,
    * read once by that person's next list call, and forgotten after a minute.
    * Each admin has their own waiting order, so two people forwarding at once
-   * never erase each other's; a second forward by the same person within the
-   * minute replaces their first, as the newer button press.
+   * never erase each other's. False, and nothing queued, when a different order
+   * of this admin's is still waiting: a second button press before the first
+   * page opened stays on Ship's own page rather than making either order vanish.
    */
-  async queueAdminOpen(orderId: string, email: string): Promise<void> {
+  async queueAdminOpen(orderId: string, email: string): Promise<boolean> {
     this.checkIsolation();
     const now = Date.now();
     const waiting = this.adminOpens(now);
+    const mine = waiting[adminEmail(email)];
+    if (mine && mine.orderId !== orderId) return false;
     waiting[adminEmail(email)] = { orderId, at: now };
     const kept = Object.entries(waiting).sort(([, a], [, b]) => b.at - a.at).slice(0, ADMIN_OPEN_MAX);
     this.setMeta("admin_open", JSON.stringify(Object.fromEntries(kept)));
+    return true;
   }
 
   /** The orders waiting to be opened, email to order, without the stale ones. */

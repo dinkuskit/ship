@@ -291,14 +291,15 @@ test("the order Ship forwarded the owner from opens once in the store admin, for
   expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", null)).json.open).toBeNull();
   expect((await callFrom(ADMIN_PAGE)).json.open).toBe("order:abc");
   expect((await callFrom(ADMIN_PAGE)).json.open).toBeNull();
-  // Two admins forwarding at once each keep their own order; the same person forwarding twice gets the newer one.
+  // Two admins forwarding at once each keep their own order; a second order for the same person while one waits is refused, not swapped in.
   await sendOrder({ orderId: "order:def", number: 1002 });
-  await shipStore().queueAdminOpen("order:abc", "owner@example.test");
-  await shipStore().queueAdminOpen("order:def", "other@example.test");
-  await shipStore().queueAdminOpen("order:def", "third@example.test");
-  await shipStore().queueAdminOpen("order:abc", "third@example.test");
+  expect(await shipStore().queueAdminOpen("order:abc", "owner@example.test")).toBe(true);
+  expect(await shipStore().queueAdminOpen("order:def", "other@example.test")).toBe(true);
+  expect(await shipStore().queueAdminOpen("order:def", "third@example.test")).toBe(true);
+  expect(await shipStore().queueAdminOpen("order:abc", "third@example.test")).toBe(false);
+  expect(await shipStore().queueAdminOpen("order:def", "third@example.test")).toBe(true);
   expect((await callFrom(ADMIN_PAGE)).json.open).toBe("order:abc");
-  expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", "third@example.test")).json.open).toBe("order:abc");
+  expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", "third@example.test")).json.open).toBe("order:def");
   expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", "Other@example.test")).json.open).toBe("order:def");
   expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", "other@example.test")).json.open).toBeNull();
   // An order Ship never saw, or a stale forward, opens nothing.

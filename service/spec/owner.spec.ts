@@ -801,9 +801,18 @@ test("once the store's Ship plugin has called, Commerce's label button lands a s
   expect(forwarded.status).toBe(303);
   expect(forwarded.headers.get("location")).toBe(adminPage);
   expect(forwarded.headers.get("cache-control")).toBe("no-store");
+  // A second button press by the same owner before the first page opened keeps Ship's own page for it; the first still waits.
+  await sendOrder({ orderId: "order:def", number: 1002 });
+  const otherPath = `/stores/${site}/orders/order%3Adef`;
+  expect((await request("GET", otherPath, { cookie, from: "cross-site" })).status).toBe(200);
   expect(await store.takeAdminOpen("someone-else@example.test")).toBeNull();
   expect(await store.takeAdminOpen("Owner@example.test")).toBe("order:abc");
   expect(await store.takeAdminOpen("owner@example.test")).toBeNull();
+  expect((await request("GET", otherPath, { cookie, from: "cross-site" })).status).toBe(303);
+  expect(await store.takeAdminOpen("owner@example.test")).toBe("order:def");
+  // Signing in on the way to the full page comes back to the full page, so the plugin's "Open in Ship" link never bounces.
+  const { back } = await signIn(`${orderPath}?view=full`);
+  expect(back.headers.get("location")).toBe(`${orderPath}?view=full`);
   // The way back from DinkusKit.com's sign-in counts as from outside Ship too.
   expect((await request("GET", orderPath, { cookie, from: "same-site" })).headers.get("location")).toBe(adminPage);
   // Ship's own links and redirects, and a browser that does not say where it came from, keep Ship's page.

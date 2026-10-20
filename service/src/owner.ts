@@ -181,7 +181,8 @@ function fromOutsideShip(request: Request): boolean {
 async function forwardToAdmin(store: Store, session: OwnerSession, orderId: string): Promise<Response | null> {
   const adminPage = await store.adminPageFor(session.email);
   if (!adminPage) return null;
-  await store.queueAdminOpen(orderId, session.email);
+  // Another order of this owner's is already waiting to open over there: this one keeps Ship's own page, so neither is lost.
+  if (!await store.queueAdminOpen(orderId, session.email)) return null;
   return see(adminPage);
 }
 
@@ -214,8 +215,10 @@ export async function handlePage(request: Request, env: Env): Promise<Response> 
       const [site, ...params] = decoded as string[];
       const signedIn = await readSession(request, env, site!);
       if (!signedIn) {
-        // A form posted after the session expired goes back to the store's orders after sign-in.
-        return startSignIn(env, site!, request.method === "GET" ? url.pathname : `${storePath(site!)}/orders`);
+        // A form posted after the session expired goes back to the store's orders after sign-in; a page asked
+        // for in full (the plugin's "Open in Ship" links) is still asked for in full on the way back.
+        const back = url.searchParams.get("view") === "full" ? `${url.pathname}?view=full` : url.pathname;
+        return startSignIn(env, site!, request.method === "GET" ? back : `${storePath(site!)}/orders`);
       }
       const fields = request.method === "POST" ? (requireSameOrigin(request), await readForm(request)) : {};
       const response = await route.handle({ site: site!, session: signedIn.session, store: env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site!)), params, fields, request });
