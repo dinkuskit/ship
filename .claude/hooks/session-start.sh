@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Prepares a Claude Code cloud session for Ship work: Node 22 as in CI and the
+# Prepares a Claude Code cloud session for Ship work: Node 24 as in CI and the
 # same lockfile install CI runs. Local sessions are left alone. Every step is
 # idempotent and a failed step is reported, not fatal, so the session still
 # starts and can say what is missing.
@@ -16,12 +16,12 @@ report() {
   printf -- '- %s\n' "${status[@]}"
 }
 
-# Node: CI (.github/workflows/ci.yml) runs Node 22; there is no .nvmrc.
+# Node: CI (.github/workflows/ci.yml) runs the Node 24 in .nvmrc.
 have="$(node -v 2>/dev/null || echo none)"
 case "$have" in
-  v22.*) status+=("node $have (npm $(npm -v))") ;;
+  v24.*) status+=("node $have (npm $(npm -v))") ;;
   *)
-    status+=("node $have is not Node 22 as in CI; dependencies were not installed. Fix the cloud environment's setup script.")
+    status+=("node $have is not Node 24 as in CI; dependencies were not installed. Fix the cloud environment's setup script.")
     report
     exit 0
     ;;

@@ -36,7 +36,12 @@ Two parts live here:
 
 ## Develop
 
-Node 22 (see `.nvmrc`).
+Node 24 (see `.nvmrc`; `>=24.15.0 <25`, the lowest Node 24 EmDash's registry
+verifier runs on). To move an existing Node 22 checkout, switch Node (mise, nvm
+and fnm read `.nvmrc`; `node --version` must print v24.x) and run `npm ci`
+again here and in `service/`, since `node_modules` installed under Node 22
+fails the engine check. Cloud sessions get Node 24 from the environment's
+setup script; the session hook installs nothing on another Node.
 
 ```sh
 npm ci --ignore-scripts
