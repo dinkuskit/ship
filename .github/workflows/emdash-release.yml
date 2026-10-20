@@ -41,6 +41,9 @@ jobs:
     name: Bundle and publish plugin to EmDash Registry
     if: github.ref == 'refs/heads/main' && ((github.event_name == 'workflow_dispatch' && inputs.release_mode == 'beta') || (github.event_name == 'push' && inputs.release_mode == 'stable' && inputs.version != ''))
     runs-on: ubuntu-latest
+    # Install, tests and the build come first, then the release action may wait up to 30 minutes
+    # for a dashboard approval.
+    timeout-minutes: 60
     permissions:
       contents: read
       id-token: write # Required for the audience-bound GitHub OIDC token.

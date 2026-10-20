@@ -40,6 +40,7 @@ jobs:
     name: Promote verified beta PR or tag merged stable release
     if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.action == 'promote')
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     outputs:
       published: ${{ steps.state.outputs.published }}
       registry_needed: ${{ steps.state.outputs.registry_needed }}
