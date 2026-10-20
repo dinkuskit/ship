@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
@@ -529,6 +529,50 @@ test("a real order's label is bought from the store's Pitney Bowes postage accou
   expect(cancel.url.searchParams.get("cancelInitiator")).toBe("SHIPPER");
   expect((await shipStore().orderSummary("order:abc"))!.labels[0]).toMatchObject({ status: "cancelled", refund: "INITIATED" });
   expect(await trackingIndex(env as unknown as Env).find("SANDBOX-TRACKING-A")).toBeNull();
+  expect(await (await request("GET", orderPath, { cookie })).text()).toContain("USPS refunds your postage account");
+});
+
+test("a label bought while the tracking index is unreachable is still bought, and reaches the index from the alarm", async () => {
+  const { cookie, orderPath, buy } = await liveOrder();
+  const store = shipStore();
+  const realIndex = env.SHIP_TRACKING;
+  const index = () => trackingIndex(env as unknown as Env);
+  const swapIndex = (binding: unknown) => runInDurableObject(store, async instance => { (instance as unknown as { env: Record<string, unknown> }).env = { ...env, SHIP_TRACKING: binding }; });
+  const work = () => runInDurableObject(store, async (_, state) =>
+    state.storage.sql.exec<{ label_id: string; action: string; attempts: number }>("SELECT label_id, action, attempts FROM tracking_work").toArray());
+  const down = { idFromName: () => ({}), get: () => ({ add: async () => { throw new Error("index down"); }, remove: async () => { throw new Error("index down"); } }) };
+  await swapIndex(down);
+  // The purchase is complete: one label, one Commerce event, the owner sees it bought; only the index entry waits.
+  expect((await buy()).status).toBe(303);
+  const label = (await store.orderSummary("order:abc"))!.labels[0]!;
+  expect(label).toMatchObject({ status: "bought", tracking: "SANDBOX-TRACKING-A", test: false });
+  expect(await labels()).toHaveLength(1);
+  expect(await index().find("SANDBOX-TRACKING-A")).toBeNull();
+  expect(await work()).toEqual([{ label_id: label.labelId, action: "add", attempts: 1 }]);
+  expect(await runInDurableObject(store, async (_, state) => state.storage.getAlarm())).not.toBeNull();
+  expect((await buy()).status).toBe(409);
+  expect(await labels()).toHaveLength(1);
+  // Still down at the next try: it waits again, longer.
+  await runInDurableObject(store, async (_, state) => state.storage.sql.exec("UPDATE tracking_work SET next_at = 0"));
+  await runDurableObjectAlarm(store);
+  expect(await work()).toMatchObject([{ action: "add", attempts: 2 }]);
+  // Back up: the alarm registers the label and the work is done.
+  await swapIndex(realIndex);
+  await runInDurableObject(store, async (_, state) => state.storage.sql.exec("UPDATE tracking_work SET next_at = 0"));
+  await runDurableObjectAlarm(store);
+  expect(await work()).toEqual([]);
+  expect(await index().find("SANDBOX-TRACKING-A")).toEqual({ tracking: "SANDBOX-TRACKING-A", site, labelId: label.labelId });
+  // A cancel while it is down leaves a "remove" that replaces any waiting "add", and the alarm finishes it.
+  await swapIndex(down);
+  expect((await request("POST", `/stores/${site}/labels/${label.labelId}/cancel`, { cookie })).status).toBe(303);
+  expect((await store.orderSummary("order:abc"))!.labels[0]).toMatchObject({ status: "cancelled" });
+  expect(await work()).toEqual([{ label_id: label.labelId, action: "remove", attempts: 1 }]);
+  expect(await index().find("SANDBOX-TRACKING-A")).not.toBeNull();
+  await swapIndex(realIndex);
+  await runInDurableObject(store, async (_, state) => state.storage.sql.exec("UPDATE tracking_work SET next_at = 0"));
+  await runDurableObjectAlarm(store);
+  expect(await work()).toEqual([]);
+  expect(await index().find("SANDBOX-TRACKING-A")).toBeNull();
   expect(await (await request("GET", orderPath, { cookie })).text()).toContain("USPS refunds your postage account");
 });
 

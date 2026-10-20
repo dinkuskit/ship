@@ -112,7 +112,9 @@ Commerce's button, or the way back from sign-in) whose DinkusKit.com email the
 plugin has sent in `x-ship-admin-user` in the last 7 days, and queues the order for
 that person: the next `GET /v1/admin/orders` naming the same email gets it as
 `open` (kept for one minute and only for an order Ship has); a call naming anyone
-else, or nobody, gets `null` and leaves it waiting. Anyone not signed in to Ship
+else, or nobody, gets `null` and leaves it waiting. Each admin has their own
+waiting order, so two people forwarding at once never erase each other's; the
+same person forwarding twice within the minute gets the later one. Anyone not signed in to Ship
 signs in first, as for any of Ship's pages, and queues nothing. An owner the
 plugin has not named (a different email on DinkusKit.com than in EmDash, or
 someone who has not opened the Shipping page in a week) gets Ship's own order

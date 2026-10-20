@@ -80,6 +80,10 @@ const EMAIL_RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 6 * 3_60
 /** A completion older than this is not emailed any more, however it got stuck. */
 const EMAIL_MAX_AGE_MS = 3 * 24 * 3_600_000;
 const EMAILS_PER_ALARM = 25;
+/** Waits between tries when the tracking index cannot be reached; the last one repeats until it can. */
+const TRACKING_RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 12 * 3_600_000];
+/** Waiting "open this order" handoffs kept per store, one per admin; the oldest make room. */
+const ADMIN_OPEN_MAX = 50;
 export interface OrderSummary { order: ShipOrder; labels: Label[]; address: LabelAddress }
 
 type Fields = Record<string, unknown>;
@@ -189,6 +193,9 @@ export class StoreShipping extends DurableObject<Env> {
       order_id TEXT NOT NULL, completed_at TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
       next_at INTEGER NOT NULL, created_at INTEGER NOT NULL, sent_at INTEGER, PRIMARY KEY (order_id, completed_at))`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS shipped_emails_due ON shipped_emails (state, next_at)");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS tracking_work (
+      label_id TEXT PRIMARY KEY, tracking TEXT NOT NULL, action TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+      next_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS sessions (
       session_id TEXT PRIMARY KEY, uid TEXT NOT NULL, email TEXT NOT NULL, refresh_token TEXT NOT NULL,
       checked_at INTEGER NOT NULL, refreshing_until INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`);
@@ -610,8 +617,48 @@ export class StoreShipping extends DurableObject<Env> {
       label.createdBy, now, label.priceCents, bought.shipmentId, bought.pdfUrl);
     this.queueLabel({ orderId: label.orderId, version: label.version, carrier: label.carrier, tracking: label.tracking });
     // A live label's number goes in the tracking index, so the carrier's updates find this store (ship-tracking-001).
-    if (!label.test) await trackingIndex(this.env).add({ tracking: label.tracking, site: this.ctx.id.name ?? "", labelId: label.labelId });
+    if (!label.test) await this.queueTracking(label.labelId, label.tracking, "add");
     return label;
+  }
+
+  /**
+   * Work for the tracking index, kept beside the label until it is done: the
+   * index is another Durable Object, and a label Pitney Bowes sold is bought
+   * whether or not that object answers right now. The row is written in the
+   * same step as the label, tried at once, and tried again from the alarm
+   * until the index takes it. A later action on the same label replaces an
+   * earlier one still waiting (a cancel after a buy leaves nothing to add).
+   */
+  private async queueTracking(labelId: string, tracking: string, action: "add" | "remove"): Promise<void> {
+    const now = Date.now();
+    this.sql.exec("INSERT OR REPLACE INTO tracking_work (label_id, tracking, action, attempts, next_at, created_at) VALUES (?, ?, ?, 0, ?, ?)",
+      labelId, tracking, action, now, now);
+    await this.syncTracking();
+  }
+
+  /** Tries the tracking work that is due; what fails waits for the alarm. */
+  private async syncTracking(): Promise<void> {
+    const now = Date.now();
+    const due = this.sql.exec<{ label_id: string; tracking: string; action: string; attempts: number }>(
+      "SELECT label_id, tracking, action, attempts FROM tracking_work WHERE next_at <= ? ORDER BY next_at LIMIT 100", now).toArray();
+    for (const row of due) {
+      try {
+        const index = trackingIndex(this.env);
+        if (row.action === "add") await index.add({ tracking: row.tracking, site: this.ctx.id.name ?? "", labelId: row.label_id });
+        else await index.remove(row.tracking);
+        this.sql.exec("DELETE FROM tracking_work WHERE label_id = ? AND action = ?", row.label_id, row.action);
+      } catch (error) {
+        console.error("ship tracking index unreachable", JSON.stringify({ action: row.action, attempts: row.attempts, message: error instanceof Error ? error.message : "unknown" }));
+        const wait = TRACKING_RETRY_MS[Math.min(row.attempts, TRACKING_RETRY_MS.length - 1)]!;
+        this.sql.exec("UPDATE tracking_work SET attempts = attempts + 1, next_at = ? WHERE label_id = ?", Date.now() + wait, row.label_id);
+      }
+    }
+    await this.wakeForTracking();
+  }
+
+  private async wakeForTracking(): Promise<void> {
+    const next = this.sql.exec<{ next_at: number | null }>("SELECT MIN(next_at) AS next_at FROM tracking_work").one().next_at;
+    if (next !== null) await this.wakeAt(Math.max(next, Date.now() + 1000));
   }
 
   /**
@@ -633,7 +680,7 @@ export class StoreShipping extends DurableObject<Env> {
       }
       this.sql.exec("UPDATE labels SET status = 'cancelled', cancelled_at = ?, refund = ? WHERE label_id = ? AND status = 'bought'",
         new Date().toISOString(), refund, labelId);
-      if (!row.test) await trackingIndex(this.env).remove(row.tracking);
+      if (!row.test) await this.queueTracking(labelId, row.tracking, "remove");
       return ok({ labelId, refund });
     } catch (error) {
       return toOutcome(asServiceError(error));
@@ -726,8 +773,13 @@ export class StoreShipping extends DurableObject<Env> {
     if (current === null || current > when) await this.ctx.storage.setAlarm(when);
   }
 
-  /** Sends the shipped emails that are due, and tries failed ones again later. A failed email never changes an order. */
+  /**
+   * Finishes tracking-index work the index was not there for, then sends the
+   * shipped emails that are due and tries failed ones again later. A failed
+   * email never changes an order.
+   */
   override async alarm(): Promise<void> {
+    await this.syncTracking();
     const sender = this.emailSender();
     if (!sender) return;
     const now = Date.now();
@@ -757,7 +809,7 @@ export class StoreShipping extends DurableObject<Env> {
       }
     }
     const next = this.sql.exec<{ next_at: number | null }>("SELECT MIN(next_at) AS next_at FROM shipped_emails WHERE state = 'pending'").one().next_at;
-    if (next !== null) await this.ctx.storage.setAlarm(Math.max(next, Date.now() + 1000));
+    if (next !== null) await this.wakeAt(Math.max(next, Date.now() + 1000));
   }
 
   /**
@@ -819,35 +871,52 @@ export class StoreShipping extends DurableObject<Env> {
    * Which order the next Shipping page load in the store admin should open, and
    * for whom: set when Ship forwards Commerce's "Create shipping label" there,
    * read once by that person's next list call, and forgotten after a minute.
+   * Each admin has their own waiting order, so two people forwarding at once
+   * never erase each other's; a second forward by the same person within the
+   * minute replaces their first, as the newer button press.
    */
   async queueAdminOpen(orderId: string, email: string): Promise<void> {
     this.checkIsolation();
-    this.setMeta("admin_open", JSON.stringify({ orderId, email: adminEmail(email), at: Date.now() }));
+    const now = Date.now();
+    const waiting = this.adminOpens(now);
+    waiting[adminEmail(email)] = { orderId, at: now };
+    const kept = Object.entries(waiting).sort(([, a], [, b]) => b.at - a.at).slice(0, ADMIN_OPEN_MAX);
+    this.setMeta("admin_open", JSON.stringify(Object.fromEntries(kept)));
+  }
+
+  /** The orders waiting to be opened, email to order, without the stale ones. */
+  private adminOpens(now: number): Record<string, { orderId: string; at: number }> {
+    let waiting: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(this.meta("admin_open") ?? "{}");
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) waiting = parsed as Record<string, unknown>;
+    } catch {
+      waiting = {};
+    }
+    const fresh: Record<string, { orderId: string; at: number }> = {};
+    for (const [email, entry] of Object.entries(waiting)) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { orderId, at } = entry as { orderId?: unknown; at?: unknown };
+      if (typeof orderId === "string" && typeof at === "number" && now - at <= ADMIN_OPEN_MS) fresh[email] = { orderId, at };
+    }
+    return fresh;
   }
 
   /**
    * The queued order to open, once, for the admin whose call this is; null when
-   * none is waiting, it has gone stale, or it waits for someone else (then it
-   * stays for them until it goes stale).
+   * none waits for them, theirs has gone stale, or the call names nobody. Other
+   * admins' waiting orders stay for them.
    */
   async takeAdminOpen(email: string | null): Promise<string | null> {
     this.checkIsolation();
-    const raw = this.meta("admin_open");
-    if (!raw) return null;
-    let queued: { orderId?: unknown; email?: unknown; at?: unknown };
-    try {
-      queued = JSON.parse(raw) as typeof queued;
-    } catch {
-      queued = {};
-    }
-    const forget = () => this.sql.exec("DELETE FROM store_meta WHERE key = 'admin_open'");
-    if (typeof queued.orderId !== "string" || typeof queued.email !== "string" || typeof queued.at !== "number" || Date.now() - queued.at > ADMIN_OPEN_MS) {
-      forget();
-      return null;
-    }
-    if (email === null || adminEmail(email) !== queued.email) return null;
-    forget();
-    return this.sql.exec("SELECT 1 FROM orders WHERE order_id = ?", queued.orderId).toArray().length ? queued.orderId : null;
+    if (email === null || !this.meta("admin_open")) return null;
+    const waiting = this.adminOpens(Date.now());
+    const mine = waiting[adminEmail(email)];
+    if (!mine) return null;
+    delete waiting[adminEmail(email)];
+    if (Object.keys(waiting).length) this.setMeta("admin_open", JSON.stringify(waiting));
+    else this.sql.exec("DELETE FROM store_meta WHERE key = 'admin_open'");
+    return this.sql.exec("SELECT 1 FROM orders WHERE order_id = ?", mine.orderId).toArray().length ? mine.orderId : null;
   }
 
   /** The store admin's Shipping page, or null while no Ship plugin has called for this store in the last week. */
