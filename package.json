@@ -1,6 +1,6 @@
 {
   "name": "@dinkuskit/ship",
-  "version": "0.1.0-beta.0",
+  "version": "0.1.0-beta.1",
   "description": "Buy, print and cancel USPS labels in the EmDash store admin, through the hosted DinkusKit Ship service",
   "type": "module",
   "engines": {
