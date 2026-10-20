@@ -1,9 +1,8 @@
 {
   "$schema": "./node_modules/@emdash-cms/plugin-cli/schemas/emdash-plugin.schema.json",
   "slug": "dinkus-ship",
-  "version": "0.1.0",
   "publisher": "did:plc:ekk4pjmkh3k3ql2kfoex3qt4",
-  "name": "Ship",
+  "name": "DinkusKit Ship",
   "description": "Buy, print and cancel USPS shipping labels for paid orders in EmDash, through the hosted DinkusKit Ship service.",
   "license": "MIT",
   "author": {

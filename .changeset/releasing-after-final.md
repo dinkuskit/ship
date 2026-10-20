@@ -1,4 +1,4 @@
 ---
 ---
 
-RELEASING.md describes the stable release state after dinkus-ship 0.1.0; no package change.
+Release files copied from Payments: the Release workflow's Cut beta and Promote buttons; no package change.

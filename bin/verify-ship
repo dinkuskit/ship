@@ -17,7 +17,9 @@ case "$mode" in
     # The hosted service under service/ (install it first: cd service && npm ci --ignore-scripts).
     (cd service && npm run typecheck && npm test && npm run build && npm run build:sandbox && npm run verify:entry)
     # A dry release preparation, as the release workflow runs it (a beta version routes to dinkus-ship-beta).
-    node scripts/prepare-emdash-release.mjs "$(node scripts/release-selector.mjs)"
+    node .github/scripts/prepare-emdash-release.mjs --out-dir .emdash-release
+    # The release-authority proof: the twelve Cut beta / Promote / publish scenarios against stubs.
+    npm run proof:release-authority >/dev/null
     ;;
   *)
     echo "Usage: bin/verify-ship [quick|full]" >&2
