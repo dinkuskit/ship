@@ -50,11 +50,15 @@ Every call also carries `x-ship-admin-page: https://<store>/_emdash/admin/plugin
 the store admin's Shipping page, which the plugin derives from the admin API URL
 EmDash calls it on. Ship keeps it only when the page is on the origin DinkusKit.com
 signed into the pass (`site_origin`) and has that exact path, with no query string.
-It is what the forward below lands on.
+It is what the forward below lands on. Every call also carries
+`x-ship-admin-user: <email>`, the store admin whose page load it is, as EmDash
+attests them (`routeCtx.user.email`, lower-cased). Ship keeps the emails it has
+seen for a week (at most 50) and compares them without case: they decide whom
+the forward below is for.
 
 | Call | Answer |
 | --- | --- |
-| `GET /v1/admin/orders` | `200 { orders: Row[], settings: Settings, open: string \| null }`: every order Ship has for the store, Processing first, newest first, at most 200, as short rows (below) so the answer stays small whatever the orders hold. `open` is the `orderId` Ship just forwarded the owner here for (below), given once and then forgotten; the plugin opens that order instead of the list. |
+| `GET /v1/admin/orders` | `200 { orders: Row[], settings: Settings, open: string \| null }`: every order Ship has for the store, Processing first, newest first, at most 200, as short rows (below) so the answer stays small whatever the orders hold. `open` is the `orderId` Ship just forwarded this same admin here for (below), given once to a call naming that admin's email and then forgotten, and `null` for anyone else; the plugin opens that order instead of the list. |
 | `GET /v1/admin/orders/{orderId}` | `200 { order: Order, settings: Settings }`; `404 NOT_FOUND` when Commerce has not sent the order. |
 | `POST /v1/admin/orders/{orderId}/prices` with `{ version, boxId, weightOz }` | `200 { prices: { GA, PM, EM } }` in cents, `null` for a service Pitney Bowes refused for this package. Refusals as on Ship's page: `409 ORDER_CHANGED`, `ALREADY_COMPLETED`, `ALREADY_LABELED`, `ADDRESS_PROBLEM`, `NO_SHIP_FROM`, `TEST_ORDER`; `503 POSTAGE_NOT_CONNECTED`. |
 | `POST /v1/admin/orders/{orderId}/labels` with `{ version, boxId, weightOz, service, by, kind?: "practice", buyAgain?: true }` | `201 { label: Label }`. `by` is who pressed the button (the admin's email, kept as `admin:<email>` in `createdBy`). The same refusals as prices, plus `409 LABEL_IN_PROGRESS`, `409 CHECK_PITNEY_BOWES` (send `buyAgain: true` after the owner ticks the box), `502 PITNEY_BOWES_NO_ANSWER`. |
@@ -104,14 +108,20 @@ Commerce's button opens `https://ship.dinkuskit.com/stores/{site}/orders/{orderI
 Once the store's Ship plugin has called with `x-ship-admin-page` in the last 7 days,
 that page answers `303` to the store admin's Shipping page for a signed-in Ship
 owner arriving from outside Ship (`Sec-Fetch-Site` cross-site, same-site or none:
-Commerce's button, or the way back from sign-in), and queues the order for the
-next `GET /v1/admin/orders` (`open`, kept for one minute and only for an order Ship
-has). Anyone not signed in to Ship signs in first, as for any of Ship's pages, and
-queues nothing. Ship's own links and redirects (same-origin), browsers that do not
+Commerce's button, or the way back from sign-in) whose DinkusKit.com email the
+plugin has sent in `x-ship-admin-user` in the last 7 days, and queues the order for
+that person: the next `GET /v1/admin/orders` naming the same email gets it as
+`open` (kept for one minute and only for an order Ship has); a call naming anyone
+else, or nobody, gets `null` and leaves it waiting. Anyone not signed in to Ship
+signs in first, as for any of Ship's pages, and queues nothing. An owner the
+plugin has not named (a different email on DinkusKit.com than in EmDash, or
+someone who has not opened the Shipping page in a week) gets Ship's own order
+page, as do Ship's own links and redirects (same-origin), browsers that do not
 say where they came from, `?view=full` (the plugin's "Open in Ship" links) and
-stores whose plugin has not called in a week all get Ship's own page, so the two
-never bounce and a removed plugin falls back within a week. The list and settings
-pages are never forwarded (ship-registry-plugin-001, question 4).
+stores whose plugin has not called in a week, so the two never bounce, nobody
+is sent to a page that will not open their order, and a removed plugin falls
+back within a week. The list and settings pages are never forwarded
+(ship-registry-plugin-001, question 4).
 
 ## Tracking updates (no pass)
 

@@ -88,11 +88,17 @@ function parseEvent(event: unknown): Parsed | null {
   return { tracking: trackingNumber, delivery: deliveryFromScan(packageStatus, eventDescription, scanTime(eventDate, eventTime, eventTimeOffset)) };
 }
 
+/**
+ * Lands a scan on its label and answers whether the label took it. The index
+ * stops asking about a label only once the store has it stored as delivered,
+ * whatever the scan said: an older "delivered" after a newer problem scan, say,
+ * leaves the label on problem and still being asked about.
+ */
 async function recordDelivery(env: Env, where: Tracked, delivery: Delivery): Promise<boolean> {
   const store: DurableObjectStub<StoreShipping> = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(where.site));
-  const recorded = await store.recordDelivery(where.labelId, delivery);
-  if (recorded && delivery.state === "delivered") await trackingIndex(env).markDone(where.tracking);
-  return recorded;
+  const stored = await store.recordDelivery(where.labelId, delivery);
+  if (stored === "delivered") await trackingIndex(env).markDone(where.tracking);
+  return stored !== null;
 }
 
 /**
@@ -135,22 +141,27 @@ export async function handleTrackingWebhook(request: Request, env: Env): Promise
 /**
  * The daily check: Track a Parcel for every live label not yet delivered, so a
  * missed update still shows within a day. Runs from the Worker's cron trigger.
+ * Every label in the batch counts as checked whether or not Pitney Bowes
+ * answered for it, so the ones it keeps failing on go to the back of the line
+ * and the rest of the queue gets its turn the next day.
  */
-export async function checkDeliveries(env: Env): Promise<{ asked: number; moved: number }> {
+export async function checkDeliveries(env: Env): Promise<{ asked: number; moved: number; failed: number }> {
   const config = pitneyConfig(env);
-  const result = { asked: 0, moved: 0 };
+  const result = { asked: 0, moved: 0, failed: 0 };
   if (!config) return result;
   const index = trackingIndex(env);
   for (const entry of await index.due()) {
+    await index.touch(entry.tracking);
     let delivery: Delivery | null;
     try {
       delivery = await trackParcel(config, entry.tracking);
     } catch {
-      continue; // Pitney Bowes is not answering; tomorrow.
+      result.failed += 1; // Pitney Bowes is not answering for it; its turn comes round again.
+      continue;
     }
     result.asked += 1;
-    await index.touch(entry.tracking);
     if (delivery && await recordDelivery(env, entry, delivery)) result.moved += 1;
   }
+  if (result.failed) console.error("ship tracking check", JSON.stringify(result));
   return result;
 }

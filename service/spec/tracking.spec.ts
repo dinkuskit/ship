@@ -124,12 +124,19 @@ test("a problem scan shows its reason, and a sandbox label never gets a delivery
   const problem = (await labelOf("9400100000000000000002")).delivery as { note: string };
   expect(problem.note.startsWith("Weather delay <b>x</b>")).toBe(true);
   expect(problem.note.length).toBe(120);
+  // A "delivered" from before that problem changes nothing, and the label is still asked about: only a stored delivered stops that.
+  await update({ trackingEvents: [event("9400100000000000000002", "Delivered", { eventDate: "2026-10-22" })] });
+  expect((await labelOf("9400100000000000000002")).delivery).toMatchObject({ state: "problem" });
+  expect(await index().due()).toMatchObject([{ tracking: "9400100000000000000002" }]);
+  await update({ trackingEvents: [event("9400100000000000000002", "Delivered", { eventDate: "2026-10-24" })] });
+  expect((await labelOf("9400100000000000000002")).delivery).toMatchObject({ state: "delivered" });
+  expect(await index().due()).toEqual([]);
 
   const sandbox = await soldLabel("SANDBOXTRACKING000003", { test: true, orderId: "order:abc" });
   expect(sandbox).toMatch(/^label_/);
   // Not indexed, so PB's update finds nothing; and even a direct record is refused.
   expect((await update({ trackingEvents: [event("SANDBOXTRACKING000003", "Delivered")] })).json.responses[0].statusCode).toBe(404);
-  expect(await shipStore().recordDelivery(sandbox, { state: "delivered", at: "2026-10-22T00:00:00.000Z", note: null })).toBe(false);
+  expect(await shipStore().recordDelivery(sandbox, { state: "delivered", at: "2026-10-22T00:00:00.000Z", note: null })).toBeNull();
   expect((await labelOf("SANDBOXTRACKING000003")).delivery).toBeNull();
 });
 
@@ -142,19 +149,29 @@ test("the daily check asks Pitney Bowes about live labels not yet delivered, and
         { packageStatus: "Delivered", eventDate: "2026-10-22", eventTime: "11:30:00", scanDescription: "Delivered, Front Door" },
       ] })
     : Response.json({ trackingNumber: tracking, status: "InTransit", scanDetailsList: [{ packageStatus: "Acceptance", eventDate: "2026-10-21", eventTime: "07:00:00", scanDescription: "USPS in possession of item" }] });
-  expect(await checkDeliveries(env as unknown as Env)).toEqual({ asked: 2, moved: 2 });
+  expect(await checkDeliveries(env as unknown as Env)).toEqual({ asked: 2, moved: 2, failed: 0 });
   expect(trackCalls.sort()).toEqual(["9400100000000000000004", "9400100000000000000005"]);
   expect((await labelOf("9400100000000000000004")).delivery).toEqual({ state: "delivered", at: "2026-10-22T11:30:00.000Z", note: "Delivered, Front Door" });
   expect((await labelOf("9400100000000000000005")).delivery).toEqual({ state: "in_transit", at: "2026-10-21T07:00:00.000Z", note: "USPS in possession of item" });
   // Delivered is done; the other is asked again tomorrow; nothing known yet changes nothing.
   trackCalls = [];
   trackAnswer = () => Response.json({ errors: [] }, { status: 404 });
-  expect(await checkDeliveries(env as unknown as Env)).toEqual({ asked: 1, moved: 0 });
+  expect(await checkDeliveries(env as unknown as Env)).toEqual({ asked: 1, moved: 0, failed: 0 });
   expect(trackCalls).toEqual(["9400100000000000000005"]);
   expect((await labelOf("9400100000000000000005")).delivery).toMatchObject({ state: "in_transit" });
-  // Pitney Bowes down: nothing recorded, nothing thrown, tomorrow again.
+  // Pitney Bowes down: nothing recorded, nothing thrown, and the labels it failed on still count as checked,
+  // so they go to the back of the line instead of heading every day's batch.
+  await soldLabel("9400100000000000000006", { labelId: "label_six" });
+  const checkedAt = async () => runInDurableObject(index(), async (_, state) =>
+    Object.fromEntries(state.storage.sql.exec<{ tracking: string; checked_at: number }>("SELECT tracking, checked_at FROM tracked").toArray().map(row => [row.tracking, row.checked_at])));
+  const before = await checkedAt();
+  expect(before["9400100000000000000006"]).toBe(0);
   trackAnswer = () => new Response("down", { status: 503 });
-  expect(await checkDeliveries(env as unknown as Env)).toEqual({ asked: 0, moved: 0 });
+  expect(await checkDeliveries(env as unknown as Env)).toEqual({ asked: 0, moved: 0, failed: 2 });
+  const after = await checkedAt();
+  expect(after["9400100000000000000005"]).toBeGreaterThan(before["9400100000000000000005"]!);
+  expect(after["9400100000000000000006"]).toBeGreaterThan(0);
+  expect((await labelOf("9400100000000000000005")).delivery).toMatchObject({ state: "in_transit" });
   // Without the sandbox keys nothing is asked at all.
-  expect(await checkDeliveries({ ...env, PB_API_KEY: undefined } as unknown as Env)).toEqual({ asked: 0, moved: 0 });
+  expect(await checkDeliveries({ ...env, PB_API_KEY: undefined } as unknown as Env)).toEqual({ asked: 0, moved: 0, failed: 0 });
 });

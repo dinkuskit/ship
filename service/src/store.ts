@@ -63,12 +63,15 @@ const NOT_CONNECTED = "Pitney Bowes is not connected to Ship yet, so only TEST o
 /** How long a purchase counts as still in flight before another page may check on it. */
 const IN_FLIGHT_MS = 60_000;
 /** How long a forwarded "Create shipping label" waits for the store admin's Shipping page to open it. */
-/** How long a forwarded order waits for the Shipping page to open it. */
 const ADMIN_OPEN_MS = 60_000;
-/** A Shipping page the plugin has not called from in this long is forgotten: Commerce's button goes back to Ship's own page. */
+/** A Shipping page, or an admin, the plugin has not called from in this long is forgotten: Commerce's button goes back to Ship's own page. */
 const ADMIN_PAGE_FRESH_MS = 7 * 86_400_000;
-/** Refresh the page's last-seen time at most this often, so the plugin's every call does not write. */
+/** Refresh a page's or an admin's last-seen time at most this often, so the plugin's every call does not write. */
 const ADMIN_PAGE_TOUCH_MS = 60 * 60_000;
+/** The most store admins Ship keeps the last-seen time of; the least recently seen make room. */
+const ADMIN_USERS_MAX = 50;
+/** Emails compare without case: EmDash's and DinkusKit.com's may spell the same address differently. */
+const adminEmail = (email: string) => email.trim().toLowerCase();
 
 /** Orders completed this long before the store first sent Ship anything get no email (clock differences aside). */
 const BEFORE_CONNECT_MS = 15 * 60_000;
@@ -402,18 +405,19 @@ export class StoreShipping extends DurableObject<Env> {
   /**
    * The carrier's latest word on a live label, from Pitney Bowes's update or the
    * daily check. Updates can arrive out of order: a delivered label stays delivered,
-   * and an older scan never replaces a newer one. False for a label this store
-   * does not have, or a sandbox or practice one, which never moves.
+   * and an older scan never replaces a newer one. Answers the state the label is
+   * left in, which is what the tracking index goes by, or null for a label this
+   * store does not have, or a sandbox or practice one, which never moves.
    */
-  async recordDelivery(labelId: string, delivery: Delivery): Promise<boolean> {
+  async recordDelivery(labelId: string, delivery: Delivery): Promise<Delivery["state"] | null> {
     this.checkIsolation();
-    const row = this.sql.exec<{ delivery_state: string | null; delivery_at: string | null }>(
+    const row = this.sql.exec<{ delivery_state: Delivery["state"] | null; delivery_at: string | null }>(
       "SELECT delivery_state, delivery_at FROM labels WHERE label_id = ? AND test = 0", labelId).toArray()[0];
-    if (!row) return false;
-    if (row.delivery_state === "delivered" && delivery.state !== "delivered") return true;
-    if (row.delivery_state && row.delivery_at && row.delivery_at > delivery.at) return true;
+    if (!row) return null;
+    if (row.delivery_state === "delivered" && delivery.state !== "delivered") return row.delivery_state;
+    if (row.delivery_state && row.delivery_at && row.delivery_at > delivery.at) return row.delivery_state;
     this.sql.exec("UPDATE labels SET delivery_state = ?, delivery_at = ?, delivery_note = ? WHERE label_id = ?", delivery.state, delivery.at, delivery.note, labelId);
-    return true;
+    return delivery.state;
   }
 
   /** Orders waiting to ship first, then the most recently changed; at most 200. */
@@ -771,28 +775,79 @@ export class StoreShipping extends DurableObject<Env> {
   }
 
   /**
-   * Which order the next Shipping page load in the store admin should open:
-   * set when Ship forwards Commerce's "Create shipping label" there, read once
-   * by the plugin's next list call, and forgotten after two minutes.
+   * A store admin the plugin has called for (their email, as EmDash attests it),
+   * with when they were last seen: Commerce's button is forwarded only for an
+   * owner Ship knows as one of the store's admins, so the order it queues can be
+   * opened by that same person and nobody else.
    */
-  async queueAdminOpen(orderId: string): Promise<void> {
+  async rememberAdminUser(email: string): Promise<void> {
     this.checkIsolation();
-    this.setMeta("admin_open", JSON.stringify({ orderId, at: Date.now() }));
+    const now = Date.now();
+    const users = this.adminUsers(now);
+    const seen = Date.parse(users[email] ?? "");
+    if (Number.isFinite(seen) && now - seen < ADMIN_PAGE_TOUCH_MS) return;
+    users[email] = new Date(now).toISOString();
+    const kept = Object.entries(users).sort(([, a], [, b]) => (a < b ? 1 : a > b ? -1 : 0)).slice(0, ADMIN_USERS_MAX);
+    this.setMeta("admin_users", JSON.stringify(Object.fromEntries(kept)));
   }
 
-  /** The queued order to open, once; null when none is waiting or it has gone stale. */
-  async takeAdminOpen(): Promise<string | null> {
+  /** The store's admins seen in the last week, email to last-seen time. */
+  private adminUsers(now: number): Record<string, string> {
+    let users: Record<string, string> = {};
+    try {
+      const parsed: unknown = JSON.parse(this.meta("admin_users") ?? "{}");
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) users = parsed as Record<string, string>;
+    } catch {
+      users = {};
+    }
+    return Object.fromEntries(Object.entries(users).filter(([, at]) => typeof at === "string" && now - Date.parse(at) < ADMIN_PAGE_FRESH_MS));
+  }
+
+  /**
+   * The store admin's Shipping page for this signed-in owner, or null: the page
+   * must be fresh (adminPage) and the owner's DinkusKit.com email must be one the
+   * plugin has called for in the last week. Anyone else gets Ship's own page.
+   */
+  async adminPageFor(email: string): Promise<string | null> {
+    this.checkIsolation();
+    const page = await this.adminPage();
+    if (!page) return null;
+    return Object.hasOwn(this.adminUsers(Date.now()), adminEmail(email)) ? page : null;
+  }
+
+  /**
+   * Which order the next Shipping page load in the store admin should open, and
+   * for whom: set when Ship forwards Commerce's "Create shipping label" there,
+   * read once by that person's next list call, and forgotten after a minute.
+   */
+  async queueAdminOpen(orderId: string, email: string): Promise<void> {
+    this.checkIsolation();
+    this.setMeta("admin_open", JSON.stringify({ orderId, email: adminEmail(email), at: Date.now() }));
+  }
+
+  /**
+   * The queued order to open, once, for the admin whose call this is; null when
+   * none is waiting, it has gone stale, or it waits for someone else (then it
+   * stays for them until it goes stale).
+   */
+  async takeAdminOpen(email: string | null): Promise<string | null> {
     this.checkIsolation();
     const raw = this.meta("admin_open");
     if (!raw) return null;
-    this.sql.exec("DELETE FROM store_meta WHERE key = 'admin_open'");
+    let queued: { orderId?: unknown; email?: unknown; at?: unknown };
     try {
-      const queued = JSON.parse(raw) as { orderId?: unknown; at?: unknown };
-      if (typeof queued.orderId !== "string" || typeof queued.at !== "number" || Date.now() - queued.at > ADMIN_OPEN_MS) return null;
-      return this.sql.exec("SELECT 1 FROM orders WHERE order_id = ?", queued.orderId).toArray().length ? queued.orderId : null;
+      queued = JSON.parse(raw) as typeof queued;
     } catch {
+      queued = {};
+    }
+    const forget = () => this.sql.exec("DELETE FROM store_meta WHERE key = 'admin_open'");
+    if (typeof queued.orderId !== "string" || typeof queued.email !== "string" || typeof queued.at !== "number" || Date.now() - queued.at > ADMIN_OPEN_MS) {
+      forget();
       return null;
     }
+    if (email === null || adminEmail(email) !== queued.email) return null;
+    forget();
+    return this.sql.exec("SELECT 1 FROM orders WHERE order_id = ?", queued.orderId).toArray().length ? queued.orderId : null;
   }
 
   /** The store admin's Shipping page, or null while no Ship plugin has called for this store in the last week. */

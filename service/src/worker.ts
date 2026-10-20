@@ -13,7 +13,7 @@ export const SERVICE_LINE = "DinkusKit Ship service";
 // Commerce's largest possible order (100 lines of long multi-byte names) is about 66 KiB.
 export const MAX_BODY_BYTES = 256 * 1024;
 
-interface Call { store: DurableObjectStub<StoreShipping>; body: unknown; admission: Record<string, unknown>; params: string[]; site: string; origin: string; env: Env }
+interface Call { store: DurableObjectStub<StoreShipping>; body: unknown; admission: Record<string, unknown>; params: string[]; site: string; origin: string; env: Env; adminUser: string | null }
 type Handler = (call: Call) => Promise<Outcome>;
 interface Route { method: string; pattern: RegExp; scope: ShipScope; handle: Handler }
 /** Order ids and label ids as they appear in a path segment (URL-encoded by the caller). */
@@ -27,7 +27,7 @@ const ROUTES: Route[] = [
   route("GET", "/v1/labels", "ship:orders", ({ store, admission }) => store.listLabels(admission)),
   route("POST", "/v1/labels/ack", "ship:orders", ({ store, body, admission }) => store.ackLabel(body, admission)),
   // What the Ship Registry plugin calls (docs/contracts/ship-plugin-v1.md).
-  route("GET", "/v1/admin/orders", ADMIN_SCOPE, ({ store }) => listAdminOrders(store)),
+  route("GET", "/v1/admin/orders", ADMIN_SCOPE, ({ store, adminUser }) => listAdminOrders(store, adminUser)),
   route("GET", "/v1/admin/orders/:id", ADMIN_SCOPE, ({ store, params }) => showAdminOrder(store, params[0]!)),
   route("POST", "/v1/admin/orders/:id/prices", ADMIN_SCOPE, ({ store, params, body }) => quoteAdminLabel(store, params[0]!, body)),
   route("POST", "/v1/admin/orders/:id/labels", ADMIN_SCOPE, ({ store, params, body }) => buyAdminLabel(store, params[0]!, body)),
@@ -64,6 +64,16 @@ export function adminPageFrom(request: Request, siteOrigin: string | null): stri
   } catch {
     return null;
   }
+}
+
+/** The header the Ship plugin sends with the email of the store admin whose page load this is (docs/contracts/ship-plugin-v1.md). */
+export const ADMIN_USER_HEADER = "x-ship-admin-user";
+const ADMIN_USER = /^[^\s@\u0000-\u001f\u007f-\u009f]{1,200}@[^\s@\u0000-\u001f\u007f-\u009f]{1,200}$/;
+
+/** The store admin the plugin is acting for, as one lower-cased email, or null when the call does not say. */
+export function adminUserFrom(request: Request): string | null {
+  const value = request.headers.get(ADMIN_USER_HEADER)?.trim().toLowerCase() ?? "";
+  return value.length <= 254 && ADMIN_USER.test(value) ? value : null;
 }
 
 function respond(outcome: Outcome): Response {
@@ -145,11 +155,14 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       }
     }
     const store = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(siteId));
+    let adminUser: string | null = null;
     if (route.scope === ADMIN_SCOPE) {
       const adminPage = adminPageFrom(request, siteOrigin);
       if (adminPage) await store.rememberAdminPage(adminPage);
+      adminUser = adminUserFrom(request);
+      if (adminUser) await store.rememberAdminUser(adminUser);
     }
-    return respond(await route.handle({ store, body, admission, params, site: siteId, origin: url.origin, env }));
+    return respond(await route.handle({ store, body, admission, params, site: siteId, origin: url.origin, env, adminUser }));
   } catch (error) {
     return respond(toOutcome(error));
   }

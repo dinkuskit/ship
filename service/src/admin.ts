@@ -125,8 +125,9 @@ function actor(input: Body): string {
   return `admin:${by.trim()}`;
 }
 
-export async function listAdminOrders(store: Store): Promise<Outcome> {
-  const [orders, settings, open] = await Promise.all([store.listOrders(), store.getSettings(), store.takeAdminOpen()]);
+/** The list, plus the order Ship forwarded this same admin here for, if one waits (null when the call names nobody). */
+export async function listAdminOrders(store: Store, adminUser: string | null): Promise<Outcome> {
+  const [orders, settings, open] = await Promise.all([store.listOrders(), store.getSettings(), store.takeAdminOpen(adminUser)]);
   return ok({ orders: orders.map(adminOrderRow), settings: adminSettings(settings), open });
 }
 

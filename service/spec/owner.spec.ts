@@ -745,14 +745,21 @@ test("once the store's Ship plugin has called, Commerce's label button lands a s
   // Anyone not signed in to Ship still signs in first, and queues nothing.
   const anonymous = await request("GET", orderPath, { from: "cross-site" });
   expect(anonymous.headers.get("location")).toContain("/ship-sign-in");
-  expect(await store.takeAdminOpen()).toBeNull();
-  // The signed-in owner arriving from Commerce (another site) is forwarded, and the order waits for the Shipping page.
+  expect(await store.takeAdminOpen("owner@example.test")).toBeNull();
+  // An owner the plugin has never acted for keeps Ship's own page: there is nobody to open the order for over there.
   const cookie = await signedIn();
+  expect((await request("GET", orderPath, { cookie, from: "cross-site" })).status).toBe(200);
+  expect(await store.takeAdminOpen("owner@example.test")).toBeNull();
+  // Once the plugin has named them (however it spells the address), the owner arriving from Commerce (another site)
+  // is forwarded, and the order waits for that person's Shipping page.
+  await store.rememberAdminUser("owner@example.test");
   const forwarded = await request("GET", orderPath, { cookie, from: "cross-site" });
   expect(forwarded.status).toBe(303);
   expect(forwarded.headers.get("location")).toBe(adminPage);
   expect(forwarded.headers.get("cache-control")).toBe("no-store");
-  expect(await store.takeAdminOpen()).toBe("order:abc");
+  expect(await store.takeAdminOpen("someone-else@example.test")).toBeNull();
+  expect(await store.takeAdminOpen("Owner@example.test")).toBe("order:abc");
+  expect(await store.takeAdminOpen("owner@example.test")).toBeNull();
   // The way back from DinkusKit.com's sign-in counts as from outside Ship too.
   expect((await request("GET", orderPath, { cookie, from: "same-site" })).headers.get("location")).toBe(adminPage);
   // Ship's own links and redirects, and a browser that does not say where it came from, keep Ship's page.

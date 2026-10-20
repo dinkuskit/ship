@@ -145,6 +145,15 @@ export interface ShipList { orders: ShipOrderRow[]; settings: ShipSettings; open
 
 /** The header that tells hosted Ship where this store's Shipping page lives, so its own order page can forward here. */
 export const ADMIN_PAGE_HEADER = "x-ship-admin-page";
+/** The header that tells hosted Ship which store admin this page load is for, so a forwarded order opens for that person alone. */
+export const ADMIN_USER_HEADER = "x-ship-admin-user";
+
+/** The admin's email as EmDash attests it, lower-cased for Ship; null when EmDash gave none Ship could use. */
+export function adminUserFrom(email: unknown): string | null {
+  if (typeof email !== "string") return null;
+  const value = email.trim().toLowerCase();
+  return value.length <= 254 && /^[^\s@]+@[^\s@]+$/.test(value) ? value : null;
+}
 
 /**
  * This store's Shipping page, derived from the admin API URL EmDash called us on
@@ -163,7 +172,7 @@ export function adminPageFrom(requestUrl: string | undefined): string | null {
 }
 
 /** Hosted Ship for this store, trading one pass per invocation and reusing it while it lasts. */
-export function ship(ctx: PluginContext, siteId: string, key: string, adminPage: string | null = null): Ship {
+export function ship(ctx: PluginContext, siteId: string, key: string, adminPage: string | null = null, adminUser: string | null = null): Ship {
   let pass: Promise<string> | undefined;
   const credential = () => pass ??= tradeStoreKey(ctx, siteId, key);
   async function call(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
@@ -175,6 +184,7 @@ export function ship(ctx: PluginContext, siteId: string, key: string, adminPage:
         headers: {
           accept: "application/json", authorization: `Bearer ${token}`,
           ...(adminPage === null ? {} : { [ADMIN_PAGE_HEADER]: adminPage }),
+          ...(adminUser === null ? {} : { [ADMIN_USER_HEADER]: adminUser }),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
         },
         ...(body === undefined ? {} : { body: JSON.stringify(body) }),

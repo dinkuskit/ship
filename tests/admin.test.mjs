@@ -36,8 +36,8 @@ function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.jso
     settings: { get: async name => ({ siteId, storeKey: key })[name] ?? null },
     http: { fetch: async (url, init) => {
       const body = init?.body ? JSON.parse(init.body) : undefined;
-      const adminPage = init?.headers?.["x-ship-admin-page"];
-      calls.push({ url, method: init?.method ?? "GET", authorization: init?.headers?.authorization, ...(adminPage === undefined ? {} : { adminPage }), body });
+      const adminPage = init?.headers?.["x-ship-admin-page"], adminUser = init?.headers?.["x-ship-admin-user"];
+      calls.push({ url, method: init?.method ?? "GET", authorization: init?.headers?.authorization, ...(adminPage === undefined ? {} : { adminPage }), ...(adminUser === undefined ? {} : { adminUser }), body });
       if (url === "https://dinkuskit.com/api/store-passes") return passes({ url, init, body });
       const path = new URL(url).pathname;
       const answer = ship[`${init?.method ?? "GET"} ${path}`];
@@ -298,7 +298,7 @@ test("a completed order and a bad address get no form", async () => {
   assert.doesNotMatch(bad, /"type":"form"/);
 });
 
-test("Ship learns where this store's Shipping page is, and opens the order it forwarded the owner from", async () => {
+test("Ship learns where this store's Shipping page is and whose page load each call is, and opens the order it forwarded that person from", async () => {
   // EmDash calls the route at the admin API URL; the Shipping page is the same origin's plugin page.
   const h = host({ requestUrl: "https://shop.example.test/_emdash/api/plugins/dinkus-ship-1/admin", ship: {
     "GET /v1/admin/orders": { orders: [row()], settings, open: "order:abc" },
@@ -309,8 +309,11 @@ test("Ship learns where this store's Shipping page is, and opens the order it fo
   assert.match(page, /prices:/, "the forwarded order opens, not the list");
   for (const call of h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com/"))) {
     assert.equal(call.adminPage, "https://shop.example.test/_emdash/admin/plugins/dinkus-ship-1/shipping");
+    assert.equal(call.adminUser, "staff@example.test", "the admin EmDash attested, so Ship forwards and opens for that person alone");
   }
-  assert.equal(h.calls.find(call => call.url === "https://dinkuskit.com/api/store-passes").adminPage, undefined, "DinkusKit.com never gets it");
+  const passCall = h.calls.find(call => call.url === "https://dinkuskit.com/api/store-passes");
+  assert.equal(passCall.adminPage, undefined, "DinkusKit.com never gets the page");
+  assert.equal(passCall.adminUser, undefined, "nor the admin");
   // "Open in Ship" asks for the full version, so Ship does not forward that click straight back here.
   assert.match(page, /\/orders\/order%3Aabc\?view=full/);
 });

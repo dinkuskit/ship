@@ -1,7 +1,7 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
 import { connectPage, listPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, type OrderView, type Toast } from "./pages.js";
-import { adminPageFrom, connection, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
+import { adminPageFrom, adminUserFrom, connection, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
 
 /** EmDash's Editor role; Administrators are above it. Lower roles never see Shipping. */
 const EDITOR = 40;
@@ -89,7 +89,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
     return connectPage(error instanceof ShipError ? error.message : undefined);
   }
   if (!settings) return connectPage();
-  const hosted = ship(ctx, settings.siteId, settings.key, adminPageFrom(route.request?.url));
+  const hosted = ship(ctx, settings.siteId, settings.key, adminPageFrom(route.request?.url), adminUserFrom(user.email));
   const by = typeof user.email === "string" && user.email ? user.email : user.id;
   try {
     if (input.type === "block_action" && input.action_id === "open" && typeof input.value === "string") return await openOrder(hosted, input.value);
