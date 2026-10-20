@@ -1,8 +1,9 @@
 import { env } from "cloudflare:workers";
-import { runInDurableObject } from "cloudflare:test";
+import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
+import { trackingIndex } from "../src/tracking";
 import { pitneyConfig } from "../src/pitney";
 import { addLabelColumns, addPurchaseColumns } from "../src/store";
 
@@ -102,9 +103,10 @@ function cookies(response: Response): string {
   return response.headers.getSetCookie().map(value => value.split(";")[0]).filter(value => !value.endsWith("=")).join("; ");
 }
 
-async function request(method: string, path: string, options: { cookie?: string; form?: Record<string, string>; origin?: string | null } = {}) {
+async function request(method: string, path: string, options: { cookie?: string; form?: Record<string, string>; origin?: string | null; from?: string } = {}) {
   const headers: Record<string, string> = {};
   if (options.cookie) headers.cookie = options.cookie;
+  if (options.from) headers["sec-fetch-site"] = options.from;
   if (options.form) headers["content-type"] = "application/x-www-form-urlencoded";
   if (method === "POST" && options.origin !== null) headers.origin = options.origin ?? ORIGIN;
   return worker.fetch(new Request(`${ORIGIN}${path}`, {
@@ -512,7 +514,9 @@ test("a real order's label is bought from the store's Pitney Bowes postage accou
   expect(await labels()).toMatchObject([{ orderId: "order:abc", version: 1, carrier: "USPS", tracking: "SANDBOX-TRACKING-A" }]);
 
   const label = (await shipStore().orderSummary("order:abc"))!.labels[0]!;
-  expect(label).toMatchObject({ test: false, priceCents: 935, status: "bought" });
+  expect(label).toMatchObject({ test: false, priceCents: 935, status: "bought", delivery: null });
+  // A live label's number is in the tracking index, so Pitney Bowes's updates find this store.
+  expect(await trackingIndex(env as unknown as Env).find("SANDBOX-TRACKING-A")).toEqual({ tracking: "SANDBOX-TRACKING-A", site, labelId: label.labelId });
   const pdf = await request("GET", `/stores/${site}/labels/${label.labelId}.pdf`, { cookie });
   expect(await pdf.text()).toBe("%PDF-1.4 sandbox label");
   expect(pbCalls.filter(call => call.url.href === LABEL_URL)).toHaveLength(1);
@@ -524,6 +528,51 @@ test("a real order's label is bought from the store's Pitney Bowes postage accou
   expect(cancel.url.pathname).toBe("/shippingservices/v1/shipments/SANDBOX-SHIPMENT-A");
   expect(cancel.url.searchParams.get("cancelInitiator")).toBe("SHIPPER");
   expect((await shipStore().orderSummary("order:abc"))!.labels[0]).toMatchObject({ status: "cancelled", refund: "INITIATED" });
+  expect(await trackingIndex(env as unknown as Env).find("SANDBOX-TRACKING-A")).toBeNull();
+  expect(await (await request("GET", orderPath, { cookie })).text()).toContain("USPS refunds your postage account");
+});
+
+test("a label bought while the tracking index is unreachable is still bought, and reaches the index from the alarm", async () => {
+  const { cookie, orderPath, buy } = await liveOrder();
+  const store = shipStore();
+  const realIndex = env.SHIP_TRACKING;
+  const index = () => trackingIndex(env as unknown as Env);
+  const swapIndex = (binding: unknown) => runInDurableObject(store, async instance => { (instance as unknown as { env: Record<string, unknown> }).env = { ...env, SHIP_TRACKING: binding }; });
+  const work = () => runInDurableObject(store, async (_, state) =>
+    state.storage.sql.exec<{ label_id: string; action: string; attempts: number }>("SELECT label_id, action, attempts FROM tracking_work").toArray());
+  const down = { idFromName: () => ({}), get: () => ({ add: async () => { throw new Error("index down"); }, remove: async () => { throw new Error("index down"); } }) };
+  await swapIndex(down);
+  // The purchase is complete: one label, one Commerce event, the owner sees it bought; only the index entry waits.
+  expect((await buy()).status).toBe(303);
+  const label = (await store.orderSummary("order:abc"))!.labels[0]!;
+  expect(label).toMatchObject({ status: "bought", tracking: "SANDBOX-TRACKING-A", test: false });
+  expect(await labels()).toHaveLength(1);
+  expect(await index().find("SANDBOX-TRACKING-A")).toBeNull();
+  expect(await work()).toEqual([{ label_id: label.labelId, action: "add", attempts: 1 }]);
+  expect(await runInDurableObject(store, async (_, state) => state.storage.getAlarm())).not.toBeNull();
+  expect((await buy()).status).toBe(409);
+  expect(await labels()).toHaveLength(1);
+  // Still down at the next try: it waits again, longer.
+  await runInDurableObject(store, async (_, state) => state.storage.sql.exec("UPDATE tracking_work SET next_at = 0"));
+  await runDurableObjectAlarm(store);
+  expect(await work()).toMatchObject([{ action: "add", attempts: 2 }]);
+  // Back up: the alarm registers the label and the work is done.
+  await swapIndex(realIndex);
+  await runInDurableObject(store, async (_, state) => state.storage.sql.exec("UPDATE tracking_work SET next_at = 0"));
+  await runDurableObjectAlarm(store);
+  expect(await work()).toEqual([]);
+  expect(await index().find("SANDBOX-TRACKING-A")).toEqual({ tracking: "SANDBOX-TRACKING-A", site, labelId: label.labelId });
+  // A cancel while it is down leaves a "remove" that replaces any waiting "add", and the alarm finishes it.
+  await swapIndex(down);
+  expect((await request("POST", `/stores/${site}/labels/${label.labelId}/cancel`, { cookie })).status).toBe(303);
+  expect((await store.orderSummary("order:abc"))!.labels[0]).toMatchObject({ status: "cancelled" });
+  expect(await work()).toEqual([{ label_id: label.labelId, action: "remove", attempts: 1 }]);
+  expect(await index().find("SANDBOX-TRACKING-A")).not.toBeNull();
+  await swapIndex(realIndex);
+  await runInDurableObject(store, async (_, state) => state.storage.sql.exec("UPDATE tracking_work SET next_at = 0"));
+  await runDurableObjectAlarm(store);
+  expect(await work()).toEqual([]);
+  expect(await index().find("SANDBOX-TRACKING-A")).toBeNull();
   expect(await (await request("GET", orderPath, { cookie })).text()).toContain("USPS refunds your postage account");
 });
 
@@ -567,7 +616,10 @@ test("when Pitney Bowes has no record of a lost purchase, the owner decides whet
     if (call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments") return new Response("gateway timeout", { status: 504 });
     return sandbox(call);
   };
-  expect((await buy()).status).toBe(502);
+  const lost = await buy();
+  expect(lost.status).toBe(502);
+  // The page says what came back, so a failed journey names it without anyone reading PB's answer.
+  expect(await lost.text()).toContain("Pitney Bowes did not confirm the label (it answered 504), so Ship does not know yet");
   pbAnswer = sandbox;
   const ask = await buy();
   expect(ask.status).toBe(409);
@@ -594,7 +646,7 @@ test("a label whose PDF Pitney Bowes could not hand over yet is fetched when ope
 
 test("postage stays off until the Pitney Bowes sandbox keys are all set", () => {
   const keys = { PB_ENVIRONMENT: "sandbox", PB_API_KEY: "k", PB_API_SECRET: "s", PB_SHIPPER_ID: "m" };
-  expect(pitneyConfig(keys as unknown as Env)).toEqual({ apiKey: "k", apiSecret: "s", shipperId: "m" });
+  expect(pitneyConfig(keys as unknown as Env)).toEqual({ apiKey: "k", apiSecret: "s", shipperId: "m", origin: "https://shipping-api-sandbox.pitneybowes.com" });
   for (const off of [{ PB_ENVIRONMENT: "" }, { PB_ENVIRONMENT: "live" }, { PB_SHIPPER_ID: "" }, { PB_API_SECRET: undefined }]) {
     expect(pitneyConfig({ ...keys, ...off } as unknown as Env)).toBeNull();
   }
@@ -722,4 +774,78 @@ test("a token endpoint redirect is refused without forwarding the sign-in code",
   const tokenCall = vi.mocked(globalThis.fetch).mock.calls.find(([input]) => String(input) === `${issuer}/token`);
   expect(tokenCall?.[1]?.redirect).toBe("manual");
   expect(vi.mocked(globalThis.fetch).mock.calls.some(([input]) => String(input).startsWith("https://redirect-target.example.invalid/"))).toBe(false);
+});
+
+test("once the store's Ship plugin has called, Commerce's label button lands a signed-in owner on the store admin's Shipping page", async () => {
+  await sendOrder();
+  const adminPage = "https://shop.example.invalid/_emdash/admin/plugins/dinkus-ship-1/shipping";
+  const orderPath = `/stores/${site}/orders/order%3Aabc`;
+  const store = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site));
+  // Before the plugin has called, Ship's own order page is the only page: sign-in first.
+  const before = await request("GET", orderPath, { from: "cross-site" });
+  expect(before.status).toBe(303);
+  expect(before.headers.get("location")).toContain("/ship-sign-in");
+  await store.rememberAdminPage(adminPage);
+  // Anyone not signed in to Ship still signs in first, and queues nothing.
+  const anonymous = await request("GET", orderPath, { from: "cross-site" });
+  expect(anonymous.headers.get("location")).toContain("/ship-sign-in");
+  expect(await store.takeAdminOpen("owner@example.test")).toBeNull();
+  // An owner the plugin has never acted for keeps Ship's own page: there is nobody to open the order for over there.
+  const cookie = await signedIn();
+  expect((await request("GET", orderPath, { cookie, from: "cross-site" })).status).toBe(200);
+  expect(await store.takeAdminOpen("owner@example.test")).toBeNull();
+  // Once the plugin has named them (however it spells the address), the owner arriving from Commerce (another site)
+  // is forwarded, and the order waits for that person's Shipping page.
+  await store.rememberAdminUser("owner@example.test");
+  const forwarded = await request("GET", orderPath, { cookie, from: "cross-site" });
+  expect(forwarded.status).toBe(303);
+  expect(forwarded.headers.get("location")).toBe(adminPage);
+  expect(forwarded.headers.get("cache-control")).toBe("no-store");
+  // A second button press by the same owner before the first page opened keeps Ship's own page for it; the first still waits.
+  await sendOrder({ orderId: "order:def", number: 1002 });
+  const otherPath = `/stores/${site}/orders/order%3Adef`;
+  expect((await request("GET", otherPath, { cookie, from: "cross-site" })).status).toBe(200);
+  expect(await store.takeAdminOpen("someone-else@example.test")).toBeNull();
+  expect(await store.takeAdminOpen("Owner@example.test")).toBe("order:abc");
+  expect(await store.takeAdminOpen("owner@example.test")).toBeNull();
+  expect((await request("GET", otherPath, { cookie, from: "cross-site" })).status).toBe(303);
+  expect(await store.takeAdminOpen("owner@example.test")).toBe("order:def");
+  // Signing in on the way to the full page comes back to the full page, so the plugin's "Open in Ship" link never bounces.
+  const { back } = await signIn(`${orderPath}?view=full`);
+  expect(back.headers.get("location")).toBe(`${orderPath}?view=full`);
+  // The way back from DinkusKit.com's sign-in counts as from outside Ship too.
+  expect((await request("GET", orderPath, { cookie, from: "same-site" })).headers.get("location")).toBe(adminPage);
+  // Ship's own links and redirects, and a browser that does not say where it came from, keep Ship's page.
+  for (const from of ["same-origin", undefined]) expect((await request("GET", orderPath, { cookie, from })).status).toBe(200);
+  // The plugin's own "Open in Ship" link asks for the full version and gets Ship's page, so the two never bounce.
+  expect((await request("GET", `${orderPath}?view=full`, { cookie, from: "cross-site" })).status).toBe(200);
+  // The list and settings pages are never forwarded.
+  expect((await request("GET", `/stores/${site}/orders`, { cookie, from: "cross-site" })).status).toBe(200);
+  expect((await request("GET", `/stores/${site}/settings`, { cookie, from: "cross-site" })).status).toBe(200);
+  // A plugin that has not called in a week is forgotten: Commerce's button is back on Ship's own page.
+  await runInDurableObject(store, async (_, state) => state.storage.sql.exec("UPDATE store_meta SET value = ? WHERE key = 'admin_page_at'", new Date(Date.now() - 8 * 86_400_000).toISOString()));
+  expect(await store.adminPage()).toBeNull();
+  expect((await request("GET", orderPath, { cookie, from: "cross-site" })).status).toBe(200);
+  // The plugin's next call brings it back.
+  await store.rememberAdminPage(adminPage);
+  expect((await request("GET", orderPath, { cookie, from: "cross-site" })).headers.get("location")).toBe(adminPage);
+});
+
+test("an answer Ship cannot read as a label says which part was missing, in plain words and never a link", async () => {
+  const { buy } = await liveOrder();
+  const answers: [Record<string, unknown>, string][] = [
+    [{ ...pbLabel("PM"), documents: [{ ...(pbLabel("PM").documents as Record<string, unknown>[])[0], contents: "https://labels-cls.gcs.pitneybowes.com/usps/x/label.pdf?token=secret" }] }, "(its label link was on another host, labels-cls.gcs.pitneybowes.com)"],
+    [{ ...pbLabel("PM"), documents: [] }, "(it gave no label document)"],
+    [{ ...pbLabel("PM"), parcelTrackingNumber: "" }, "(it gave no tracking number)"],
+    [{ ...pbLabel("PM"), rates: [{ carrier: "USPS", serviceId: "PM", totalCarrierCharge: 0 }] }, "(it gave no price)"],
+    [{ ...pbLabel("PM"), shipmentId: undefined }, "(it gave no shipment id)"],
+  ];
+  for (const [answer, expected] of answers) {
+    pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? Response.json(answer) : sandbox(call);
+    const page = await buy({ buyAgain: "yes" });
+    expect(page.status).toBe(502);
+    const text = await page.text();
+    expect(text).toContain(expected);
+    expect(text).not.toContain("token=secret");
+  }
 });

@@ -1,5 +1,5 @@
 import type { Block, BlockResponse, FormField, LinkElement } from "@emdash-cms/blocks/server";
-import { shipPages, type Box, type Label, type Prices, type ServiceCode, type ShipOrder, type ShipOrderRow, type ShipSettings } from "./ship.js";
+import { type Delivery, shipPages, type Box, type Label, type Prices, type ServiceCode, type ShipOrder, type ShipOrderRow, type ShipSettings } from "./ship.js";
 
 /** The Shipping pages, drawn fresh from hosted Ship's answers; nothing here is kept. */
 export const SERVICES: Record<ServiceCode, string> = { GA: "USPS Ground Advantage", PM: "USPS Priority Mail", EM: "USPS Priority Mail Express" };
@@ -42,8 +42,17 @@ function price(label: Label): string {
   return label.priceCents === null ? "Charged to your Pitney Bowes postage account" : `${money(label.priceCents)} from your Pitney Bowes postage account`;
 }
 
+const DELIVERY: Record<Delivery["state"], string> = { in_transit: "In transit", out_for_delivery: "Out for delivery", delivered: "Delivered", problem: "Problem" };
+/** "Delivered", or "Problem: Delivery attempted", with the scan's day when asked. */
+function deliveryText(delivery: Delivery, withNote = false): string {
+  const phrase = withNote && delivery.note && delivery.state === "problem" ? `${DELIVERY[delivery.state]}: ${delivery.note}` : DELIVERY[delivery.state];
+  return withNote ? `${phrase}, ${delivery.at.replace("T", " ").slice(0, 16)} UTC` : phrase;
+}
+
 function status(order: ShipOrder | ShipOrderRow): string {
   const labelStatus = "labelStatus" in order ? order.labelStatus : order.label ? "bought" : order.labels.some(label => label.status === "cancelled") ? "cancelled" : null;
+  const delivery = "labelStatus" in order ? order.delivery : order.label?.delivery;
+  if (labelStatus === "bought" && delivery) return deliveryText(delivery);
   if (labelStatus === "bought") return "Label bought";
   if (order.addressProblem && order.status === "processing") return "Fix address";
   if (labelStatus === "cancelled") return "Label cancelled";
@@ -101,6 +110,7 @@ function labelFields(label: Label): Block {
   return fields(["Service", SERVICES[label.service] ?? label.service], ["Tracking number", tracking(label)],
     ["Box", `${label.box.name}: ${label.box.lengthIn} × ${label.box.widthIn} × ${label.box.heightIn} in`], ["Weight", `${label.weightOz} oz`],
     ["Postage", price(label)], ["Bought", label.createdAt.replace("T", " ").slice(0, 16)],
+    ...(label.delivery ? [["Delivery", deliveryText(label.delivery, true)] as [string, string]] : []),
     ...(label.status === "cancelled" ? [["Cancelled", `${(label.cancelledAt ?? "").replace("T", " ").slice(0, 16)}${label.refund && !label.test ? `, refund ${label.refund.toLowerCase()}` : ""}`] as [string, string]] : []));
 }
 

@@ -9,8 +9,14 @@
   "preview_urls": false,
   "routes": [{ "pattern": "ship.sm0ky.dev", "custom_domain": true }],
   "observability": { "enabled": true, "head_sampling_rate": 0.1 },
-  "durable_objects": { "bindings": [{ "name": "SHIP_STORES", "class_name": "StoreShipping" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StoreShipping"] }],
+  "durable_objects": { "bindings": [
+    { "name": "SHIP_STORES", "class_name": "StoreShipping" },
+    { "name": "SHIP_TRACKING", "class_name": "TrackingIndex" }
+  ] },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["StoreShipping"] },
+    { "tag": "v2", "new_sqlite_classes": ["TrackingIndex"] }
+  ],
   "vars": {
     "ACCOUNT_ISSUER": "https://dinkuskit.com/account",
     "ACCOUNT_AUDIENCE": "dinkus-ship-sandbox",

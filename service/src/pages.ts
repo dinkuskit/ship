@@ -1,4 +1,5 @@
 import type { LabelAddress } from "./address.js";
+import { deliveryText } from "./delivery.js";
 import type { ShipOrder } from "./order.js";
 import { signupUrl } from "./pitney.js";
 import { MAX_WEIGHT_OZ, SERVICES, type Label, type OrderSummary, type Quotes, type ServiceCode, type Settings } from "./store.js";
@@ -67,7 +68,7 @@ export function ordersPage(site: string, email: string, orders: OrderSummary[]):
   const rows = orders.map(summary => {
     const { order } = summary;
     const label = liveLabel(summary);
-    const state = order.status === "completed" ? "Completed" : label ? "Label bought" : summary.address.ok ? "Waiting for a label" : "Address needs a fix";
+    const state = label?.delivery ? deliveryText(label.delivery, false) : order.status === "completed" ? "Completed" : label ? "Label bought" : summary.address.ok ? "Waiting for a label" : "Address needs a fix";
     return `<tr><td><a href="/stores/${encodeURIComponent(site)}/orders/${encodeURIComponent(order.orderId)}">${esc(orderName(order))}</a>
       ${order.test ? ' <span class="tag test">TEST</span>' : ""}</td><td>${esc(order.shipTo.name)}<br><span class="muted">${esc(order.shipTo.city)}${order.shipTo.region ? `, ${esc(order.shipTo.region)}` : ""}</span></td>
       <td>${order.lines.reduce((sum, line) => sum + line.quantity, 0)}</td><td>${esc(state)}</td></tr>`;
@@ -87,7 +88,7 @@ function labelRow(site: string, label: Label, current: boolean): string {
        <form class="inline" method="post" action="${base}/cancel"><button class="secondary" style="margin:0 0 0 12px">Cancel label</button></form>`
     : `<span class="muted">Cancelled${label.refund && !label.test ? ". USPS refunds your postage account, which can take up to 14 days." : ""}</span>`;
   return `<tr><td>${esc(SERVICES[label.service])}${label.practice ? ' <span class="tag test">PRACTICE</span>' : label.test ? ' <span class="tag test">TEST SANDBOX</span>' : ""}${current ? "" : ' <span class="muted">(older order version)</span>'}</td>
-    <td>${esc(label.tracking)}</td><td>${esc(label.box.name)}, ${esc(label.weightOz)} oz</td>
+    <td>${esc(label.tracking)}${label.delivery ? `<br><span class="muted">${esc(deliveryText(label.delivery))}, ${esc(label.delivery.at.replace("T", " ").slice(0, 16))} UTC</span>` : ""}</td><td>${esc(label.box.name)}, ${esc(label.weightOz)} oz</td>
     <td>${label.priceCents === null ? '<span class="muted">—</span>' : `${money(label.priceCents)}${label.test ? ' <span class="muted">(sandbox, not charged)</span>' : ""}`}</td><td>${actions}</td></tr>`;
 }
 

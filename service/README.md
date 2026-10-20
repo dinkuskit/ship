@@ -107,6 +107,8 @@ value. The vars below live in the Cloudflare dashboard and survive every deploy.
 - **Route:** `ship.dinkuskit.com`. Keep `global_fetch_strictly_public` enabled so token and JWKS requests reach the DinkusKit.com Worker on the same zone. Token exchange uses manual redirect handling and rejects non-2xx replies without forwarding the sign-in code.
 - **Pitney Bowes (sandbox):** var `PB_ENVIRONMENT=sandbox`, and secrets `PB_API_KEY`, `PB_API_SECRET` (DinkusKit's PB developer keys) and `PB_SHIPPER_ID` (the sandbox's test merchant), set by Ronald with `wrangler secret put`. They never go in this repository. Until all four are set, real orders cannot get labels and TEST orders get practice labels. Var `PB_DEVELOPER_ID` (DinkusKit's PB developer id, from PB Developer Hub > Profile) turns on owners' sign-up link and connect form. Live postage is not built: it needs Ronald's word and PB's live keys, and PB may charge owners a subscription fee (asked, not yet answered).
 
+- **Tracking updates (ship-tracking-001):** secrets `PB_TRACKING_USER` and `PB_TRACKING_PASSWORD`, the username and password Ronald gives Pitney Bowes for its webhook (see docs/pitney-tracking-webhook.md), set with `wrangler secret put`. `POST /v1/tracking/pitney` answers 503 until both are set. The deploy also applies Durable Object migration `v2` (the `TrackingIndex` class) and the daily cron `0 14 * * *` from `wrangler.jsonc`; `--keep-vars` does not affect either. Tracking only ever reports on live labels, so nothing shows until a store buys production postage.
+
 ## Isolated TEST recipient preparation
 
 See [the isolated sandbox contract](../docs/contracts/isolated-ship-sandbox-v1.md)

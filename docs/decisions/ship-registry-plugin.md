@@ -60,6 +60,12 @@ He wants Commerce's "Create shipping label" to lead to the plugin once the plugi
 
 ## Live tracking: Pitney Bowes or USPS directly (checked 19 Oct)
 
+Locked 20 Oct 2026 as ship-tracking-001 on Ronald's "a a" (03:12 UTC): the
+recommendation below, built before Ship's final and proved only on his real store
+with production postage; the final does not wait for that proof. Built as
+`service/src/tracking.ts` (the receiver, the index, the daily check) and `delivery`
+on labels; the contract's additive fields are in docs/contracts/ship-plugin-v1.md.
+
 - **Pitney Bowes** pushes scan updates (In transit, Out for delivery, Delivered, Exception, Return to sender and others) to one web address per *developer account* ([webhook docs](https://docs.shippingapi.pitneybowes.com/tracking/webhook.html)). Under PB 2a every store's labels are bought through DinkusKit's one developer account, so one Ship address would get updates for every store. It is switched on by contacting PB with the address and a username and password (or OAuth) that PB sends with each update; PB retries failures for 16 hours. There's also a "Track a Parcel" lookup to ask for one label's status ([overview](https://docs.shippingapi.pitneybowes.com/tracking/overview.html)). Catch: tracking only works for live labels, not sandbox ones, so TEST orders never get scan updates. No price is listed.
 - **USPS directly** has tracking subscriptions in its new APIs ([guide](https://hookdeck.com/webhooks/platforms/guide-to-usps-webhooks-features-and-best-practices)): DinkusKit would need its own USPS business account (a CRID), subscribe per mailer or per tracking number, verify each update by its signature, and keep subscriptions alive (they stop after 30 days quiet, and USPS doesn't retry a missed update). It's USPS only and adds a second outside account.
 - **Recommendation (inference):** use Pitney Bowes' updates, since they come with the account we already have and cover every store at once, plus a daily "Track a Parcel" check for labels still not delivered, to catch a missed update. Build it as its own small Ship change after the plugin, so the plugin's states grow from 3 to include In transit and Delivered when it lands. Ask PB about the webhook and any fee in the same thread as the pending fee question.

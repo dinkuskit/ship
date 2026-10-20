@@ -116,3 +116,6 @@
 {"action": "decision_proposed", "at": "2026-10-19T23:00:50+00:00", "data": {"decision_id": "ship-plugin-contract-001"}, "event_id": "2ca2ef7f-c97a-4da7-806c-d971d213aed5"}
 {"action": "decision_locked", "at": "2026-10-19T23:47:54+00:00", "data": {"decision_id": "ship-plugin-contract-001"}, "event_id": "c192dcc9-9466-4080-ba22-08d1affdb1e2"}
 {"action": "decision_implemented", "at": "2026-10-19T23:47:54+00:00", "data": {"decision_id": "ship-plugin-contract-001"}, "event_id": "c07522b5-b678-4db3-9e59-487cb1dff399"}
+{"action": "decision_proposed", "at": "2026-10-20T03:27:37+00:00", "data": {"decision_id": "ship-tracking-001"}, "event_id": "ce732803-54dd-472b-bd2b-d0f393c0b4e9"}
+{"action": "decision_locked", "at": "2026-10-20T03:27:37+00:00", "data": {"decision_id": "ship-tracking-001"}, "event_id": "b9d334a1-f139-49f7-ab05-10177cc641bf"}
+{"action": "decision_implemented", "at": "2026-10-20T03:40:56+00:00", "data": {"decision_id": "ship-tracking-001"}, "event_id": "ce32896f-871c-4ea5-b1bc-02e52eca4b19"}

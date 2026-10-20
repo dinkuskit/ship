@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
@@ -91,7 +92,7 @@ async function setUp(): Promise<string> {
 test("the admin routes take only a ship:admin pass, and Commerce's routes still take only ship:orders", async () => {
   expect((await call("GET", "/v1/admin/orders", { scope: "ship:orders" })).status).toBe(403);
   expect((await call("GET", "/v1/labels", { scope: "ship:admin" })).status).toBe(403);
-  expect((await call("GET", "/v1/admin/orders")).json).toEqual({ orders: [], settings: { shipFrom: false, boxes: [], postageConnected: true, testSandbox: true } });
+  expect((await call("GET", "/v1/admin/orders")).json).toEqual({ orders: [], settings: { shipFrom: false, boxes: [], postageConnected: true, testSandbox: true }, open: null });
   expect((await call("DELETE", "/v1/admin/orders")).status).toBe(405);
   expect((await call("GET", "/v1/admin/orders/nope")).json.error.code).toBe("NOT_FOUND");
   expect((await call("POST", "/v1/admin/labels/nope/print-link")).json.error.code).toBe("NOT_FOUND");
@@ -104,7 +105,7 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
     shipTo: { name: "Demo Shopper", lines: ["1 Example Way"], city: "Testville", region: "California", postalCode: "90000" },
     addressProblem: null, items: "2 × Demo Mug", itemCount: 1, labelStatus: null }]);
   // The list is rows, not whole orders: the items and label history come with the one order.
-  expect(Object.keys(before.json.orders[0]).sort()).toEqual(["addressProblem", "itemCount", "items", "labelStatus", "number", "orderId", "shipTo", "status", "test", "version"]);
+  expect(Object.keys(before.json.orders[0]).sort()).toEqual(["addressProblem", "delivery", "itemCount", "items", "labelStatus", "number", "orderId", "shipTo", "status", "test", "version"]);
   expect(before.json.settings.shipFrom).toBe(false);
   // Nothing from the owner's PB account crosses to the plugin.
   expect(Object.keys(before.json.settings).sort()).toEqual(["boxes", "postageConnected", "shipFrom", "testSandbox"]);
@@ -218,4 +219,98 @@ test("the order list stays small however big the orders are: the items come with
   expect(json.orders[0].itemCount).toBe(100);
   expect(text.length).toBeLessThan(64 * 1024);
   expect((await call("GET", "/v1/admin/orders/order%3Abig-0")).json.order.lines).toHaveLength(100);
+});
+
+// The forward (ship-registry-plugin-001, question 4): the plugin tells Ship where the
+// store admin's Shipping page is, and Ship's own order page sends the owner there.
+
+const STORE = "https://shop.example.invalid";
+const ADMIN_PAGE = `${STORE}/_emdash/admin/plugins/dinkus-ship-1/shipping`;
+
+/** The store admin whose page load the plugin says a call is, as EmDash spells it. */
+const ADMIN = "Owner@Example.test";
+
+/** A ship:admin pass as DinkusKit.com signs it for a store, with the store's origin, plus the headers the plugin sends. */
+async function callFrom(adminPage: string | null, siteOrigin: string | null = STORE, path = "/v1/admin/orders", adminUser: string | null = ADMIN) {
+  const token = await new SignJWT({ site_id: site, scope: "ship:admin", ...(siteOrigin === null ? {} : { site_origin: siteOrigin }) })
+    .setProtectedHeader({ alg: "ES256", kid: "synthetic" }).setIssuer(issuer).setAudience("dinkus-ship")
+    .setSubject("synthetic-business").setIssuedAt().setExpirationTime("5m").sign(privateKey);
+  const headers: Record<string, string> = { authorization: `Bearer ${token}` };
+  if (adminPage !== null) headers["x-ship-admin-page"] = adminPage;
+  if (adminUser !== null) headers["x-ship-admin-user"] = adminUser;
+  const response = await worker.fetch(new Request(`${ORIGIN}${path}`, { headers }), configured());
+  return { status: response.status, json: await response.json() as any };
+}
+
+test("Ship remembers the store's Shipping page only from a page on the store the pass was signed for", async () => {
+  expect(await shipStore().adminPage()).toBeNull();
+  // Other origins, other admin paths, query strings and passes without the store's origin are ignored.
+  for (const [page, origin] of [
+    [`https://elsewhere.example.invalid/_emdash/admin/plugins/dinkus-ship-1/shipping`, STORE],
+    [`${STORE}/_emdash/admin/plugins/dinkus-ship-1/shipping?x=1`, STORE],
+    [`${STORE}/admin/plugins/dinkus-ship-1/shipping`, STORE],
+    [`${STORE}/_emdash/admin/plugins/../shipping`, STORE],
+    [ADMIN_PAGE, null],
+    [ADMIN_PAGE, "not a url"],
+    [ADMIN_PAGE, `${STORE}/path`],
+  ] as [string, string | null][]) {
+    expect((await callFrom(page, origin)).status).toBe(200);
+    expect(await shipStore().adminPage(), `${page} from ${origin}`).toBeNull();
+  }
+  expect((await callFrom(ADMIN_PAGE)).status).toBe(200);
+  expect(await shipStore().adminPage()).toBe(ADMIN_PAGE);
+  // A list without a forward waiting carries open: null, and a Commerce call never carries the header's meaning.
+  expect((await callFrom(ADMIN_PAGE)).json.open).toBeNull();
+});
+
+test("Ship remembers which store admins the plugin acts for, by email, for a week", async () => {
+  await callFrom(ADMIN_PAGE);
+  expect(await shipStore().adminPageFor("owner@example.test")).toBe(ADMIN_PAGE);
+  expect(await shipStore().adminPageFor(" OWNER@example.test ")).toBe(ADMIN_PAGE);
+  expect(await shipStore().adminPageFor("stranger@example.test")).toBeNull();
+  // A header that is not one email names nobody.
+  for (const bad of ["not an email", "two@example.test three@example.test", "@example.test", `${"a".repeat(260)}@example.test`]) {
+    expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", bad)).status).toBe(200);
+    expect(await shipStore().adminPageFor(bad), bad).toBeNull();
+  }
+  // Without a fresh Shipping page there is nowhere to forward anyone.
+  await runInDurableObject(shipStore(), async (_, state) => state.storage.sql.exec("UPDATE store_meta SET value = ? WHERE key = 'admin_page_at'", new Date(Date.now() - 8 * 86_400_000).toISOString()));
+  expect(await shipStore().adminPageFor("owner@example.test")).toBeNull();
+  // An admin not seen in a week is forgotten too.
+  await callFrom(ADMIN_PAGE);
+  await runInDurableObject(shipStore(), async (_, state) => state.storage.sql.exec("UPDATE store_meta SET value = ? WHERE key = 'admin_users'", JSON.stringify({ "owner@example.test": new Date(Date.now() - 8 * 86_400_000).toISOString() })));
+  expect(await shipStore().adminPageFor("owner@example.test")).toBeNull();
+});
+
+test("the order Ship forwarded the owner from opens once in the store admin, for that same person, and only while it is fresh", async () => {
+  await sendOrder();
+  await callFrom(ADMIN_PAGE);
+  await shipStore().queueAdminOpen("order:abc", "owner@example.test");
+  // Another admin's page load, or a call that names nobody, leaves it waiting for the person it is for.
+  expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", "other@example.test")).json.open).toBeNull();
+  expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", null)).json.open).toBeNull();
+  expect((await callFrom(ADMIN_PAGE)).json.open).toBe("order:abc");
+  expect((await callFrom(ADMIN_PAGE)).json.open).toBeNull();
+  // Two admins forwarding at once each keep their own order; a second order for the same person while one waits is refused, not swapped in.
+  await sendOrder({ orderId: "order:def", number: 1002 });
+  expect(await shipStore().queueAdminOpen("order:abc", "owner@example.test")).toBe(true);
+  expect(await shipStore().queueAdminOpen("order:def", "other@example.test")).toBe(true);
+  expect(await shipStore().queueAdminOpen("order:def", "third@example.test")).toBe(true);
+  expect(await shipStore().queueAdminOpen("order:abc", "third@example.test")).toBe(false);
+  expect(await shipStore().queueAdminOpen("order:def", "third@example.test")).toBe(true);
+  expect((await callFrom(ADMIN_PAGE)).json.open).toBe("order:abc");
+  expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", "third@example.test")).json.open).toBe("order:def");
+  expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", "Other@example.test")).json.open).toBe("order:def");
+  expect((await callFrom(ADMIN_PAGE, STORE, "/v1/admin/orders", "other@example.test")).json.open).toBeNull();
+  // An order Ship never saw, or a stale forward, opens nothing.
+  await shipStore().queueAdminOpen("order:nope", "owner@example.test");
+  expect((await callFrom(ADMIN_PAGE)).json.open).toBeNull();
+  vi.useFakeTimers();
+  try {
+    await shipStore().queueAdminOpen("order:abc", "owner@example.test");
+    vi.setSystemTime(Date.now() + 3 * 60_000);
+    expect((await callFrom(ADMIN_PAGE)).json.open).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });

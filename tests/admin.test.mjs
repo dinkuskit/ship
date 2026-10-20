@@ -30,13 +30,14 @@ const pass = (claims = {}) => `${b64({ alg: "ES256" })}.${b64({ iss: "https://di
   scope: "ship:admin", iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300, ...claims })}.${b64("sig")}`;
 
 /** A host with the plugin's settings, a fake network, and an Editor at the Shipping page. */
-function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.json({ access_token: pass(), token_type: "Bearer", expires_in: 300 }), role = 40 } = {}) {
+function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.json({ access_token: pass(), token_type: "Bearer", expires_in: 300 }), role = 40, requestUrl = "" } = {}) {
   const calls = [];
   const ctx = {
     settings: { get: async name => ({ siteId, storeKey: key })[name] ?? null },
     http: { fetch: async (url, init) => {
       const body = init?.body ? JSON.parse(init.body) : undefined;
-      calls.push({ url, method: init?.method ?? "GET", authorization: init?.headers?.authorization, body });
+      const adminPage = init?.headers?.["x-ship-admin-page"], adminUser = init?.headers?.["x-ship-admin-user"];
+      calls.push({ url, method: init?.method ?? "GET", authorization: init?.headers?.authorization, ...(adminPage === undefined ? {} : { adminPage }), ...(adminUser === undefined ? {} : { adminUser }), body });
       if (url === "https://dinkuskit.com/api/store-passes") return passes({ url, init, body });
       const path = new URL(url).pathname;
       const answer = ship[`${init?.method ?? "GET"} ${path}`];
@@ -45,7 +46,7 @@ function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.jso
     } },
     log: { error() {}, info() {}, warn() {}, debug() {} },
   };
-  const route = input => ({ input, ui: { surface: "admin-page", locale: "en", direction: "ltr" }, user: { id: "u1", email: "staff@example.test", name: "Staff", role, createdAt: "" }, request: { url: "", method: "POST", headers: {} } });
+  const route = input => ({ input, ui: { surface: "admin-page", locale: "en", direction: "ltr" }, user: { id: "u1", email: "staff@example.test", name: "Staff", role, createdAt: "" }, request: { url: requestUrl, method: "POST", headers: {} } });
   // Every answer must be Block Kit the host would render.
   const page = async input => {
     const response = await admin(route(input), ctx);
@@ -295,4 +296,53 @@ test("a completed order and a bad address get no form", async () => {
   const bad = text(await h.page({ type: "block_action", action_id: "open", value: "bad" }));
   assert.match(bad, /no US state/);
   assert.doesNotMatch(bad, /"type":"form"/);
+});
+
+test("Ship learns where this store's Shipping page is and whose page load each call is, and opens the order it forwarded that person from", async () => {
+  // EmDash calls the route at the admin API URL; the Shipping page is the same origin's plugin page.
+  const h = host({ requestUrl: "https://shop.example.test/_emdash/api/plugins/dinkus-ship-1/admin", ship: {
+    "GET /v1/admin/orders": { orders: [row()], settings, open: "order:abc" },
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+  } });
+  const page = text(await h.page(load));
+  assert.match(page, /Demo Mug/);
+  assert.match(page, /prices:/, "the forwarded order opens, not the list");
+  for (const call of h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com/"))) {
+    assert.equal(call.adminPage, "https://shop.example.test/_emdash/admin/plugins/dinkus-ship-1/shipping");
+    assert.equal(call.adminUser, "staff@example.test", "the admin EmDash attested, so Ship forwards and opens for that person alone");
+  }
+  const passCall = h.calls.find(call => call.url === "https://dinkuskit.com/api/store-passes");
+  assert.equal(passCall.adminPage, undefined, "DinkusKit.com never gets the page");
+  assert.equal(passCall.adminUser, undefined, "nor the admin");
+  // "Open in Ship" asks for the full version, so Ship does not forward that click straight back here.
+  assert.match(page, /\/orders\/order%3Aabc\?view=full/);
+});
+
+test("without a usable request URL no page is sent, and a list without an open order stays a list", async () => {
+  for (const requestUrl of ["", "http://shop.example.test/_emdash/api/plugins/dinkus-ship-1/admin", "https://shop.example.test/other"]) {
+    const h = host({ requestUrl, ship: { "GET /v1/admin/orders": { orders: [row()], settings, open: null } } });
+    const page = text(await h.page(load));
+    assert.match(page, /Demo Mug/);
+    assert.doesNotMatch(page, /prices:/);
+    assert.ok(h.calls.every(call => call.adminPage === undefined), requestUrl);
+  }
+});
+
+test("a live label's delivery shows in the list and on the order, and a label without one reads Label bought", async () => {
+  const delivered = { state: "delivered", at: "2026-10-22T18:02:00.000Z", note: "Delivered, In/At Mailbox" };
+  const problem = { state: "problem", at: "2026-10-23T12:00:00.000Z", note: "Delivery attempted" };
+  const live = label({ test: false, tracking: "9400100000000000000001", delivery: delivered });
+  const h = host({ ship: {
+    "GET /v1/admin/orders": { orders: [row({ labelStatus: "bought", delivery: delivered }), row({ orderId: "order:def", number: 1002, labelStatus: "bought", delivery: problem }), row({ orderId: "order:ghi", number: 1003, labelStatus: "bought", delivery: null })], settings },
+    "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false, label: live, labels: [live] }), settings },
+    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/t", expiresAt: "2026-10-19T22:05:00.000Z" },
+  } });
+  const list = text(await h.page(load));
+  assert.match(list, /"Delivered"/);
+  assert.match(list, /"Problem"/);
+  assert.doesNotMatch(list, /Delivery attempted/, "the list keeps the one word; the order page has the reason");
+  assert.match(list, /"Label bought"/);
+  const page = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc", page: "/shipping" }));
+  assert.match(page, /"label":"Delivery","value":"Delivered, 2026-10-22 18:02 UTC"/);
+  assert.match(page, /"label":"Status","value":"Delivered"/);
 });

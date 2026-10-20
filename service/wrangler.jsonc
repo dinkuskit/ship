@@ -9,15 +9,24 @@
   "workers_dev": false,
   "preview_urls": false,
   "observability": { "enabled": true, "head_sampling_rate": 0.1 },
-  "durable_objects": { "bindings": [{ "name": "SHIP_STORES", "class_name": "StoreShipping" }] },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["StoreShipping"] }],
+  "durable_objects": { "bindings": [
+    { "name": "SHIP_STORES", "class_name": "StoreShipping" },
+    { "name": "SHIP_TRACKING", "class_name": "TrackingIndex" }
+  ] },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["StoreShipping"] },
+    { "tag": "v2", "new_sqlite_classes": ["TrackingIndex"] }
+  ],
   // No vars here on purpose: `wrangler deploy --keep-vars` keeps only the variables
   // this file does not mention, so listing them (even empty) would overwrite the
   // live values. The live Worker's vars (ACCOUNT_ISSUER, ACCOUNT_AUDIENCE,
   // ACCOUNT_JWKS_URL, ACCOUNT_SIGNIN_URL, ACCOUNT_TOKEN_URL, PB_ENVIRONMENT,
   // PB_DEVELOPER_ID, SHIP_EMAIL_FROM) are set in the Cloudflare dashboard; see
   // README.md "Deploy settings". Local dev and tests supply their own bindings.
-  "send_email": [{ "name": "EMAIL" }]
+  "send_email": [{ "name": "EMAIL" }],
+  // The daily tracking check: Track a Parcel for live labels not yet delivered (ship-tracking-001).
+  "triggers": { "crons": ["0 14 * * *"] }
   // Secrets, set with `wrangler secret put`: SHIP_SESSION_SECRET (32+ random characters);
-  // PB_API_KEY, PB_API_SECRET and PB_SHIPPER_ID (Pitney Bowes sandbox, set by Ronald).
+  // PB_API_KEY, PB_API_SECRET and PB_SHIPPER_ID (Pitney Bowes sandbox, set by Ronald);
+  // PB_TRACKING_USER and PB_TRACKING_PASSWORD (what Pitney Bowes sends with each tracking update).
 }

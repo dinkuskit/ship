@@ -7,6 +7,8 @@ import { authorizeMerchant, buy, downloadPdf, findPurchase, newTransactionId, Pi
 import { practiceLabelPdf } from "./practice-pdf.js";
 import { DEFAULT_FROM, shippedEmail } from "./shipped-email.js";
 import { GRACE_SECONDS, REFRESH_SECONDS } from "./session.js";
+import type { Delivery } from "./delivery.js";
+import { trackingIndex } from "./tracking.js";
 
 /** Commerce reads at most this many labels per call (dinkuskit/commerce src/features/orders/ship.ts). */
 export const LABELS_PER_LIST = 100;
@@ -32,6 +34,8 @@ export interface Label {
   priceCents: number | null;
   /** PB's refund state after a cancel ("INITIATED" or "APPROVED"); null otherwise. */
   refund: string | null;
+  /** Where the carrier says a live label is (ship-tracking-001); null until its first scan, and always for sandbox and practice labels. */
+  delivery: Delivery | null;
 }
 export interface Settings {
   shipFrom: ShipFrom | null; boxes: Box[]; storeName: string | null; replyTo: string | null;
@@ -58,6 +62,16 @@ type Purchase = { transaction_id: string; order_id: string; version: number; tes
 const NOT_CONNECTED = "Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels: practice labels with no postage.";
 /** How long a purchase counts as still in flight before another page may check on it. */
 const IN_FLIGHT_MS = 60_000;
+/** How long a forwarded "Create shipping label" waits for the store admin's Shipping page to open it. */
+const ADMIN_OPEN_MS = 60_000;
+/** A Shipping page, or an admin, the plugin has not called from in this long is forgotten: Commerce's button goes back to Ship's own page. */
+const ADMIN_PAGE_FRESH_MS = 7 * 86_400_000;
+/** Refresh a page's or an admin's last-seen time at most this often, so the plugin's every call does not write. */
+const ADMIN_PAGE_TOUCH_MS = 60 * 60_000;
+/** The most store admins Ship keeps the last-seen time of; the least recently seen make room. */
+const ADMIN_USERS_MAX = 50;
+/** Emails compare without case: EmDash's and DinkusKit.com's may spell the same address differently. */
+const adminEmail = (email: string) => email.trim().toLowerCase();
 
 /** Orders completed this long before the store first sent Ship anything get no email (clock differences aside). */
 const BEFORE_CONNECT_MS = 15 * 60_000;
@@ -66,6 +80,10 @@ const EMAIL_RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 6 * 3_60
 /** A completion older than this is not emailed any more, however it got stuck. */
 const EMAIL_MAX_AGE_MS = 3 * 24 * 3_600_000;
 const EMAILS_PER_ALARM = 25;
+/** Waits between tries when the tracking index cannot be reached; the last one repeats until it can. */
+const TRACKING_RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 12 * 3_600_000];
+/** Waiting "open this order" handoffs kept per store, one per admin; the oldest make room. */
+const ADMIN_OPEN_MAX = 50;
 export interface OrderSummary { order: ShipOrder; labels: Label[]; address: LabelAddress }
 
 type Fields = Record<string, unknown>;
@@ -89,7 +107,7 @@ function formNumber(fields: Fields, key: string, label: string, min: number, max
 }
 
 /** Columns labels gained with Pitney Bowes postage; a store made before then gets them added once. */
-const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT" } as const;
+const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT", delivery_state: "TEXT", delivery_at: "TEXT", delivery_note: "TEXT" } as const;
 
 /** Columns purchases gained when TEST orders got Pitney Bowes sandbox labels. */
 const PURCHASE_COLUMNS = { test: "INTEGER NOT NULL DEFAULT 0" } as const;
@@ -175,6 +193,9 @@ export class StoreShipping extends DurableObject<Env> {
       order_id TEXT NOT NULL, completed_at TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
       next_at INTEGER NOT NULL, created_at INTEGER NOT NULL, sent_at INTEGER, PRIMARY KEY (order_id, completed_at))`);
     this.sql.exec("CREATE INDEX IF NOT EXISTS shipped_emails_due ON shipped_emails (state, next_at)");
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS tracking_work (
+      label_id TEXT PRIMARY KEY, tracking TEXT NOT NULL, action TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+      next_at INTEGER NOT NULL, created_at INTEGER NOT NULL)`);
     this.sql.exec(`CREATE TABLE IF NOT EXISTS sessions (
       session_id TEXT PRIMARY KEY, uid TEXT NOT NULL, email TEXT NOT NULL, refresh_token TEXT NOT NULL,
       checked_at INTEGER NOT NULL, refreshing_until INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL)`);
@@ -377,14 +398,33 @@ export class StoreShipping extends DurableObject<Env> {
 
   private labelsFor(orderId: string): Label[] {
     return this.sql.exec<Record<string, string | number | null>>(
-      "SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at, price_cents, refund, shipment_id FROM labels WHERE order_id = ? ORDER BY created_at",
+      "SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at, price_cents, refund, shipment_id, delivery_state, delivery_at, delivery_note FROM labels WHERE order_id = ? ORDER BY created_at",
       orderId).toArray().map(row => ({
         labelId: row.label_id as string, orderId: row.order_id as string, version: row.version as number, test: row.test === 1,
         service: row.service as ServiceCode, box: JSON.parse(row.box as string) as Box, weightOz: row.weight_oz as number,
         carrier: row.carrier as string, tracking: row.tracking as string, status: row.status as Label["status"],
         createdBy: row.created_by as string, createdAt: row.created_at as string, cancelledAt: row.cancelled_at as string | null,
         practice: row.test === 1 && row.shipment_id === null, priceCents: row.price_cents as number | null, refund: row.refund as string | null,
+        delivery: row.delivery_state && row.delivery_at ? { state: row.delivery_state as Delivery["state"], at: row.delivery_at as string, note: row.delivery_note as string | null } : null,
       }));
+  }
+
+  /**
+   * The carrier's latest word on a live label, from Pitney Bowes's update or the
+   * daily check. Updates can arrive out of order: a delivered label stays delivered,
+   * and an older scan never replaces a newer one. Answers the state the label is
+   * left in, which is what the tracking index goes by, or null for a label this
+   * store does not have, or a sandbox or practice one, which never moves.
+   */
+  async recordDelivery(labelId: string, delivery: Delivery): Promise<Delivery["state"] | null> {
+    this.checkIsolation();
+    const row = this.sql.exec<{ delivery_state: Delivery["state"] | null; delivery_at: string | null }>(
+      "SELECT delivery_state, delivery_at FROM labels WHERE label_id = ? AND test = 0", labelId).toArray()[0];
+    if (!row) return null;
+    if (row.delivery_state === "delivered" && delivery.state !== "delivered") return row.delivery_state;
+    if (row.delivery_state && row.delivery_at && row.delivery_at > delivery.at) return row.delivery_state;
+    this.sql.exec("UPDATE labels SET delivery_state = ?, delivery_at = ?, delivery_note = ? WHERE label_id = ?", delivery.state, delivery.at, delivery.note, labelId);
+    return delivery.state;
   }
 
   /** Orders waiting to ship first, then the most recently changed; at most 200. */
@@ -491,7 +531,7 @@ export class StoreShipping extends DurableObject<Env> {
     const label: Label = {
       labelId: `label_${crypto.randomUUID()}`, orderId: order.orderId, version: order.version, test: true,
       service, box, weightOz, carrier: "USPS", tracking: `TEST${randomDigits(18)}`,
-      status: "bought", createdBy: uid, createdAt: now, cancelledAt: null, practice: true, priceCents: null, refund: null,
+      status: "bought", createdBy: uid, createdAt: now, cancelledAt: null, practice: true, priceCents: null, refund: null, delivery: null,
     };
     const pdf = practiceLabelPdf([
       `ORDER: ${order.number === null ? order.orderId : `#${order.number}`}   SERVICE: ${SERVICES[label.service]}`,
@@ -544,7 +584,7 @@ export class StoreShipping extends DurableObject<Env> {
     } catch (error) {
       if (error instanceof PitneyError && error.kind === "unknown") {
         this.sql.exec("UPDATE purchases SET state = 'unknown' WHERE transaction_id = ?", purchase.transaction_id);
-        refuse("PITNEY_BOWES_NO_ANSWER", "Pitney Bowes did not confirm the label, so Ship does not know yet whether it was bought. Press Buy label again: Ship checks with Pitney Bowes first and does not buy a second label without asking.", 502);
+        refuse("PITNEY_BOWES_NO_ANSWER", `Pitney Bowes did not confirm the label${error.detail ? ` (${error.detail})` : ""}, so Ship does not know yet whether it was bought. Press Buy label again: Ship checks with Pitney Bowes first and does not buy a second label without asking.`, 502);
       }
       this.sql.exec("DELETE FROM purchases WHERE transaction_id = ?", purchase.transaction_id);
       throw error;
@@ -569,14 +609,56 @@ export class StoreShipping extends DurableObject<Env> {
       labelId: `label_${crypto.randomUUID()}`, orderId: purchase.order_id, version: purchase.version, test: purchase.test === 1,
       service: purchase.service as ServiceCode, box: JSON.parse(purchase.box) as Box, weightOz: purchase.weight_oz, carrier: "USPS",
       tracking: bought.tracking, status: "bought", createdBy: purchase.created_by, createdAt: now, cancelledAt: null,
-      practice: false, priceCents: bought.priceCents, refund: null,
+      practice: false, priceCents: bought.priceCents, refund: null, delivery: null,
     };
     this.sql.exec(`INSERT INTO labels (label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, pdf, status, created_by, created_at, price_cents, shipment_id, pdf_url)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'bought', ?, ?, ?, ?, ?)`,
       label.labelId, label.orderId, label.version, purchase.test, label.service, purchase.box, label.weightOz, label.carrier, label.tracking, pdf,
       label.createdBy, now, label.priceCents, bought.shipmentId, bought.pdfUrl);
     this.queueLabel({ orderId: label.orderId, version: label.version, carrier: label.carrier, tracking: label.tracking });
+    // A live label's number goes in the tracking index, so the carrier's updates find this store (ship-tracking-001).
+    if (!label.test) await this.queueTracking(label.labelId, label.tracking, "add");
     return label;
+  }
+
+  /**
+   * Work for the tracking index, kept beside the label until it is done: the
+   * index is another Durable Object, and a label Pitney Bowes sold is bought
+   * whether or not that object answers right now. The row is written in the
+   * same step as the label, tried at once, and tried again from the alarm
+   * until the index takes it. A later action on the same label replaces an
+   * earlier one still waiting (a cancel after a buy leaves nothing to add).
+   */
+  private async queueTracking(labelId: string, tracking: string, action: "add" | "remove"): Promise<void> {
+    const now = Date.now();
+    this.sql.exec("INSERT OR REPLACE INTO tracking_work (label_id, tracking, action, attempts, next_at, created_at) VALUES (?, ?, ?, 0, ?, ?)",
+      labelId, tracking, action, now, now);
+    await this.syncTracking();
+  }
+
+  /** Tries the tracking work that is due; what fails waits for the alarm. */
+  private async syncTracking(): Promise<void> {
+    const now = Date.now();
+    const due = this.sql.exec<{ label_id: string; tracking: string; action: string; attempts: number }>(
+      "SELECT label_id, tracking, action, attempts FROM tracking_work WHERE next_at <= ? ORDER BY next_at LIMIT 100", now).toArray();
+    for (const row of due) {
+      try {
+        const index = trackingIndex(this.env);
+        if (row.action === "add") await index.add({ tracking: row.tracking, site: this.ctx.id.name ?? "", labelId: row.label_id });
+        else await index.remove(row.tracking);
+        this.sql.exec("DELETE FROM tracking_work WHERE label_id = ? AND action = ?", row.label_id, row.action);
+      } catch (error) {
+        console.error("ship tracking index unreachable", JSON.stringify({ action: row.action, attempts: row.attempts, message: error instanceof Error ? error.message : "unknown" }));
+        const wait = TRACKING_RETRY_MS[Math.min(row.attempts, TRACKING_RETRY_MS.length - 1)]!;
+        this.sql.exec("UPDATE tracking_work SET attempts = attempts + 1, next_at = ? WHERE label_id = ?", Date.now() + wait, row.label_id);
+      }
+    }
+    await this.wakeForTracking();
+  }
+
+  private async wakeForTracking(): Promise<void> {
+    const next = this.sql.exec<{ next_at: number | null }>("SELECT MIN(next_at) AS next_at FROM tracking_work").one().next_at;
+    if (next !== null) await this.wakeAt(Math.max(next, Date.now() + 1000));
   }
 
   /**
@@ -587,8 +669,8 @@ export class StoreShipping extends DurableObject<Env> {
   async cancelLabel(labelId: string): Promise<Outcome> {
     try {
       await this.admitLabel(labelId);
-      const row = this.sql.exec<{ test: number; shipment_id: string | null }>(
-        "SELECT test, shipment_id FROM labels WHERE label_id = ? AND status = 'bought'", labelId).toArray()[0];
+      const row = this.sql.exec<{ test: number; shipment_id: string | null; tracking: string }>(
+        "SELECT test, shipment_id, tracking FROM labels WHERE label_id = ? AND status = 'bought'", labelId).toArray()[0];
       if (!row) refuse("NOT_FOUND", "No label to cancel.", 404);
       let refund: string | null = null;
       if (row.shipment_id || !row.test) {
@@ -598,6 +680,7 @@ export class StoreShipping extends DurableObject<Env> {
       }
       this.sql.exec("UPDATE labels SET status = 'cancelled', cancelled_at = ?, refund = ? WHERE label_id = ? AND status = 'bought'",
         new Date().toISOString(), refund, labelId);
+      if (!row.test) await this.queueTracking(labelId, row.tracking, "remove");
       return ok({ labelId, refund });
     } catch (error) {
       return toOutcome(asServiceError(error));
@@ -690,8 +773,13 @@ export class StoreShipping extends DurableObject<Env> {
     if (current === null || current > when) await this.ctx.storage.setAlarm(when);
   }
 
-  /** Sends the shipped emails that are due, and tries failed ones again later. A failed email never changes an order. */
+  /**
+   * Finishes tracking-index work the index was not there for, then sends the
+   * shipped emails that are due and tries failed ones again later. A failed
+   * email never changes an order.
+   */
   override async alarm(): Promise<void> {
+    await this.syncTracking();
     const sender = this.emailSender();
     if (!sender) return;
     const now = Date.now();
@@ -721,7 +809,125 @@ export class StoreShipping extends DurableObject<Env> {
       }
     }
     const next = this.sql.exec<{ next_at: number | null }>("SELECT MIN(next_at) AS next_at FROM shipped_emails WHERE state = 'pending'").one().next_at;
-    if (next !== null) await this.ctx.storage.setAlarm(Math.max(next, Date.now() + 1000));
+    if (next !== null) await this.wakeAt(Math.max(next, Date.now() + 1000));
+  }
+
+  /**
+   * The store admin's Shipping page, learned from the Ship plugin's calls
+   * (ship-registry-plugin-001, question 4): once known, Commerce's "Create
+   * shipping label" lands there instead of on Ship's own page.
+   */
+  async rememberAdminPage(url: string): Promise<void> {
+    this.checkIsolation();
+    const now = Date.now();
+    const seen = Date.parse(this.meta("admin_page_at") ?? "");
+    if (this.meta("admin_page") === url && Number.isFinite(seen) && now - seen < ADMIN_PAGE_TOUCH_MS) return;
+    this.setMeta("admin_page", url);
+    this.setMeta("admin_page_at", new Date(now).toISOString());
+  }
+
+  /**
+   * A store admin the plugin has called for (their email, as EmDash attests it),
+   * with when they were last seen: Commerce's button is forwarded only for an
+   * owner Ship knows as one of the store's admins, so the order it queues can be
+   * opened by that same person and nobody else.
+   */
+  async rememberAdminUser(email: string): Promise<void> {
+    this.checkIsolation();
+    const now = Date.now();
+    const users = this.adminUsers(now);
+    const seen = Date.parse(users[email] ?? "");
+    if (Number.isFinite(seen) && now - seen < ADMIN_PAGE_TOUCH_MS) return;
+    users[email] = new Date(now).toISOString();
+    const kept = Object.entries(users).sort(([, a], [, b]) => (a < b ? 1 : a > b ? -1 : 0)).slice(0, ADMIN_USERS_MAX);
+    this.setMeta("admin_users", JSON.stringify(Object.fromEntries(kept)));
+  }
+
+  /** The store's admins seen in the last week, email to last-seen time. */
+  private adminUsers(now: number): Record<string, string> {
+    let users: Record<string, string> = {};
+    try {
+      const parsed: unknown = JSON.parse(this.meta("admin_users") ?? "{}");
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) users = parsed as Record<string, string>;
+    } catch {
+      users = {};
+    }
+    return Object.fromEntries(Object.entries(users).filter(([, at]) => typeof at === "string" && now - Date.parse(at) < ADMIN_PAGE_FRESH_MS));
+  }
+
+  /**
+   * The store admin's Shipping page for this signed-in owner, or null: the page
+   * must be fresh (adminPage) and the owner's DinkusKit.com email must be one the
+   * plugin has called for in the last week. Anyone else gets Ship's own page.
+   */
+  async adminPageFor(email: string): Promise<string | null> {
+    this.checkIsolation();
+    const page = await this.adminPage();
+    if (!page) return null;
+    return Object.hasOwn(this.adminUsers(Date.now()), adminEmail(email)) ? page : null;
+  }
+
+  /**
+   * Which order the next Shipping page load in the store admin should open, and
+   * for whom: set when Ship forwards Commerce's "Create shipping label" there,
+   * read once by that person's next list call, and forgotten after a minute.
+   * Each admin has their own waiting order, so two people forwarding at once
+   * never erase each other's. False, and nothing queued, when a different order
+   * of this admin's is still waiting: a second button press before the first
+   * page opened stays on Ship's own page rather than making either order vanish.
+   */
+  async queueAdminOpen(orderId: string, email: string): Promise<boolean> {
+    this.checkIsolation();
+    const now = Date.now();
+    const waiting = this.adminOpens(now);
+    const mine = waiting[adminEmail(email)];
+    if (mine && mine.orderId !== orderId) return false;
+    waiting[adminEmail(email)] = { orderId, at: now };
+    const kept = Object.entries(waiting).sort(([, a], [, b]) => b.at - a.at).slice(0, ADMIN_OPEN_MAX);
+    this.setMeta("admin_open", JSON.stringify(Object.fromEntries(kept)));
+    return true;
+  }
+
+  /** The orders waiting to be opened, email to order, without the stale ones. */
+  private adminOpens(now: number): Record<string, { orderId: string; at: number }> {
+    let waiting: Record<string, unknown> = {};
+    try {
+      const parsed: unknown = JSON.parse(this.meta("admin_open") ?? "{}");
+      if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) waiting = parsed as Record<string, unknown>;
+    } catch {
+      waiting = {};
+    }
+    const fresh: Record<string, { orderId: string; at: number }> = {};
+    for (const [email, entry] of Object.entries(waiting)) {
+      if (typeof entry !== "object" || entry === null) continue;
+      const { orderId, at } = entry as { orderId?: unknown; at?: unknown };
+      if (typeof orderId === "string" && typeof at === "number" && now - at <= ADMIN_OPEN_MS) fresh[email] = { orderId, at };
+    }
+    return fresh;
+  }
+
+  /**
+   * The queued order to open, once, for the admin whose call this is; null when
+   * none waits for them, theirs has gone stale, or the call names nobody. Other
+   * admins' waiting orders stay for them.
+   */
+  async takeAdminOpen(email: string | null): Promise<string | null> {
+    this.checkIsolation();
+    if (email === null || !this.meta("admin_open")) return null;
+    const waiting = this.adminOpens(Date.now());
+    const mine = waiting[adminEmail(email)];
+    if (!mine) return null;
+    delete waiting[adminEmail(email)];
+    if (Object.keys(waiting).length) this.setMeta("admin_open", JSON.stringify(waiting));
+    else this.sql.exec("DELETE FROM store_meta WHERE key = 'admin_open'");
+    return this.sql.exec("SELECT 1 FROM orders WHERE order_id = ?", mine.orderId).toArray().length ? mine.orderId : null;
+  }
+
+  /** The store admin's Shipping page, or null while no Ship plugin has called for this store in the last week. */
+  async adminPage(): Promise<string | null> {
+    this.checkIsolation();
+    const seen = Date.parse(this.meta("admin_page_at") ?? "");
+    return Number.isFinite(seen) && Date.now() - seen < ADMIN_PAGE_FRESH_MS ? this.meta("admin_page") : null;
   }
 
   /** Where each completion's shipped email stands, for the owner's order page. */

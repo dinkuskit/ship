@@ -3,15 +3,17 @@ import { createAuthenticator, type ShipScope } from "./auth.js";
 import { ServiceError, toOutcome, type Outcome } from "./errors.js";
 import { handlePage, handlePrint } from "./owner.js";
 import { ADMIN_SCOPE, buyAdminLabel, cancelAdminLabel, listAdminOrders, printLink, quoteAdminLabel, showAdminOrder } from "./admin.js";
+import { checkDeliveries, handleTrackingWebhook, PB_TRACKING_PATH } from "./tracking.js";
 import type { StoreShipping } from "./store.js";
 
 export { StoreShipping } from "./store.js";
+export { TrackingIndex } from "./tracking.js";
 
 export const SERVICE_LINE = "DinkusKit Ship service";
 // Commerce's largest possible order (100 lines of long multi-byte names) is about 66 KiB.
 export const MAX_BODY_BYTES = 256 * 1024;
 
-interface Call { store: DurableObjectStub<StoreShipping>; body: unknown; admission: Record<string, unknown>; params: string[]; site: string; origin: string; env: Env }
+interface Call { store: DurableObjectStub<StoreShipping>; body: unknown; admission: Record<string, unknown>; params: string[]; site: string; origin: string; env: Env; adminUser: string | null }
 type Handler = (call: Call) => Promise<Outcome>;
 interface Route { method: string; pattern: RegExp; scope: ShipScope; handle: Handler }
 /** Order ids and label ids as they appear in a path segment (URL-encoded by the caller). */
@@ -25,7 +27,7 @@ const ROUTES: Route[] = [
   route("GET", "/v1/labels", "ship:orders", ({ store, admission }) => store.listLabels(admission)),
   route("POST", "/v1/labels/ack", "ship:orders", ({ store, body, admission }) => store.ackLabel(body, admission)),
   // What the Ship Registry plugin calls (docs/contracts/ship-plugin-v1.md).
-  route("GET", "/v1/admin/orders", ADMIN_SCOPE, ({ store }) => listAdminOrders(store)),
+  route("GET", "/v1/admin/orders", ADMIN_SCOPE, ({ store, adminUser }) => listAdminOrders(store, adminUser)),
   route("GET", "/v1/admin/orders/:id", ADMIN_SCOPE, ({ store, params }) => showAdminOrder(store, params[0]!)),
   route("POST", "/v1/admin/orders/:id/prices", ADMIN_SCOPE, ({ store, params, body }) => quoteAdminLabel(store, params[0]!, body)),
   route("POST", "/v1/admin/orders/:id/labels", ADMIN_SCOPE, ({ store, params, body }) => buyAdminLabel(store, params[0]!, body)),
@@ -42,6 +44,37 @@ function decode(segment: string): string {
 }
 
 const NO_STORE = { "cache-control": "no-store" };
+
+/** The header the Ship plugin sends with its own Shipping page's address (docs/contracts/ship-plugin-v1.md). */
+export const ADMIN_PAGE_HEADER = "x-ship-admin-page";
+
+/**
+ * The store admin's Shipping page as the plugin names it, accepted only when it
+ * sits on the store's own origin from the pass and under EmDash's plugin admin
+ * path, so a store can never be forwarded anywhere but its own admin.
+ */
+export function adminPageFrom(request: Request, siteOrigin: string | null): string | null {
+  const value = request.headers.get(ADMIN_PAGE_HEADER);
+  if (!value || !siteOrigin || value.length > 600) return null;
+  try {
+    const url = new URL(value);
+    if (url.origin !== siteOrigin || url.username || url.password || url.search || url.hash) return null;
+    if (!/^\/_emdash\/admin\/plugins\/[A-Za-z0-9_-]{1,64}\/[A-Za-z0-9._\/-]{1,120}$/.test(url.pathname)) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+/** The header the Ship plugin sends with the email of the store admin whose page load this is (docs/contracts/ship-plugin-v1.md). */
+export const ADMIN_USER_HEADER = "x-ship-admin-user";
+const ADMIN_USER = /^[^\s@\u0000-\u001f\u007f-\u009f]{1,200}@[^\s@\u0000-\u001f\u007f-\u009f]{1,200}$/;
+
+/** The store admin the plugin is acting for, as one lower-cased email, or null when the call does not say. */
+export function adminUserFrom(request: Request): string | null {
+  const value = request.headers.get(ADMIN_USER_HEADER)?.trim().toLowerCase() ?? "";
+  return value.length <= 254 && ADMIN_USER.test(value) ? value : null;
+}
 
 function respond(outcome: Outcome): Response {
   return outcome.ok
@@ -102,6 +135,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
   }
   if (url.pathname.startsWith("/stores/") || url.pathname.startsWith("/auth/")) return handlePage(request, env);
   if (url.pathname.startsWith("/print/")) return handlePrint(request, env);
+  if (url.pathname === PB_TRACKING_PATH) return handleTrackingWebhook(request, env);
   try {
     const matches = ROUTES.map(candidate => ({ candidate, found: candidate.pattern.exec(url.pathname) })).filter(match => match.found);
     if (matches.length === 0) throw new ServiceError(404, "NOT_FOUND", "not found");
@@ -111,7 +145,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
     if (!env.ACCOUNT_ISSUER || !env.ACCOUNT_AUDIENCE || !env.ACCOUNT_JWKS_URL) {
       throw new ServiceError(503, "NOT_CONFIGURED", "the Ship service is not configured");
     }
-    const siteId = await authenticator(env)(request, route.scope);
+    const { siteId, siteOrigin } = await authenticator(env)(request, route.scope);
     const body = await readBody(request);
     const admission = requestTuple(request);
     assertTuple(env, admission);
@@ -121,10 +155,21 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       }
     }
     const store = env.SHIP_STORES.get(env.SHIP_STORES.idFromName(siteId));
-    return respond(await route.handle({ store, body, admission, params, site: siteId, origin: url.origin, env }));
+    let adminUser: string | null = null;
+    if (route.scope === ADMIN_SCOPE) {
+      const adminPage = adminPageFrom(request, siteOrigin);
+      if (adminPage) await store.rememberAdminPage(adminPage);
+      adminUser = adminUserFrom(request);
+      if (adminUser) await store.rememberAdminUser(adminUser);
+    }
+    return respond(await route.handle({ store, body, admission, params, site: siteId, origin: url.origin, env, adminUser }));
   } catch (error) {
     return respond(toOutcome(error));
   }
 }
 
-export default { fetch: handle } satisfies ExportedHandler<Env>;
+export default {
+  fetch: handle,
+  /** The daily tracking check (wrangler.jsonc triggers.crons). */
+  scheduled: (_event, env, ctx) => ctx.waitUntil(checkDeliveries(env)),
+} satisfies ExportedHandler<Env>;
