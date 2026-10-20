@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { appendFile, cp, mkdir, readdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { findMajorViolation } from "../.github/scripts/check-no-major.mjs";
 import { resolvePdsEndpoint } from "../.github/scripts/verify-registry-release.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -976,6 +977,15 @@ export async function runReleaseFlowCli(argv, deps = {}) {
       });
       const next = computeNextBetaVersion({ targetVersion, gitTags, registryVersions });
       version = next.version;
+    }
+
+    // The 1.0.0 gate (check-no-major.mjs) guards the stable release job; Cut beta skips that
+    // job, so the beta it is about to tag and publish is checked here, override or computed.
+    const majorViolation = findMajorViolation(version);
+    if (majorViolation) {
+      throw new Error(
+        `Cannot cut beta "${version}": ${majorViolation}. Ship stays on 0.x until the 1.0.0 gate is lifted in .github/scripts/check-no-major.mjs.`,
+      );
     }
 
     const tag = `v${version}`;

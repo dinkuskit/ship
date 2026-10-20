@@ -344,6 +344,7 @@ test("changeset parsing remains available before dependencies are installed", as
     await mkdir(join(root, ".github/scripts"), { recursive: true });
     await writeFile(join(root, "scripts/release-flow.mjs"), await readFile(join(repositoryRoot, "scripts/release-flow.mjs")));
     await writeFile(join(root, ".github/scripts/verify-registry-release.mjs"), await readFile(join(repositoryRoot, ".github/scripts/verify-registry-release.mjs")));
+    await writeFile(join(root, ".github/scripts/check-no-major.mjs"), await readFile(join(repositoryRoot, ".github/scripts/check-no-major.mjs")));
     execFileSync(process.execPath, ["--input-type=module", "-e", `
       import { parseChangesetFrontmatter } from ${JSON.stringify(`file://${join(root, "scripts/release-flow.mjs")}`)};
       if (!parseChangesetFrontmatter('---\\n---\\n').empty) process.exit(1);
@@ -364,6 +365,43 @@ test("release inventory reads JSONC publisher identity and rejects malformed syn
     await assert.rejects(() => fetchRegistryVersions(BETA_REGISTRY_SLUG, { root, fetchImpl }), /JSONC/);
   } finally {
     await rm(root, { recursive: true, force: true });
+  }
+});
+
+test("cut-beta refuses a beta at or above 1.0 before tagging or publishing", async () => {
+  const tempRoot = await mkdtemp(join(tmpdir(), "ship-beta-major-gate-"));
+  try {
+    await writePublisherManifest(tempRoot);
+    await mkdir(join(tempRoot, ".changeset"), { recursive: true });
+    await writeFile(join(tempRoot, "package.json"), JSON.stringify({ name: PACKAGE_NAME, version: "0.1.0" }));
+    await writeFile(join(tempRoot, ".changeset/bump.md"), `---\n"${PACKAGE_NAME}": patch\n---\n\nFix.\n`);
+    const gitCalls = [];
+    const deps = {
+      root: tempRoot,
+      gitExec: (args) => { gitCalls.push(args); return ""; },
+      fetchImpl: mockPdsFetch(jsonResponse({ records: [] })),
+      log: () => {},
+    };
+    // An explicit override at or above 1.0 is refused, however valid its beta syntax.
+    for (const version of ["1.0.0-beta.1", "2.3.4-beta.7"]) {
+      await assert.rejects(
+        () => runReleaseFlowCli(["cut-beta", "--version", version], deps),
+        /reaches >=1\.0\.0 before the 1\.0\.0 gate/,
+        version,
+      );
+    }
+    // So is a computed next beta when a pending changeset would lift the package to 1.0.0.
+    await writeFile(join(tempRoot, ".changeset/bump.md"), `---\n"${PACKAGE_NAME}": major\n---\n\nBreak.\n`);
+    await assert.rejects(() => runReleaseFlowCli(["plan-beta"], deps), /reaches >=1\.0\.0 before the 1\.0\.0 gate/);
+    await assert.rejects(() => runReleaseFlowCli(["cut-beta"], deps), /reaches >=1\.0\.0 before the 1\.0\.0 gate/);
+    assert.equal(gitCalls.some(([command]) => command === "push"), false);
+    assert.equal(gitCalls.some(([command, option]) => command === "tag" && option !== "--list"), false);
+    // A 0.x beta still passes the gate.
+    await writeFile(join(tempRoot, ".changeset/bump.md"), `---\n"${PACKAGE_NAME}": patch\n---\n\nFix.\n`);
+    const plan = await runReleaseFlowCli(["plan-beta", "--version", "0.9.9-beta.1"], deps);
+    assert.equal(plan.version, "0.9.9-beta.1");
+  } finally {
+    await rm(tempRoot, { recursive: true, force: true });
   }
 });
 
