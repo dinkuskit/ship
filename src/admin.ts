@@ -1,7 +1,7 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
 import { connectPage, listPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, type OrderView, type Toast } from "./pages.js";
-import { connection, ship, ShipError, type LabelRequest, type Ship } from "./ship.js";
+import { connection, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
 
 /** EmDash's Editor role; Administrators are above it. Lower roles never see Shipping. */
 const EDITOR = 40;
@@ -39,7 +39,7 @@ function text(value: unknown, max = 200): string | undefined {
 /** The label form as typed, checked here so an impossible value never reaches Ship. */
 function labelRequest(version: number, values: Record<string, unknown>, by: string): { request: LabelRequest; typed: OrderView["typed"] } {
   const boxId = text(values.boxId);
-  const weight = typeof values.weightOz === "number" ? values.weightOz : typeof values.weightOz === "string" ? Number(values.weightOz) : NaN;
+  const weight = typeof values.weightOz === "number" ? values.weightOz : typeof values.weightOz === "string" ? Number(values.weightOz.trim().replace(/\s*oz\.?$/i, "") || NaN) : NaN;
   const weightOz = Number.isFinite(weight) ? Math.round(weight * 10) / 10 : NaN;
   const service = text(values.service), kind = text(values.kind);
   const typed = { boxId, weightOz: Number.isFinite(weightOz) ? weightOz : undefined, service, kind, buyAgain: values.buyAgain === true };
@@ -51,8 +51,9 @@ function labelRequest(version: number, values: Record<string, unknown>, by: stri
 }
 
 /** The order as Ship has it right now, with a fresh five-minute print link when it has a live label. */
-async function openOrder(hosted: Ship, orderId: string, extra: Partial<OrderView> = {}, toast?: Toast): Promise<BlockResponse> {
+async function openOrder(hosted: Ship, orderId: string, extra: Partial<OrderView> = {}, toast?: Toast | ((order: ShipOrder) => Toast)): Promise<BlockResponse> {
   const { order, settings } = await hosted.order(orderId);
+  if (typeof toast === "function") toast = toast(order);
   let printUrl: string | undefined;
   if (order.label) {
     try { printUrl = (await hosted.printLink(order.label.labelId)).url; } catch { /* the page says to open the order again */ }
@@ -96,7 +97,9 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       const orderId = decodeURIComponent(input.action_id.slice("cancel:".length));
       try {
         const cancelled = await hosted.cancel(input.value);
-        return await openOrder(hosted, orderId, {}, { type: "success", message: cancelled.refund ? "Label cancelled. USPS refunds the postage account within about 14 days." : "Label cancelled." });
+        // Ship records a refund for sandbox labels too; only a live label's postage comes back.
+        const live = (order: ShipOrder) => cancelled.refund !== null && order.labels.some(label => label.labelId === cancelled.labelId && !label.test);
+        return await openOrder(hosted, orderId, {}, order => ({ type: "success", message: live(order) ? "Label cancelled. USPS refunds the postage account within about 14 days." : "Label cancelled." }));
       } catch (error) {
         if (error instanceof ShipError) return await refused(hosted, orderId, error, undefined);
         throw error;

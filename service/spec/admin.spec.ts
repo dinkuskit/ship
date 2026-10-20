@@ -147,6 +147,25 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).json.error.code).toBe("NOT_FOUND");
 });
 
+test("after Commerce completes the order with the label, the Shipping page can still print and cancel it", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" } });
+  expect(bought.status).toBe(201);
+  // Commerce marks the order Completed at the next version and sends that version to Ship, as it does on every sync.
+  await sendOrder({ version: 2, status: "completed", completed: { at: "2026-10-19T23:59:00.000Z", carrier: "USPS", tracking: "SANDBOX-TRACKING-A" } });
+  const shown = await call("GET", "/v1/admin/orders/order%3Aabc");
+  expect(shown.json.order).toMatchObject({ version: 2, status: "completed", label: { labelId: bought.json.label.labelId, version: 1, status: "bought" } });
+  expect((await call("GET", "/v1/admin/orders")).json.orders[0]).toMatchObject({ status: "completed", labelStatus: "bought" });
+  const link = await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/print-link`);
+  expect((await worker.fetch(new Request(link.json.url), configured())).status).toBe(200);
+  expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).json).toEqual({ labelId: bought.json.label.labelId, refund: "INITIATED" });
+  const after = await call("GET", "/v1/admin/orders/order%3Aabc");
+  expect(after.json.order.label).toBeNull();
+  expect(after.json.order.status).toBe("completed");
+  expect((await call("GET", "/v1/admin/orders")).json.orders[0].labelStatus).toBe("cancelled");
+});
+
 test("a print link opens only while it lasts, only for a link Ship made, and only one label", async () => {
   await sendOrder();
   const boxId = await setUp();
