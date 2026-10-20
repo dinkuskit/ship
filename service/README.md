@@ -91,6 +91,11 @@ Commerce's "Create shipping label" opens `https://ship.dinkuskit.com/stores/{sit
 
 ## Deploy settings (for Ronald's deploy agents, on his go)
 
+Deploy with `npx wrangler deploy --name dinkus-ship --keep-vars`. `wrangler.jsonc`
+lists no vars on purpose: `--keep-vars` keeps only the variables the config does
+not mention, so any var listed in the file, even as `""`, would overwrite the live
+value. The vars below live in the Cloudflare dashboard and survive every deploy.
+
 - **Vars:**
   - `ACCOUNT_ISSUER=https://dinkuskit.com/account`
   - `ACCOUNT_AUDIENCE=dinkus-ship`
