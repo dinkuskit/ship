@@ -39,7 +39,7 @@ Registry publishing uses GitHub OIDC, Sigstore build provenance (`actions/attest
 
 - The release GitHub App credentials for this repository (`RELEASE_APP_ID` and
   `RELEASE_APP_PRIVATE_KEY` repository secrets), as for Commerce and Payments.
-- The `LIVE_JOURNEYS_TOKEN` repository secret (Step 3).
+- The `DINKUS_LIVE_JOURNEYS_TOKEN` dinkuskit org secret (Step 3).
 - The `dinkus-ship-beta` package profile already exists under `@smokyco.bsky.social`
   (`did:plc:ekk4pjmkh3k3ql2kfoex3qt4`): the `0.1.0-beta.N` betas published to it. If it
   ever has to be recreated, stage a beta manifest directory from a built checkout and
@@ -80,9 +80,9 @@ When `main` has pending version-bumping `.changeset/*.md` files and you are read
 
 ## Step 3: Run Beta Store `@running` Journeys
 
-Cut beta starts them itself. Once the beta is published, Release's **Start the live journeys on the beta store** job presses **Live journeys** in [SaariusSkills](https://github.com/saariuslystoned/SaariusSkills/actions/workflows/live-journeys.yml) with `beta: dinkus-ship-beta X.Y.Z-beta.N`. That run waits for the Registry to offer the beta, updates the beta store (beta.sm0ky.dev, `installedPluginId: r_nhb4yqdnowdmkxyu`) to it in place, and runs the `@running` journeys there; for Ship that is "Buy a label in the store admin". Its run is named `Live journeys for dinkus-ship-beta X.Y.Z-beta.N`, and its page shows each journey's pass or fail and the plugin versions tested. When it passes, Step 4's `proof_ref` is that run's address followed by the beta version, for example `https://github.com/saariuslystoned/SaariusSkills/actions/runs/<run id> (X.Y.Z-beta.N @running pass)`; the address alone has no version in it, and the promotion gate refuses a proof that doesn't name the beta. If an update asks for new permissions the run stops and its page says what was asked; update the plugin by hand from the store's Plugins page, then press Run workflow again with the same `beta`.
+Cut beta starts them itself. Once the beta is published, Release's **Start the live journeys on the beta store** job presses **Live journeys** in [dinkuskit/live-journeys](https://github.com/dinkuskit/live-journeys/actions/workflows/live-journeys.yml) with `beta: dinkus-ship-beta X.Y.Z-beta.N`. That run waits for the Registry to offer the beta, updates the beta store (beta.sm0ky.dev, `installedPluginId: r_nhb4yqdnowdmkxyu`) to it in place, and runs the `@running` journeys there; for Ship that is "Buy a label in the store admin". Its run is named `Live journeys for dinkus-ship-beta X.Y.Z-beta.N`, and its page shows each journey's pass or fail and the plugin versions tested. When it passes, Step 4's `proof_ref` is that run's address followed by the beta version, for example `https://github.com/dinkuskit/live-journeys/actions/runs/<run id> (X.Y.Z-beta.N @running pass)`; the address alone has no version in it, and the promotion gate refuses a proof that doesn't name the beta. If an update asks for new permissions the run stops and its page says what was asked; update the plugin by hand from the store's Plugins page, then press Run workflow again with the same `beta`.
 
-The press needs the `LIVE_JOURNEYS_TOKEN` repository secret: a fine-grained GitHub token whose only access is **Actions: Read and write** on `saariuslystoned/SaariusSkills`. Without it the job fails after the publish, and the journeys can be started by hand with the same `beta` input.
+The press needs the `DINKUS_LIVE_JOURNEYS_TOKEN` org secret, shared by every dinkuskit plugin repo: a fine-grained GitHub token owned by dinkuskit whose only access is **Actions: Read and write** on `dinkuskit/live-journeys`. Without it the job fails after the publish, and the journeys can be started by hand with the same `beta` input.
 
 ## Step 4: Promote Verified Beta to a `ci: release` PR
 
