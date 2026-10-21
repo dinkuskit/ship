@@ -2705,20 +2705,35 @@
         "ship-plugin-contract-001"
       ],
       "domain": "Ship Registry plugin in the store admin",
-      "history": [],
+      "history": [
+        {
+          "at": "2026-10-21T01:12:38+00:00",
+          "choice": "The plugin keeps the 5-minute pass in its own KV beside a SHA-256 fingerprint of the store key and reuses it for later clicks only while the pass is under a minute old, has 30 seconds left and the same key is in the settings; a kept pass Ship answers 401 to is dropped and the call retried once. So a burst of clicks shares one trade, a newly pasted key takes effect at once, and a key replaced or a Ship turned off at DinkusKit.com stops clicks within a minute instead of at the next click. Hosted Ship is unchanged.",
+          "from": "proposed",
+          "implementation_ref": null,
+          "note": "user accepted the scoped decision",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "locked",
+          "verification_ref": null
+        }
+      ],
       "id": "ship-pass-reuse-001",
       "implementation_ref": null,
       "question": "Does the Shipping page reuse its Ship pass across clicks, and how soon does a key replaced or a Ship turned off at DinkusKit.com stop clicks?",
-      "rationale": "Trading the key on every click can hit DinkusKit.com's pass rate limit in a labelling session. Only the store's own signed-in Editors and Administrators can use a kept pass; a leaked key never reaches the plugin's KV, so replacing the key still stops the holder of the old key at once. ClawSweeper's review of ship#57 (21 Oct 2026) named the revocation delay; the one-minute window keeps nearly all the saving. Proposed pending Ronald's answer in the Ship plugin thread (one minute recommended, five minutes, or drop the cache).",
+      "rationale": "Ronald chose 'Accept 1 minute' on the decision card in the Ship plugin thread, 21 Oct 2026 01:12 UTC (options: one minute recommended, five minutes, drop the cache). A kept pass is reused for later clicks only while under a minute old, with 30 seconds left and the same key in the settings; a key replaced or a Ship turned off at DinkusKit.com stops clicks within a minute; only the store's own signed-in staff can use a kept pass.",
       "repair_required": false,
       "review_classifications": [],
       "review_history": [],
       "review_ref": null,
       "review_result": null,
       "review_source_identity": null,
-      "status": "proposed",
+      "status": "locked",
       "superseded_by": null,
-      "updated_at": "2026-10-21T00:14:18+00:00",
+      "updated_at": "2026-10-21T01:12:38+00:00",
       "verification_ref": null
     }
   ],
@@ -2747,5 +2762,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-21T00:14:18+00:00"
+  "updated_at": "2026-10-21T01:12:38+00:00"
 }
