@@ -21,6 +21,20 @@ Two parts live here:
   account, refunds and label history. It is the full path and the fallback
   when the plugin is not installed.
 
+## Status
+
+Released: the Ship plugin `dinkus-ship@0.2.0` on the EmDash Registry, 21 Oct
+2026 ([release](https://github.com/dinkuskit/ship/releases/tag/v0.2.0),
+[changes](CHANGELOG.md)). Its beta, `dinkus-ship-beta@0.2.0-beta.1`, passed all
+eight live test journeys on the beta store, including both ship paths ("Buy a
+label in the store admin" and "Buy and ship" on ship.dinkuskit.com), in
+[run 18](https://github.com/saariuslystoned/SaariusSkills/actions/runs/39533111037)
+on 21 Oct 2026.
+
+Hosted Ship runs on the Pitney Bowes sandbox: labels are sandbox labels and
+nothing is charged. Live postage is not on yet
+([service status](service/README.md)).
+
 ## How a label gets bought from the store admin
 
 1. The owner pastes the **Store ID** and **store key** from the Set up Commerce
