@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import plugin from "../dist/plugin.mjs";
 import { validateBlockResponse } from "@emdash-cms/blocks/server";
 
@@ -61,6 +62,9 @@ const text = response => JSON.stringify(response);
 const load = { type: "page_load", page: "/shipping" };
 const trades = h => h.calls.filter(call => call.url === "https://dinkuskit.com/api/store-passes").length;
 const PASS_KEY = `cache:pass:${SITE}`;
+/** What the plugin keeps beside a pass: a SHA-256 fingerprint of the key it was traded with. */
+const FINGERPRINT = createHash("sha256").update(KEY).digest("hex");
+const keptPass = (token, key = FINGERPRINT) => ({ token, key });
 
 test("lower roles and other surfaces never reach Ship", async () => {
   const h = host({ role: 30 });
@@ -105,38 +109,53 @@ test("the pass is kept and reused across clicks, so the key is traded once, not 
   } });
   await h.page(load);
   assert.equal(trades(h), 1);
-  const kept = h.kv.get(PASS_KEY);
+  const { token: kept, key } = h.kv.get(PASS_KEY);
   assert.match(kept, /^ey/);
+  assert.equal(key, FINGERPRINT, "the key's fingerprint, never the key");
   await h.page({ type: "block_action", action_id: "open", value: "order:abc", page: "/shipping" });
   await h.page(load);
   assert.equal(trades(h), 1, "two more clicks, no new trade");
   for (const call of h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com/"))) assert.equal(call.authorization, `Bearer ${kept}`);
   // Another store's pass is never this store's.
-  const other = host({ siteId: "site_other", kv: h.kv, ship: { "GET /v1/admin/orders": { orders: [], settings } } });
-  await other.page(load);
+  const other = host({ siteId: "site_other", kv: h.kv, passes: () => Response.json({ access_token: pass({ site_id: "site_other" }), token_type: "Bearer", expires_in: 300 }),
+    ship: { "GET /v1/admin/orders": { orders: [], settings } } });
+  assert.match(text(await other.page(load)), /No paid orders/);
   assert.equal(trades(other), 1);
-  assert.notEqual(other.kv.get("cache:pass:site_other"), kept);
+  assert.notEqual(other.kv.get("cache:pass:site_other").token, kept);
+  assert.equal(h.kv.get(PASS_KEY).token, kept, "the first store's pass is untouched");
 });
 
-test("a kept pass with under 30 seconds left, or not this store's, is replaced by a fresh one", async () => {
-  for (const stale of [pass({ exp: Math.floor(Date.now() / 1000) + 20 }), pass({ site_id: "site_other" }), "not-a-pass", 42]) {
-    const h = host({ kv: new Map([[PASS_KEY, stale]]), ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
-    assert.match(text(await h.page(load)), /#1001/);
-    assert.equal(trades(h), 1, String(stale));
-    assert.notEqual(h.kv.get(PASS_KEY), stale);
-    assert.equal(h.calls.at(-1).authorization, `Bearer ${h.kv.get(PASS_KEY)}`, "the fresh pass is the one used and kept");
+test("a kept pass over a minute old, under 30 seconds left, not this store's, traded with another key, or malformed is replaced by a fresh one", async () => {
+  const now = Math.floor(Date.now() / 1000);
+  const stale = {
+    "traded 61 seconds ago": keptPass(pass({ iat: now - 61, exp: now + 239 })),
+    "no iat": keptPass(pass({ iat: undefined })),
+    "under 30 seconds left": keptPass(pass({ exp: now + 20 })),
+    "another store's": keptPass(pass({ site_id: "site_other" })),
+    "a newly pasted key": keptPass(pass(), createHash("sha256").update("dk_store_" + "o".repeat(43)).digest("hex")),
+    "no key": { token: pass() },
+    "a bare token": pass(),
+    "not a pass": "not-a-pass",
+    "a number": 42,
+  };
+  for (const [why, entry] of Object.entries(stale)) {
+    const h = host({ kv: new Map([[PASS_KEY, entry]]), ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+    assert.match(text(await h.page(load)), /#1001/, why);
+    assert.equal(trades(h), 1, why);
+    assert.notDeepEqual(h.kv.get(PASS_KEY), entry, why);
+    assert.equal(h.calls.at(-1).authorization, `Bearer ${h.kv.get(PASS_KEY).token}`, `${why}: the fresh pass is the one used and kept`);
   }
 });
 
 test("a kept pass Ship no longer accepts is dropped and the call retried once on a fresh pass", async () => {
   const stale = pass({ sub: "old" });
-  const h = host({ kv: new Map([[PASS_KEY, stale]]), ship: { "GET /v1/admin/orders": () => h.calls.at(-1).authorization === `Bearer ${stale}`
+  const h = host({ kv: new Map([[PASS_KEY, keptPass(stale)]]), ship: { "GET /v1/admin/orders": () => h.calls.at(-1).authorization === `Bearer ${stale}`
     ? Response.json({ error: { code: "UNAUTHORIZED", message: "Pass refused" } }, { status: 401 })
     : Response.json({ orders: [row()], settings }) } });
   assert.match(text(await h.page(load)), /#1001/);
   assert.equal(trades(h), 1);
   assert.equal(h.calls.filter(call => call.url.endsWith("/v1/admin/orders")).length, 2, "one refused call, one retry");
-  assert.notEqual(h.kv.get(PASS_KEY), stale);
+  assert.notEqual(h.kv.get(PASS_KEY).token, stale);
   // A fresh pass Ship refuses is reported, not retried again.
   const refusing = host({ ship: { "GET /v1/admin/orders": () => Response.json({ error: { code: "UNAUTHORIZED", message: "Pass refused" } }, { status: 401 }) } });
   assert.match(text(await refusing.page(load)), /Pass refused/);

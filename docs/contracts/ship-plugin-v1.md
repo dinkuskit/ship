@@ -23,11 +23,14 @@ through, Ship.
 - The store key `dk_store_…` goes only to `https://dinkuskit.com/api/store-passes`,
   never to Ship. The plugin trades it for a 5-minute pass with
   `scope: "ship:admin"`, `audience: "dinkus-ship"`, keeps the pass in its own
-  plugin KV and reuses it across clicks while it has at least 30 seconds left,
-  so the key is traded about once per five minutes rather than once per click.
-  It uses a pass only when its `iss`, `aud`, `site_id`, `scope` and `exp` are
-  what it asked for; a kept pass Ship answers 401 to is dropped and the call
-  retried once on a fresh one.
+  plugin KV beside a SHA-256 fingerprint of the key, and reuses it for later
+  clicks only while the pass is under a minute old (its `iat`), has at least
+  30 seconds left, and the same key is still in the settings. So a burst of
+  clicks shares one trade, and a key replaced or a Ship turned off at
+  DinkusKit.com stops clicks within a minute (ship-pass-reuse-001). It uses a
+  pass only when its `iss`, `aud`, `site_id`, `scope` and `exp` are what it
+  asked for; a kept pass Ship answers 401 to is dropped and the call retried
+  once on a fresh one.
 - The plugin's settings are the **Store ID** (`siteId`) and the **store key**,
   both from the Set up Commerce box on DinkusKit.com, the same ones Commerce uses.
 - Ship verifies the pass as it verifies Commerce's (`service/src/auth.ts`); the

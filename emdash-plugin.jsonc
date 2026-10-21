@@ -31,7 +31,7 @@
       "storeKey": {
         "type": "secret",
         "label": "Store key",
-        "description": "Paste the store key from the Set up Commerce box on DinkusKit.com, the same one pasted into Commerce. Ship trades it there for short passes; it is never sent to Ship itself. Replace key on DinkusKit.com stops this one."
+        "description": "Paste the store key from the Set up Commerce box on DinkusKit.com, the same one pasted into Commerce. Ship trades it there for short passes; it is never sent to Ship itself. Replace key on DinkusKit.com stops this one within a minute."
       }
     },
     "pages": [

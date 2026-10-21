@@ -119,3 +119,4 @@
 {"action": "decision_proposed", "at": "2026-10-20T03:27:37+00:00", "data": {"decision_id": "ship-tracking-001"}, "event_id": "ce732803-54dd-472b-bd2b-d0f393c0b4e9"}
 {"action": "decision_locked", "at": "2026-10-20T03:27:37+00:00", "data": {"decision_id": "ship-tracking-001"}, "event_id": "b9d334a1-f139-49f7-ab05-10177cc641bf"}
 {"action": "decision_implemented", "at": "2026-10-20T03:40:56+00:00", "data": {"decision_id": "ship-tracking-001"}, "event_id": "ce32896f-871c-4ea5-b1bc-02e52eca4b19"}
+{"action": "decision_proposed", "at": "2026-10-21T00:14:18+00:00", "data": {"decision_id": "ship-pass-reuse-001"}, "event_id": "a1a4bc79-6667-41ba-a8ac-43cf24f34812"}
