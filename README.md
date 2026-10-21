@@ -25,8 +25,10 @@ Two parts live here:
 
 1. The owner pastes the **Store ID** and **store key** from the Set up Commerce
    box on DinkusKit.com into the plugin's settings (the same ones Commerce has).
-2. Each click trades the key at `https://dinkuskit.com/api/store-passes` for a
-   5-minute `ship:admin` pass. The key never goes to Ship or a store page.
+2. The plugin trades the key at `https://dinkuskit.com/api/store-passes` for a
+   5-minute `ship:admin` pass and reuses that pass across clicks while it lasts,
+   so the key is traded about once per five minutes. The key never goes to Ship
+   or a store page.
 3. With the pass, the plugin asks Ship for the orders, prices, the label, a
    print link or a cancel. Ship buys from Pitney Bowes with DinkusKit's developer
    keys and the store's own postage account; TEST orders get free sandbox labels

@@ -29,11 +29,12 @@ const b64 = value => Buffer.from(JSON.stringify(value)).toString("base64url");
 const pass = (claims = {}) => `${b64({ alg: "ES256" })}.${b64({ iss: "https://dinkuskit.com/account", aud: "dinkus-ship", sub: "biz", site_id: SITE,
   scope: "ship:admin", iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300, ...claims })}.${b64("sig")}`;
 
-/** A host with the plugin's settings, a fake network, and an Editor at the Shipping page. */
-function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.json({ access_token: pass(), token_type: "Bearer", expires_in: 300 }), role = 40, requestUrl = "" } = {}) {
+/** A host with the plugin's settings, a fake network, the plugin's KV (a Map, or null for a host without one), and an Editor at the Shipping page. */
+function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.json({ access_token: pass(), token_type: "Bearer", expires_in: 300 }), role = 40, requestUrl = "", kv = new Map() } = {}) {
   const calls = [];
   const ctx = {
     settings: { get: async name => ({ siteId, storeKey: key })[name] ?? null },
+    ...(kv === null ? {} : { kv: { get: async name => kv.has(name) ? kv.get(name) : null, set: async (name, value) => { kv.set(name, value); }, delete: async name => kv.delete(name) } }),
     http: { fetch: async (url, init) => {
       const body = init?.body ? JSON.parse(init.body) : undefined;
       const adminPage = init?.headers?.["x-ship-admin-page"], adminUser = init?.headers?.["x-ship-admin-user"];
@@ -54,10 +55,12 @@ function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.jso
     if (!checked.valid) throw new Error(`invalid Block Kit: ${JSON.stringify(checked.errors)}`);
     return response;
   };
-  return { ctx, calls, page, route };
+  return { ctx, calls, page, route, kv };
 }
 const text = response => JSON.stringify(response);
 const load = { type: "page_load", page: "/shipping" };
+const trades = h => h.calls.filter(call => call.url === "https://dinkuskit.com/api/store-passes").length;
+const PASS_KEY = `cache:pass:${SITE}`;
 
 test("lower roles and other surfaces never reach Ship", async () => {
   const h = host({ role: 30 });
@@ -92,6 +95,60 @@ test("the store key goes only to DinkusKit.com, and the pass goes only to Ship",
   assert.match(h.calls[1].authorization, /^Bearer ey/);
   assert.notEqual(h.calls[1].authorization, `Bearer ${KEY}`);
   assert.doesNotMatch(page, new RegExp(KEY));
+  assert.doesNotMatch(JSON.stringify([...h.kv.values()]), new RegExp(KEY), "the KV keeps the pass, never the key");
+});
+
+test("the pass is kept and reused across clicks, so the key is traded once, not once per click", async () => {
+  const h = host({ ship: {
+    "GET /v1/admin/orders": { orders: [row()], settings },
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+  } });
+  await h.page(load);
+  assert.equal(trades(h), 1);
+  const kept = h.kv.get(PASS_KEY);
+  assert.match(kept, /^ey/);
+  await h.page({ type: "block_action", action_id: "open", value: "order:abc", page: "/shipping" });
+  await h.page(load);
+  assert.equal(trades(h), 1, "two more clicks, no new trade");
+  for (const call of h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com/"))) assert.equal(call.authorization, `Bearer ${kept}`);
+  // Another store's pass is never this store's.
+  const other = host({ siteId: "site_other", kv: h.kv, ship: { "GET /v1/admin/orders": { orders: [], settings } } });
+  await other.page(load);
+  assert.equal(trades(other), 1);
+  assert.notEqual(other.kv.get("cache:pass:site_other"), kept);
+});
+
+test("a kept pass with under 30 seconds left, or not this store's, is replaced by a fresh one", async () => {
+  for (const stale of [pass({ exp: Math.floor(Date.now() / 1000) + 20 }), pass({ site_id: "site_other" }), "not-a-pass", 42]) {
+    const h = host({ kv: new Map([[PASS_KEY, stale]]), ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+    assert.match(text(await h.page(load)), /#1001/);
+    assert.equal(trades(h), 1, String(stale));
+    assert.notEqual(h.kv.get(PASS_KEY), stale);
+    assert.equal(h.calls.at(-1).authorization, `Bearer ${h.kv.get(PASS_KEY)}`, "the fresh pass is the one used and kept");
+  }
+});
+
+test("a kept pass Ship no longer accepts is dropped and the call retried once on a fresh pass", async () => {
+  const stale = pass({ sub: "old" });
+  const h = host({ kv: new Map([[PASS_KEY, stale]]), ship: { "GET /v1/admin/orders": () => h.calls.at(-1).authorization === `Bearer ${stale}`
+    ? Response.json({ error: { code: "UNAUTHORIZED", message: "Pass refused" } }, { status: 401 })
+    : Response.json({ orders: [row()], settings }) } });
+  assert.match(text(await h.page(load)), /#1001/);
+  assert.equal(trades(h), 1);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/v1/admin/orders")).length, 2, "one refused call, one retry");
+  assert.notEqual(h.kv.get(PASS_KEY), stale);
+  // A fresh pass Ship refuses is reported, not retried again.
+  const refusing = host({ ship: { "GET /v1/admin/orders": () => Response.json({ error: { code: "UNAUTHORIZED", message: "Pass refused" } }, { status: 401 }) } });
+  assert.match(text(await refusing.page(load)), /Pass refused/);
+  assert.equal(trades(refusing), 1);
+  assert.equal(refusing.calls.filter(call => call.url.endsWith("/v1/admin/orders")).length, 1);
+});
+
+test("a host without KV still works, trading the key once per click", async () => {
+  const h = host({ kv: null, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  assert.match(text(await h.page(load)), /#1001/);
+  assert.match(text(await h.page(load)), /#1001/);
+  assert.equal(trades(h), 2);
 });
 
 test("DinkusKit.com's refusals and bad passes stop the click with a plain reason", async () => {
