@@ -4,7 +4,9 @@ import type { PluginContext } from "emdash/plugin";
  * The plugin's side of the Ship contract (docs/contracts/ship-plugin-v1.md).
  * The store key goes only to DinkusKit.com's fixed store-passes address, never to
  * Ship or anywhere named in settings (ship-registry-plugin-001, store-key rules).
- * Each click trades the key for a 5-minute ship:admin pass and calls hosted Ship.
+ * The key is traded for a 5-minute ship:admin pass, which is kept in the plugin's KV and
+ * reused by later clicks for up to a minute after it was traded, so a burst of clicks shares
+ * one trade and a key replaced or a Ship turned off at DinkusKit.com stops clicks within a minute.
  */
 export const STORE_PASSES_URL = "https://dinkuskit.com/api/store-passes";
 export const ISSUER = "https://dinkuskit.com/account";
@@ -14,6 +16,20 @@ export const SCOPE = "ship:admin";
 /** Ship's biggest answer is one order with its 500 lines and label history, far below this; the list is bounded rows. */
 const MAX_ANSWER_BYTES = 1024 * 1024;
 const SITE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
+/** A kept pass is reused only for this long after DinkusKit.com issued it, so a revoked key stops clicks within a minute. */
+export const PASS_REUSE_SECONDS = 60;
+/** A kept pass is reused only while it has at least this long left, so a call never starts on a pass about to expire. */
+const PASS_REUSE_MARGIN_SECONDS = 30;
+/** Where this store's pass is kept between clicks (the plugin's own KV, `cache:` namespace). */
+export const passCacheKey = (siteId: string) => `cache:pass:${siteId}`;
+/** What is kept: the pass and a fingerprint of the key it was traded with, never the key itself. */
+interface KeptPass { token: string; key: string }
+
+/** A one-way fingerprint of the store key, so a kept pass is reused only while the same key is pasted in the settings. */
+export async function keyFingerprint(key: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
+  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
+}
 
 export type ServiceCode = "GA" | "PM" | "EM";
 /** Where the carrier says a live label is; sandbox and practice labels never move. */
@@ -86,14 +102,19 @@ function jwtPart(encoded: string): Record<string, unknown> | null {
   }
 }
 
-/** A pass is used only when it is plainly DinkusKit.com's pass for this store, this scope and Ship. */
-export function admitPass(token: unknown, siteId: string): string {
+/**
+ * A pass is used only when it is plainly DinkusKit.com's pass for this store, this scope and Ship.
+ * With `reuse`, a kept pass is admitted only while it is under PASS_REUSE_SECONDS old and has
+ * PASS_REUSE_MARGIN_SECONDS left, so a revoked key stops clicks within a minute.
+ */
+export function admitPass(token: unknown, siteId: string, reuse = false): string {
   const parts = typeof token === "string" && token.length <= 16384 ? token.split(".") : [];
   const payload = parts.length === 3 && parts.every(part => /^[A-Za-z0-9_-]+$/.test(part)) ? jwtPart(parts[1]!) : null;
   const now = Math.floor(Date.now() / 1000);
   if (!payload || payload.iss !== ISSUER || !(payload.aud === AUDIENCE || Array.isArray(payload.aud) && payload.aud.includes(AUDIENCE)) ||
       payload.site_id !== siteId || typeof payload.scope !== "string" || !payload.scope.split(" ").includes(SCOPE) ||
-      !Number.isSafeInteger(payload.exp) || (payload.exp as number) <= now) {
+      !Number.isSafeInteger(payload.exp) || (payload.exp as number) <= now + (reuse ? PASS_REUSE_MARGIN_SECONDS : 0) ||
+      reuse && (!Number.isSafeInteger(payload.iat) || now >= (payload.iat as number) + PASS_REUSE_SECONDS)) {
     throw new ShipError("PASS", "DinkusKit.com sent a pass Ship cannot use. Try again in a moment.");
   }
   return token as string;
@@ -171,12 +192,36 @@ export function adminPageFrom(requestUrl: string | undefined): string | null {
   }
 }
 
-/** Hosted Ship for this store, trading one pass per invocation and reusing it while it lasts. */
+/**
+ * Hosted Ship for this store. A pass kept in the plugin's KV is reused while it is under a minute
+ * old and was traded with the key now in the settings; otherwise the key is traded for a fresh one,
+ * which is kept for the next click. A kept pass Ship no longer accepts (401) is dropped and the
+ * call retried once on a fresh pass.
+ */
 export function ship(ctx: PluginContext, siteId: string, key: string, adminPage: string | null = null, adminUser: string | null = null): Ship {
-  let pass: Promise<string> | undefined;
-  const credential = () => pass ??= tradeStoreKey(ctx, siteId, key);
-  async function call(method: "GET" | "POST", path: string, body?: unknown): Promise<unknown> {
-    const token = admitPass(await credential(), siteId);
+  const cacheKey = passCacheKey(siteId);
+  let pass: Promise<{ token: string; kept: boolean }> | undefined;
+  // The KV is a convenience: a click never fails because the pass could not be kept or read.
+  const fresh = async () => {
+    const token = await tradeStoreKey(ctx, siteId, key);
+    try {
+      await ctx.kv?.set(cacheKey, { token, key: await keyFingerprint(key) } satisfies KeptPass);
+    } catch { /* traded per click until the KV answers */ }
+    return { token, kept: false };
+  };
+  const kept = async () => {
+    try {
+      const stored = await ctx.kv?.get<Partial<KeptPass> | null>(cacheKey);
+      if (stored?.key !== await keyFingerprint(key)) throw new ShipError("PASS", "kept for another key");
+      return { token: admitPass(stored.token, siteId, true), kept: true };
+    } catch {
+      return fresh();
+    }
+  };
+  const credential = () => pass ??= kept();
+  async function call(method: "GET" | "POST", path: string, body?: unknown, retried = false): Promise<unknown> {
+    const { token, kept: reused } = await credential();
+    admitPass(token, siteId);
     let response: Response;
     try {
       response = await ctx.http!.fetch(`${SHIP_ORIGIN}${path}`, {
@@ -194,6 +239,11 @@ export function ship(ctx: PluginContext, siteId: string, key: string, adminPage:
     }
     const answer = await readJson(response);
     if (response.ok) return answer;
+    if (response.status === 401 && reused && !retried) {
+      await ctx.kv?.delete(cacheKey).catch(() => undefined);
+      pass = fresh();
+      return call(method, path, body, true);
+    }
     const error = typeof answer === "object" && answer !== null ? (answer as { error?: { code?: unknown; message?: unknown } }).error : undefined;
     const code = typeof error?.code === "string" ? error.code : "SHIP", message = typeof error?.message === "string" ? error.message : `Ship answered ${response.status}.`;
     throw new ShipError(code, code === "INTERNAL" ? "Ship could not finish that. Try again." : message, response.status);
