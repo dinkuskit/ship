@@ -78,8 +78,9 @@ export async function connectionState(ctx: PluginContext, press = false): Promis
   const { value, revision } = await saved(ctx);
   if (!value.flow) return connectedIn(value) ?? { state: "disconnected" };
   const control = await ctx.kv.get<Control>(CONTROL_KEY);
+  const flowId = value.flow.id;
   const restart = async (failure = RESTART): Promise<ConnectView> => {
-    await write(ctx, revision, withoutFlow(value));
+    if ((await write(ctx, revision, withoutFlow(value))).applied && control?.flowId === flowId) await ctx.kv.delete(CONTROL_KEY);
     return connectedIn(value) ?? { state: "disconnected", failure };
   };
   if (!control || control.flowId !== value.flow.id || control.expiresAt <= Date.now()) return restart();
@@ -150,7 +151,9 @@ export async function startConnect(ctx: PluginContext): Promise<ConnectView> {
 /** Cancel a waiting Connect; a key this store already had keeps working. */
 export async function cancelConnect(ctx: PluginContext): Promise<ConnectView> {
   const { value, revision } = await saved(ctx);
-  if (value.flow) await write(ctx, revision, withoutFlow(value));
+  if (value.flow && (await write(ctx, revision, withoutFlow(value))).applied && (await ctx.kv.get<Control>(CONTROL_KEY))?.flowId === value.flow.id) {
+    await ctx.kv.delete(CONTROL_KEY);
+  }
   return connectedIn(value) ?? { state: "disconnected" };
 }
 
@@ -168,7 +171,8 @@ export async function storeProof(input: unknown, ctx: PluginContext): Promise<Pl
   try {
     const control = await ctx.kv.get<Control>(CONTROL_KEY);
     const ok = control && control.receipt.connection_id === query.connection_id && control.expiresAt > Date.now() && control.receipt.site_origin === siteOrigin(ctx);
-    return ok ? proofResponse(200, control.receipt) : proofResponse(404, { error: "not_found" });
+    // Only the Connect still waiting in the encrypted setting is vouched for: a cancelled or replaced one is not.
+    return ok && (await saved(ctx)).value.flow?.id === control.flowId ? proofResponse(200, control.receipt) : proofResponse(404, { error: "not_found" });
   } catch {
     return proofResponse(503, { error: "connection_unavailable" });
   }

@@ -186,6 +186,20 @@ test("a refused or answered-wrong Connect starts over, and Cancel keeps the key 
   assert.match(text(await again.page({ type: "block_action", action_id: "cancel_connect" })), /#1001/);
   assert.deepEqual(again.saved(), { siteId: SITE, storeKey: KEY });
 
+  // The proof route vouches only for the Connect still waiting; Cancel takes its receipt away too.
+  const kv = new Map();
+  const fenced = host({ role: 50, kv, dinkus: { "/api/store-connections": started() }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  await fenced.page({ type: "block_action", action_id: "connect" });
+  assert.equal((await proofOf(fenced, { connection_id: CONNECTION })).status, 200);
+  await fenced.page({ type: "block_action", action_id: "cancel_connect" });
+  assert.equal((await proofOf(fenced, { connection_id: CONNECTION })).status, 404);
+  assert.equal(kv.has("state:connect"), false, "no receipt is left behind");
+  const replaced = new Map();
+  const other = host({ role: 50, kv: replaced, dinkus: { "/api/store-connections": started() }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  await other.page({ type: "block_action", action_id: "connect" });
+  replaced.set("state:connect", { ...replaced.get("state:connect"), flowId: "another-flow" });
+  assert.equal((await proofOf(other, { connection_id: CONNECTION })).status, 404, "a receipt for a flow the setting no longer holds is refused");
+
   // Only a Registry install on its https address can Connect.
   for (const options of [{ pluginId: "something-else" }, { siteUrl: "http://shop.example.test" }]) {
     const h = host({ siteId: null, key: null, role: 50, ...options });
