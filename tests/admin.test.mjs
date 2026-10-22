@@ -159,7 +159,8 @@ test("Connect: the owner approves at DinkusKit.com, the proof route vouches for 
 
   // The owner approves; DinkusKit.com sends them back and the page load finishes Connect.
   approved = true;
-  h.kv.set("state:connect", { ...h.kv.get("state:connect"), nextPollAt: 0 });
+  const waiting = `state:connect:${h.saved().flow.id}`;
+  h.kv.set(waiting, { ...h.kv.get(waiting), nextPollAt: 0 });
   const list = text(await h.page(load));
   assert.match(list, /#1001/);
   assert.deepEqual(h.saved(), { siteId: SITE, storeKey: issued });
@@ -203,11 +204,12 @@ test("a refused or answered-wrong Connect starts over, and Cancel keeps the key 
   assert.equal((await proofOf(fenced, { connection_id: CONNECTION })).status, 200);
   await fenced.page({ type: "block_action", action_id: "cancel_connect" });
   assert.equal((await proofOf(fenced, { connection_id: CONNECTION })).status, 404);
-  assert.equal(kv.has("state:connect"), false, "no receipt is left behind");
+  assert.equal([...kv.keys()].some(name => name.startsWith("state:connect")), false, "no receipt is left behind");
   const replaced = new Map();
   const other = host({ role: 50, kv: replaced, dinkus: { "/api/store-connections": started() }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
   await other.page({ type: "block_action", action_id: "connect" });
-  replaced.set("state:connect", { ...replaced.get("state:connect"), flowId: "another-flow" });
+  const record = `state:connect:${other.saved().flow.id}`;
+  replaced.set(record, { ...replaced.get(record), flowId: "another-flow" });
   assert.equal((await proofOf(other, { connection_id: CONNECTION })).status, 404, "a receipt for a flow the setting no longer holds is refused");
 
   // Only a Registry install on its https address can Connect.
@@ -264,11 +266,36 @@ test("a page load while Connect again is saving never wipes the new Connect", as
   assert.match(text(await h.page({ type: "block_action", action_id: "connect" })), /connect\?connection_id=conn_2/);
   assert.match(seen[0], /Approve at DinkusKit.com/, "the page in between shows the Connect waiting");
   assert.notEqual(h.saved().flow.id, first);
-  assert.equal(kv.get("state:connect").flowId, h.saved().flow.id, "the new verifier and its waiting record match");
+  assert.deepEqual([...kv.keys()].filter(name => name.startsWith("state:connect")), [`state:connect:${h.saved().flow.id}`], "only the new Connect's waiting record is left");
   assert.equal((await proofOf(h, { connection_id: "conn_2" })).status, 200);
   assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 404, "the replaced Connect is not vouched for");
   assert.match(text(await h.page({ type: "block_action", action_id: "check" })), /#1001/);
   assert.deepEqual(h.saved(), { siteId: SITE, storeKey: issued });
+});
+
+test("a slow Check of a cancelled Connect never wipes the Connect that replaced it", async () => {
+  let answerFirst, first = true;
+  const h = host({ siteId: null, key: null, role: 50, dinkus: {
+    "/api/store-connections": () => Response.json(started(first ? {} : { connection_id: "conn_2", verification_uri: "https://dinkuskit.com/account/connect?connection_id=conn_2" })),
+    "/api/store-connections/token": body => body.connection_id === CONNECTION
+      ? new Promise(resolve => { answerFirst = () => resolve(Response.json({ error: "authorization_pending" }, { status: 400 })); })
+      : Response.json({ error: "authorization_pending" }, { status: 400 }),
+  } });
+  await h.page({ type: "block_action", action_id: "connect" });
+  const slow = h.page({ type: "block_action", action_id: "check" });
+  while (!answerFirst) await new Promise(resolve => setTimeout(resolve, 1));
+  // Another tab cancels and connects again while DinkusKit.com is still answering the first Check.
+  await h.page({ type: "block_action", action_id: "cancel_connect" }); first = false;
+  await h.page({ type: "block_action", action_id: "connect" });
+  const replacement = h.saved().flow.id;
+  answerFirst();
+  await slow;
+  assert.equal(h.saved().flow.id, replacement);
+  assert.deepEqual([...h.kv.keys()].filter(name => name.startsWith("state:connect")), [`state:connect:${replacement}`]);
+  assert.equal((await proofOf(h, { connection_id: "conn_2" })).status, 200);
+  assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 404);
+  assert.match(text(await h.page({ type: "block_action", action_id: "check" })), /Not approved yet/, "the replacement still waits for the owner");
+  assert.equal(h.saved().flow.id, replacement);
 });
 
 test("a key DinkusKit.com no longer knows asks for Connect again", async () => {

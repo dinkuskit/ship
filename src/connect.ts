@@ -13,7 +13,8 @@ export const SERVICE = "ship";
 /** The Registry installations DinkusKit.com knows, by slug and by installed ID. */
 const INSTALLED: Record<string, string> = { "dinkus-ship": "r_ehdlg5cxkb3ffqvr", "dinkus-ship-beta": "r_nhb4yqdnowdmkxyu" };
 export const CONNECTION_SETTING = "connection";
-export const CONTROL_KEY = "state:connect";
+/** Each Connect keeps its waiting record under its own flow, so a slow Check of an old Connect never touches a newer one. */
+export const controlKey = (flowId: string) => `state:connect:${flowId}`;
 export const STORE_KEY_RE = /^dk_store_[A-Za-z0-9_-]{43}$/;
 const SITE_ID_RE = /^[A-Za-z0-9_-]{1,200}$/;
 const MAX_CONNECT_MS = 600_000;
@@ -91,15 +92,13 @@ const withoutFlow = ({ flow: _flow, ...rest }: Saved): Saved => rest;
 export async function connectionState(ctx: PluginContext, press = false): Promise<ConnectView> {
   const { value, revision } = await saved(ctx);
   if (!value.flow) return connectedIn(value) ?? await notConnected(ctx);
-  const control = await ctx.kv.get<Control>(CONTROL_KEY);
   const flowId = value.flow.id;
+  const control = await ctx.kv.get<Control>(controlKey(flowId));
   const restart = async (failure = RESTART): Promise<ConnectView> => {
-    if ((await write(ctx, revision, withoutFlow(value))).applied && control?.flowId === flowId) await ctx.kv.delete(CONTROL_KEY);
+    if ((await write(ctx, revision, withoutFlow(value))).applied) await ctx.kv.delete(controlKey(flowId));
     return connectedIn(value) ?? { state: "disconnected", failure };
   };
-  if (!control || control.expiresAt <= Date.now()) return restart();
-  // A newer Connect publishes its waiting record before its verifier: leave both alone while it lands.
-  if (control.flowId !== flowId) return { state: "pending", verificationUri: control.verificationUri };
+  if (!control || control.flowId !== flowId || control.expiresAt <= Date.now()) return restart();
   if (!press && Date.now() < control.nextPollAt) return { state: "pending", verificationUri: control.verificationUri };
   let response: Response, body: Record<string, unknown>;
   try {
@@ -112,7 +111,9 @@ export async function connectionState(ctx: PluginContext, press = false): Promis
   }
   if (!response.ok) {
     if (body?.error === "authorization_pending") {
-      await ctx.kv.set(CONTROL_KEY, { ...control, nextPollAt: Date.now() + control.interval * 1000 } satisfies Control);
+      await ctx.kv.set(controlKey(flowId), { ...control, nextPollAt: Date.now() + control.interval * 1000 } satisfies Control);
+      // Cancelled or replaced while DinkusKit.com answered: leave nothing behind for it.
+      if ((await saved(ctx)).value.flow?.id !== flowId) await ctx.kv.delete(controlKey(flowId));
       return { state: "pending", verificationUri: control.verificationUri, ...(press ? { checked: true as const } : {}) };
     }
     if (body?.error === "access_denied") return restart("The business owner did not approve Ship at DinkusKit.com. Press Connect to ask again.");
@@ -122,7 +123,7 @@ export async function connectionState(ctx: PluginContext, press = false): Promis
   const next: Saved = { siteId: control.receipt.site_id, storeKey: body.store_key };
   if (!(await write(ctx, revision, next)).applied) return restart();
   // A finished Connect vouches for nothing on the store-proof route, and a key pasted into 0.2.1 is no longer kept.
-  await ctx.kv.delete(CONTROL_KEY);
+  await ctx.kv.delete(controlKey(flowId));
   await Promise.all(LEGACY_SETTINGS.map(name => ctx.settings.delete(name).catch(() => false)));
   return { state: "connected", siteId: next.siteId!, key: next.storeKey! };
 }
@@ -155,27 +156,25 @@ export async function startConnect(ctx: PluginContext): Promise<ConnectView> {
   }
   if (value.siteId && value.siteId !== siteId) return { state: "disconnected", failure: "DinkusKit.com named another store for this web address. Contact DinkusKit." };
   const flowId = base64url(crypto.getRandomValues(new Uint8Array(18)));
-  // The waiting record goes first, so a page load in between never sees this verifier without it.
-  // The store-proof route vouches for it only once the verifier below is saved too.
-  await ctx.kv.set(CONTROL_KEY, {
+  // The waiting record goes first, so the verifier is never saved without it; the store-proof route vouches for it only once the verifier is saved too.
+  await ctx.kv.set(controlKey(flowId), {
     flowId, expiresAt: expiresAt as number, interval: interval as number, nextPollAt: Date.now() + (interval as number) * 1000,
     verificationUri: body.verification_uri,
     receipt: { version: 2, site_id: siteId, connection_id: connectionId, challenge: body.challenge, client_id: CLIENT_ID, service: SERVICE,
       site_origin: origin, callback_uri: callback, code_challenge: challenge, expires_at: expiresAt as number },
   } satisfies Control);
   if (!(await write(ctx, revision, { ...value, flow: { id: flowId, verifier } })).applied) {
-    if ((await ctx.kv.get<Control>(CONTROL_KEY))?.flowId === flowId) await ctx.kv.delete(CONTROL_KEY);
+    await ctx.kv.delete(controlKey(flowId));
     return { state: "disconnected", failure: RESTART };
   }
+  if (value.flow) await ctx.kv.delete(controlKey(value.flow.id));
   return { state: "pending", verificationUri: body.verification_uri };
 }
 
 /** Cancel a waiting Connect; a key this store already had keeps working. */
 export async function cancelConnect(ctx: PluginContext): Promise<ConnectView> {
   const { value, revision } = await saved(ctx);
-  if (value.flow && (await write(ctx, revision, withoutFlow(value))).applied && (await ctx.kv.get<Control>(CONTROL_KEY))?.flowId === value.flow.id) {
-    await ctx.kv.delete(CONTROL_KEY);
-  }
+  if (value.flow && (await write(ctx, revision, withoutFlow(value))).applied) await ctx.kv.delete(controlKey(value.flow.id));
   return connectedIn(value) ?? { state: "disconnected" };
 }
 
@@ -191,10 +190,10 @@ export async function storeProof(input: unknown, ctx: PluginContext): Promise<Pl
   const query = typeof input === "object" && input !== null ? input as Record<string, unknown> : {};
   if (Object.keys(query).length !== 1 || !safe(query.connection_id, 200)) return proofResponse(400, { error: "invalid_request" });
   try {
-    const control = await ctx.kv.get<Control>(CONTROL_KEY);
-    const ok = control && control.receipt.connection_id === query.connection_id && control.expiresAt > Date.now() && control.receipt.site_origin === siteOrigin(ctx);
     // Only the Connect still waiting in the encrypted setting is vouched for: a cancelled or replaced one is not.
-    return ok && (await saved(ctx)).value.flow?.id === control.flowId ? proofResponse(200, control.receipt) : proofResponse(404, { error: "not_found" });
+    const flow = (await saved(ctx)).value.flow, control = flow && await ctx.kv.get<Control>(controlKey(flow.id));
+    return control && control.flowId === flow.id && control.receipt.connection_id === query.connection_id && control.expiresAt > Date.now() &&
+      control.receipt.site_origin === siteOrigin(ctx) ? proofResponse(200, control.receipt) : proofResponse(404, { error: "not_found" });
   } catch {
     return proofResponse(503, { error: "connection_unavailable" });
   }
