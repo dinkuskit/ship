@@ -1,5 +1,11 @@
 # @dinkuskit/ship
 
+## 0.2.1
+
+### Patch Changes
+
+- [#62](https://github.com/dinkuskit/ship/pull/62) [`d433d5e`](https://github.com/dinkuskit/ship/commit/d433d5e8c43b65a3a65a1cde741e3b878455f3ae) Thanks [@saariuslystoned](https://github.com/saariuslystoned)! - Ship 0.2.1 is the first release cut from a release/X.Y.Z branch. The plugin code is unchanged from 0.2.0; the release is how the new release path (GrillTrack release-branches-079) gets proven end to end.
+
 ## 0.2.0
 
 ### Minor Changes
