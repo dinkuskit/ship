@@ -32,16 +32,26 @@ const pass = (claims = {}) => `${b64({ alg: "ES256" })}.${b64({ iss: "https://di
 
 /** A host with the plugin's settings, a fake network, the plugin's KV (a Map, or null for a host without one), and an Editor at the Shipping page. */
 function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.json({ access_token: pass(), token_type: "Bearer", expires_in: 300 }), role = 40, requestUrl = "",
-  kv = new Map(), dinkus = {}, pluginId = "dinkus-ship", siteUrl = "https://shop.example.test" } = {}) {
+  kv = new Map(), dinkus = {}, pluginId = "dinkus-ship", siteUrl = "https://shop.example.test", legacy = null } = {}) {
   const calls = [];
   // The encrypted "connection" setting Connect fills, with a revision per write.
   const stored = new Map(siteId && key ? [["connection", { value: JSON.stringify({ siteId, storeKey: key }), revision: "1" }]] : []);
+  // Ship 0.2.1's pasted settings: a plain Store ID and a key still encrypted under a secret this version no longer declares.
+  if (legacy) {
+    stored.set("siteId", { value: legacy.siteId, revision: "1" });
+    stored.set("storeKey", { value: { encrypted: legacy.storeKey }, revision: "1" });
+  }
   let revisions = 1;
   const ctx = {
     plugin: { id: pluginId, version: "0.3.0" },
     site: { url: siteUrl, name: "Shop", locale: "en" },
     settings: {
-      get: async name => stored.get(name)?.value ?? null,
+      get: async name => {
+        // As on the host: a setting encrypted under a secret the schema no longer declares cannot be read.
+        if (typeof stored.get(name)?.value === "object") throw new Error("Encrypted plugin setting is not declared as a secret");
+        return stored.get(name)?.value ?? null;
+      },
+      delete: async name => stored.delete(name),
       getVersioned: async name => stored.get(name) ?? null,
       compareAndSet: async (name, revision, value) => {
         if ((stored.get(name)?.revision ?? null) !== revision) return { applied: false };
@@ -206,6 +216,59 @@ test("a refused or answered-wrong Connect starts over, and Cancel keeps the key 
     assert.match(text(await h.page({ type: "block_action", action_id: "connect" })), /https web address/);
     assert.deepEqual(h.calls, []);
   }
+});
+
+test("a store upgraded from 0.2.1 never uses its pasted key: it is told to Connect once, and Connect forgets the old settings", async () => {
+  const issued = "dk_store_" + "u".repeat(43);
+  const editor = host({ siteId: null, key: null, legacy: { siteId: SITE, storeKey: KEY } });
+  const page = text(await editor.page(load));
+  assert.match(page, /no longer used/);
+  assert.match(page, /Ask an Administrator of this site to press Connect/);
+  assert.deepEqual(editor.calls, [], "the pasted key is not traded for a pass");
+
+  const h = host({ siteId: null, key: null, role: 50, legacy: { siteId: SITE, storeKey: KEY }, dinkus: {
+    "/api/store-connections": started(), "/api/store-connections/token": { store_key: issued, site_id: SITE },
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  assert.match(text(await h.page(load)), /"label":"Connect again","action_id":"connect"/);
+  await h.page({ type: "block_action", action_id: "connect" });
+  assert.match(text(await h.page({ type: "block_action", action_id: "check" })), /#1001/);
+  assert.deepEqual(h.saved(), { siteId: SITE, storeKey: issued });
+  assert.equal(h.stored.has("siteId") || h.stored.has("storeKey"), false, "the 0.2.1 settings are gone once Connect finishes");
+  assert.doesNotMatch(JSON.stringify(h.calls), new RegExp(KEY), "the pasted key was never sent anywhere");
+});
+
+test("a page load while Connect again is saving never wipes the new Connect", async () => {
+  const kv = new Map();
+  const issued = "dk_store_" + "r".repeat(43);
+  let approved = false;
+  const h = host({ siteId: null, key: null, role: 50, kv, dinkus: {
+    "/api/store-connections": body => Response.json(started({ connection_id: approved ? "conn_2" : CONNECTION, verification_uri: `https://dinkuskit.com/account/connect?connection_id=${approved ? "conn_2" : CONNECTION}`, challenge: body.code_challenge.slice(0, 8) })),
+    "/api/store-connections/token": body => body.connection_id === "conn_2" ? Response.json({ store_key: issued, site_id: SITE }) : Response.json({ error: "authorization_pending" }, { status: 400 }),
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  await h.page({ type: "block_action", action_id: "connect" });
+  const first = h.saved().flow.id;
+  // Connect again; another Shipping page load runs right after the first of the two writes it makes, whichever that is.
+  approved = true;
+  const seen = [];
+  let armed = true;
+  const between = write => async (...args) => {
+    const result = await write(...args);
+    if (armed) {
+      armed = false;
+      seen.push(text(await h.page(load)));
+    }
+    return result;
+  };
+  h.ctx.kv.set = between(h.ctx.kv.set);
+  h.ctx.settings.compareAndSet = between(h.ctx.settings.compareAndSet);
+  assert.match(text(await h.page({ type: "block_action", action_id: "connect" })), /connect\?connection_id=conn_2/);
+  assert.match(seen[0], /Approve at DinkusKit.com/, "the page in between shows the Connect waiting");
+  assert.notEqual(h.saved().flow.id, first);
+  assert.equal(kv.get("state:connect").flowId, h.saved().flow.id, "the new verifier and its waiting record match");
+  assert.equal((await proofOf(h, { connection_id: "conn_2" })).status, 200);
+  assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 404, "the replaced Connect is not vouched for");
+  assert.match(text(await h.page({ type: "block_action", action_id: "check" })), /#1001/);
+  assert.deepEqual(h.saved(), { siteId: SITE, storeKey: issued });
 });
 
 test("a key DinkusKit.com no longer knows asks for Connect again", async () => {

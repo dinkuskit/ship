@@ -43,6 +43,11 @@ through, Ship.
   refuses with `connect_commerce_first` until Commerce has connected the store.
   A key DinkusKit.com no longer knows (`invalid_store_key`, `site_mismatch`)
   shows **Connect again**.
+- Upgrading from 0.2.1 (store-connect-no-paste-082): pasted keys retire, so the
+  old `siteId` and `storeKey` settings are never used or sent. A store that
+  still has the old Store ID shows why it must Connect once; the plugin reads only
+  that plain Store ID, never the old key. When Connect finishes both old settings
+  are deleted.
 - Ship verifies the pass as it verifies Commerce's (`service/src/auth.ts`); the
   store is the pass's `site_id` and nothing in the request can name another.
 

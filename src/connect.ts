@@ -33,6 +33,12 @@ export type ConnectView =
 
 const COMMERCE_FIRST = "Connect Commerce first. Press Connect in the Commerce plugin, then come back here and press Connect.";
 const RESTART = "Connect did not finish. Press Connect to start again.";
+/**
+ * Ship 0.2.1's pasted Store ID and store key. Pasted keys retire (store-connect-no-paste-082): an
+ * upgraded store never uses or sends one, asks for Connect once, and forgets it when Connect finishes.
+ */
+const LEGACY_SETTINGS = ["siteId", "storeKey"];
+const UPGRADED = "Ship now connects to DinkusKit.com itself, so the store key pasted into an older Ship is no longer used. An Administrator presses Connect once and the business owner approves at DinkusKit.com.";
 
 function base64url(bytes: Uint8Array): string {
   let binary = "";
@@ -66,6 +72,14 @@ async function saved(ctx: PluginContext): Promise<{ value: Saved; revision: stri
 const connectedIn = (value: Saved): ConnectView | null =>
   safe(value.siteId, 200) && SITE_ID_RE.test(value.siteId) && typeof value.storeKey === "string" && STORE_KEY_RE.test(value.storeKey)
     ? { state: "connected", siteId: value.siteId, key: value.storeKey } : null;
+/**
+ * Not connected: a store upgraded from 0.2.1 is told why it must Connect. Only the plain Store ID is
+ * looked at; the old key, encrypted under a setting this version no longer declares, is never read.
+ */
+async function notConnected(ctx: PluginContext): Promise<ConnectView> {
+  const pasted = await ctx.settings.get<unknown>("siteId").then(value => typeof value === "string" && value.length > 0, () => false);
+  return pasted ? { state: "disconnected", failure: UPGRADED } : { state: "disconnected" };
+}
 const write = (ctx: PluginContext, revision: string | null, value: Saved) => ctx.settings.compareAndSet(CONNECTION_SETTING, revision, JSON.stringify(value));
 /** The setting without a Connect's verifier: a cancelled or failed Connect keeps the key it had. */
 const withoutFlow = ({ flow: _flow, ...rest }: Saved): Saved => rest;
@@ -76,14 +90,16 @@ const withoutFlow = ({ flow: _flow, ...rest }: Saved): Saved => rest;
  */
 export async function connectionState(ctx: PluginContext, press = false): Promise<ConnectView> {
   const { value, revision } = await saved(ctx);
-  if (!value.flow) return connectedIn(value) ?? { state: "disconnected" };
+  if (!value.flow) return connectedIn(value) ?? await notConnected(ctx);
   const control = await ctx.kv.get<Control>(CONTROL_KEY);
   const flowId = value.flow.id;
   const restart = async (failure = RESTART): Promise<ConnectView> => {
     if ((await write(ctx, revision, withoutFlow(value))).applied && control?.flowId === flowId) await ctx.kv.delete(CONTROL_KEY);
     return connectedIn(value) ?? { state: "disconnected", failure };
   };
-  if (!control || control.flowId !== value.flow.id || control.expiresAt <= Date.now()) return restart();
+  if (!control || control.expiresAt <= Date.now()) return restart();
+  // A newer Connect publishes its waiting record before its verifier: leave both alone while it lands.
+  if (control.flowId !== flowId) return { state: "pending", verificationUri: control.verificationUri };
   if (!press && Date.now() < control.nextPollAt) return { state: "pending", verificationUri: control.verificationUri };
   let response: Response, body: Record<string, unknown>;
   try {
@@ -105,8 +121,9 @@ export async function connectionState(ctx: PluginContext, press = false): Promis
   if (body.site_id !== control.receipt.site_id || typeof body.store_key !== "string" || !STORE_KEY_RE.test(body.store_key)) return restart();
   const next: Saved = { siteId: control.receipt.site_id, storeKey: body.store_key };
   if (!(await write(ctx, revision, next)).applied) return restart();
-  // A finished Connect vouches for nothing on the store-proof route.
+  // A finished Connect vouches for nothing on the store-proof route, and a key pasted into 0.2.1 is no longer kept.
   await ctx.kv.delete(CONTROL_KEY);
+  await Promise.all(LEGACY_SETTINGS.map(name => ctx.settings.delete(name).catch(() => false)));
   return { state: "connected", siteId: next.siteId!, key: next.storeKey! };
 }
 
@@ -138,13 +155,18 @@ export async function startConnect(ctx: PluginContext): Promise<ConnectView> {
   }
   if (value.siteId && value.siteId !== siteId) return { state: "disconnected", failure: "DinkusKit.com named another store for this web address. Contact DinkusKit." };
   const flowId = base64url(crypto.getRandomValues(new Uint8Array(18)));
-  if (!(await write(ctx, revision, { ...value, flow: { id: flowId, verifier } })).applied) return { state: "disconnected", failure: RESTART };
+  // The waiting record goes first, so a page load in between never sees this verifier without it.
+  // The store-proof route vouches for it only once the verifier below is saved too.
   await ctx.kv.set(CONTROL_KEY, {
     flowId, expiresAt: expiresAt as number, interval: interval as number, nextPollAt: Date.now() + (interval as number) * 1000,
     verificationUri: body.verification_uri,
     receipt: { version: 2, site_id: siteId, connection_id: connectionId, challenge: body.challenge, client_id: CLIENT_ID, service: SERVICE,
       site_origin: origin, callback_uri: callback, code_challenge: challenge, expires_at: expiresAt as number },
   } satisfies Control);
+  if (!(await write(ctx, revision, { ...value, flow: { id: flowId, verifier } })).applied) {
+    if ((await ctx.kv.get<Control>(CONTROL_KEY))?.flowId === flowId) await ctx.kv.delete(CONTROL_KEY);
+    return { state: "disconnected", failure: RESTART };
+  }
   return { state: "pending", verificationUri: body.verification_uri };
 }
 
