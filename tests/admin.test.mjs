@@ -298,6 +298,30 @@ test("a slow Check of a cancelled Connect never wipes the Connect that replaced 
   assert.equal(h.saved().flow.id, replacement);
 });
 
+test("a key that arrives late for a cancelled Connect is never saved", async () => {
+  let answerFirst, first = true;
+  const late = "dk_store_" + "l".repeat(43);
+  const h = host({ role: 50, dinkus: {
+    "/api/store-connections": () => Response.json(started(first ? {} : { connection_id: "conn_2", verification_uri: "https://dinkuskit.com/account/connect?connection_id=conn_2" })),
+    "/api/store-connections/token": body => body.connection_id === CONNECTION
+      ? new Promise(resolve => { answerFirst = () => resolve(Response.json({ store_key: late, site_id: SITE })); })
+      : Response.json({ error: "authorization_pending" }, { status: 400 }),
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  await h.page({ type: "block_action", action_id: "connect" });
+  const slow = h.page({ type: "block_action", action_id: "check" });
+  while (!answerFirst) await new Promise(resolve => setTimeout(resolve, 1));
+  // The owner approved, but the Administrator cancelled and pressed Connect again before the key came back.
+  await h.page({ type: "block_action", action_id: "cancel_connect" }); first = false;
+  await h.page({ type: "block_action", action_id: "connect" });
+  const replacement = h.saved().flow.id;
+  answerFirst();
+  await slow;
+  assert.equal(h.saved().storeKey, KEY, "the key the store had stays; the late one is dropped");
+  assert.equal(h.saved().flow.id, replacement);
+  assert.deepEqual([...h.kv.keys()].filter(name => name.startsWith("state:connect")), [`state:connect:${replacement}`]);
+  assert.doesNotMatch(JSON.stringify(h.calls.filter(call => call.url === "https://dinkuskit.com/api/store-passes")), new RegExp(late), "the late key is never used");
+});
+
 test("a key DinkusKit.com no longer knows asks for Connect again", async () => {
   for (const error of ["invalid_store_key", "site_mismatch"]) {
     const page = text(await host({ role: 50, passes: () => Response.json({ error }, { status: 401 }) }).page(load));
