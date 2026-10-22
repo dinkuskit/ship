@@ -17,7 +17,8 @@ execFileSync("tar", ["-xf", artifact.tarballPath, "-C", extracted]);
 const backend = await readFile(resolve(extracted, "backend.js"));
 const manifest = JSON.parse(await readFile(resolve(extracted, "manifest.json"), "utf8"));
 if (manifest.id !== "dinkus-ship") throw new Error(`unexpected plugin id ${manifest.id}`);
-if (manifest.routes.some(route => route.public)) throw new Error("the Ship plugin declares no public routes");
+// The one public route is the store-proof receipt DinkusKit.com reads during Connect.
+if (manifest.routes.some(route => route.public && route.name !== "store-proof")) throw new Error("the Ship plugin's only public route is store-proof");
 console.log([
   "registry_bundle=pass",
   `backend_bytes=${backend.byteLength}`,

@@ -1,5 +1,6 @@
 import type { SandboxedPlugin } from "emdash/plugin";
 import { shippingAdmin } from "./admin.js";
+import { storeProof } from "./connect.js";
 
 /**
  * DinkusKit Ship for the EmDash store admin (GrillTrack ship-registry-plugin-001):
@@ -10,6 +11,8 @@ const plugin: SandboxedPlugin = {
   routes: {
     // Editors and Administrators; lower roles do not see Shipping.
     admin: { public: false, permission: "content:edit_any", methods: ["POST"], handler: shippingAdmin },
+    // DinkusKit.com reads a waiting Connect's receipt here on the store's own web address (store-connect-flow-081).
+    "store-proof": { public: true, methods: ["GET"], response: "raw", request: { body: "none" }, handler: (route, ctx) => storeProof(route.input, ctx) },
   },
 };
 

@@ -1,10 +1,13 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
-import { connectPage, listPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, type OrderView, type Toast } from "./pages.js";
-import { adminPageFrom, adminUserFrom, connection, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
+import { connectPage, listPage, pendingPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, type OrderView, type Toast } from "./pages.js";
+import { cancelConnect, connectionState, startConnect, type ConnectView } from "./connect.js";
+import { adminPageFrom, adminUserFrom, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
 
 /** EmDash's Editor role; Administrators are above it. Lower roles never see Shipping. */
 const EDITOR = 40;
+/** Only an Administrator connects the plugin to DinkusKit.com (store-connect-flow-081). */
+const ADMIN = 50;
 
 interface Action { type: "block_action"; action_id: string; value?: unknown }
 interface Submit { type: "form_submit"; action_id: string; values: Record<string, unknown> }
@@ -63,6 +66,7 @@ async function openOrder(hosted: Ship, orderId: string, extra: Partial<OrderView
 
 /** A refusal while on an order's page keeps the page, with Ship's reason and what was typed. */
 async function refused(hosted: Ship, orderId: string, error: ShipError, typed: OrderView["typed"]): Promise<BlockResponse> {
+  if (error.code === "RECONNECT") throw error;
   if (error.code === "NOT_FOUND") return problemPage(hosted.siteId, "Order not at Ship", error.message);
   try {
     return await openOrder(hosted, orderId, { failure: error.message, typed, askBuyAgain: error.code === "CHECK_PITNEY_BOWES" });
@@ -82,13 +86,19 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
   }
   const input = interaction(route.input);
   if (!input) return { blocks: [] };
-  let settings;
+  const isAdmin = user.role >= ADMIN;
+  const connect = input.type === "block_action" && ["connect", "check", "cancel_connect"].includes(input.action_id) ? input.action_id : null;
+  let settings: ConnectView;
   try {
-    settings = await connection(ctx);
+    settings = connect === "connect" && isAdmin ? await startConnect(ctx)
+      : connect === "cancel_connect" && isAdmin ? await cancelConnect(ctx)
+      : await connectionState(ctx, connect === "check");
   } catch (error) {
-    return connectPage(error instanceof ShipError ? error.message : undefined);
+    ctx.log.error("Connect failed", { message: error instanceof Error ? error.message : String(error) });
+    return connectPage(isAdmin, "Connect could not finish. Try again in a moment.");
   }
-  if (!settings) return connectPage();
+  if (settings.state === "pending") return pendingPage(settings.verificationUri, settings.checked);
+  if (settings.state === "disconnected") return connectPage(isAdmin, settings.failure);
   const hosted = ship(ctx, settings.siteId, settings.key, adminPageFrom(route.request?.url), adminUserFrom(user.email));
   const by = typeof user.email === "string" && user.email ? user.email : user.id;
   try {
@@ -135,7 +145,8 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
     return listPage(hosted.siteId, list.orders, list.settings);
   } catch (error) {
     if (error instanceof ShipError) {
-      return error.code === "PASS" || error.code === "NETWORK" || error.code === "SETTINGS"
+      if (error.code === "RECONNECT") return connectPage(isAdmin, error.message);
+      return error.code === "PASS" || error.code === "NETWORK"
         ? problemPage(hosted.siteId, error.code === "PASS" ? "DinkusKit.com did not sign a pass" : "Ship could not be reached", error.message)
         : problemPage(hosted.siteId, "Ship could not be used", error.message);
     }
