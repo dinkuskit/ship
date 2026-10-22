@@ -37,11 +37,13 @@ nothing is charged. Live postage is not on yet
 
 ## How a label gets bought from the store admin
 
-1. The owner pastes the **Store ID** and **store key** from the Set up Commerce
-   box on DinkusKit.com into the plugin's settings (the same ones Commerce has).
+1. An Administrator presses **Connect** on the Shipping page, after Commerce is
+   connected, and the business owner presses Approve at DinkusKit.com. DinkusKit.com
+   gives the plugin its own store key, good only for `ship:admin` passes, which
+   the plugin keeps in its encrypted settings. Nobody pastes a key.
 2. The plugin trades the key at `https://dinkuskit.com/api/store-passes` for a
    5-minute `ship:admin` pass and reuses that pass for later clicks for up to a
-   minute, so a burst of clicks shares one trade and a key replaced at
+   minute, so a burst of clicks shares one trade and a Disconnect at
    DinkusKit.com stops clicks within a minute. The key never goes to Ship or a
    store page.
 3. With the pass, the plugin asks Ship for the orders, prices, the label, a

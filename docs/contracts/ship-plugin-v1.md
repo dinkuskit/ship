@@ -25,14 +25,29 @@ through, Ship.
   `scope: "ship:admin"`, `audience: "dinkus-ship"`, keeps the pass in its own
   plugin KV beside a SHA-256 fingerprint of the key, and reuses it for later
   clicks only while the pass is under a minute old (its `iat`), has at least
-  30 seconds left, and the same key is still in the settings. So a burst of
-  clicks shares one trade, and a key replaced or a Ship turned off at
+  30 seconds left, and the plugin still has the same key. So a burst of
+  clicks shares one trade, and a Disconnect or a Ship turned off at
   DinkusKit.com stops clicks within a minute (ship-pass-reuse-001). It uses a
   pass only when its `iss`, `aud`, `site_id`, `scope` and `exp` are what it
   asked for; a kept pass Ship answers 401 to is dropped and the call retried
   once on a fresh one.
-- The plugin's settings are the **Store ID** (`siteId`) and the **store key**,
-  both from the Set up Commerce box on DinkusKit.com, the same ones Commerce uses.
+- The plugin gets its Store ID and its own store key from **Connect to DinkusKit**
+  (store-connect-per-plugin-key-080, store-connect-flow-081), never from a paste.
+  An Administrator presses Connect on the Shipping page; the plugin starts a
+  protocol-2 connection (`client_id: "dinkus-ship-emdash"`, `service: "ship"`,
+  PKCE S256, callback `/_emdash/admin/plugins/<installed id>/shipping`), serves the
+  receipt on its one public route, `store-proof`, while that Connect waits, and
+  polls `/api/store-connections/token` on Check or page load. The business owner
+  approves at DinkusKit.com; the answer is `{ store_key, site_id }`, saved in
+  the encrypted `connection` setting in place of the verifier. DinkusKit.com
+  refuses with `connect_commerce_first` until Commerce has connected the store.
+  A key DinkusKit.com no longer knows (`invalid_store_key`, `site_mismatch`)
+  shows **Connect again**.
+- Upgrading from 0.2.1 (store-connect-no-paste-082): pasted keys retire, so the
+  old `siteId` and `storeKey` settings are never used or sent. A store that
+  still has the old Store ID shows why it must Connect once; the plugin reads only
+  that plain Store ID, never the old key. When Connect finishes both old settings
+  are deleted.
 - Ship verifies the pass as it verifies Commerce's (`service/src/auth.ts`); the
   store is the pass's `site_id` and nothing in the request can name another.
 

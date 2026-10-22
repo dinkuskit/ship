@@ -31,16 +31,45 @@ const pass = (claims = {}) => `${b64({ alg: "ES256" })}.${b64({ iss: "https://di
   scope: "ship:admin", iat: Math.floor(Date.now() / 1000), exp: Math.floor(Date.now() / 1000) + 300, ...claims })}.${b64("sig")}`;
 
 /** A host with the plugin's settings, a fake network, the plugin's KV (a Map, or null for a host without one), and an Editor at the Shipping page. */
-function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.json({ access_token: pass(), token_type: "Bearer", expires_in: 300 }), role = 40, requestUrl = "", kv = new Map() } = {}) {
+function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.json({ access_token: pass(), token_type: "Bearer", expires_in: 300 }), role = 40, requestUrl = "",
+  kv = new Map(), dinkus = {}, pluginId = "dinkus-ship", siteUrl = "https://shop.example.test", legacy = null } = {}) {
   const calls = [];
+  // The encrypted "connection" setting Connect fills, with a revision per write.
+  const stored = new Map(siteId && key ? [["connection", { value: JSON.stringify({ siteId, storeKey: key }), revision: "1" }]] : []);
+  // Ship 0.2.1's pasted settings: a plain Store ID and a key still encrypted under a secret this version no longer declares.
+  if (legacy) {
+    stored.set("siteId", { value: legacy.siteId, revision: "1" });
+    stored.set("storeKey", { value: { encrypted: legacy.storeKey }, revision: "1" });
+  }
+  let revisions = 1;
   const ctx = {
-    settings: { get: async name => ({ siteId, storeKey: key })[name] ?? null },
+    plugin: { id: pluginId, version: "0.3.0" },
+    site: { url: siteUrl, name: "Shop", locale: "en" },
+    settings: {
+      get: async name => {
+        // As on the host: a setting encrypted under a secret the schema no longer declares cannot be read.
+        if (typeof stored.get(name)?.value === "object") throw new Error("Encrypted plugin setting is not declared as a secret");
+        return stored.get(name)?.value ?? null;
+      },
+      delete: async name => stored.delete(name),
+      getVersioned: async name => stored.get(name) ?? null,
+      compareAndSet: async (name, revision, value) => {
+        if ((stored.get(name)?.revision ?? null) !== revision) return { applied: false };
+        stored.set(name, { value, revision: String(++revisions) });
+        return { applied: true };
+      },
+    },
     ...(kv === null ? {} : { kv: { get: async name => kv.has(name) ? kv.get(name) : null, set: async (name, value) => { kv.set(name, value); }, delete: async name => kv.delete(name) } }),
     http: { fetch: async (url, init) => {
       const body = init?.body ? JSON.parse(init.body) : undefined;
       const adminPage = init?.headers?.["x-ship-admin-page"], adminUser = init?.headers?.["x-ship-admin-user"];
       calls.push({ url, method: init?.method ?? "GET", authorization: init?.headers?.authorization, ...(adminPage === undefined ? {} : { adminPage }), ...(adminUser === undefined ? {} : { adminUser }), body });
       if (url === "https://dinkuskit.com/api/store-passes") return passes({ url, init, body });
+      if (url.startsWith("https://dinkuskit.com/api/store-connections")) {
+        const answer = dinkus[new URL(url).pathname];
+        if (!answer) throw new Error(`unexpected call ${url}`);
+        return typeof answer === "function" ? answer(body) : Response.json(answer);
+      }
       const path = new URL(url).pathname;
       const answer = ship[`${init?.method ?? "GET"} ${path}`];
       if (!answer) throw new Error(`unexpected call ${init?.method ?? "GET"} ${path}`);
@@ -56,7 +85,7 @@ function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.jso
     if (!checked.valid) throw new Error(`invalid Block Kit: ${JSON.stringify(checked.errors)}`);
     return response;
   };
-  return { ctx, calls, page, route, kv };
+  return { ctx, calls, page, route, kv, stored, saved: () => JSON.parse(stored.get("connection")?.value ?? "{}") };
 }
 const text = response => JSON.stringify(response);
 const load = { type: "page_load", page: "/shipping" };
@@ -75,16 +104,230 @@ test("lower roles and other surfaces never reach Ship", async () => {
   assert.deepEqual(h.calls, []);
 });
 
-test("until both settings are pasted the page asks for them, and a malformed one is named", async () => {
-  for (const settings of [{ siteId: "", key: KEY }, { siteId: SITE, key: "" }]) {
-    const h = host(settings);
-    const page = text(await h.page(load));
-    assert.match(page, /Connect Ship/);
-    assert.match(page, /"kind":"plugin-settings"/);
+const CONNECTION = "conn_1";
+const started = (extra = {}) => ({ protocol_version: 2, site_id: SITE, connection_id: CONNECTION, challenge: "challenge-1", expires_at: Date.now() + 300_000,
+  interval: 5, verification_uri: `https://dinkuskit.com/account/connect?connection_id=${CONNECTION}`, ...extra });
+const proof = plugin.routes["store-proof"].handler;
+const proofOf = async (h, input) => {
+  const response = await proof({ input, request: { url: "", method: "GET", headers: {} } }, h.ctx);
+  return { status: response.status, body: JSON.parse(response.body.value) };
+};
+
+test("until Connect has run the page asks an Administrator to press Connect, and an Editor to ask one", async () => {
+  const admin = host({ siteId: null, key: null, role: 50 });
+  const page = text(await admin.page(load));
+  assert.match(page, /Connect Ship/);
+  assert.match(page, /"action_id":"connect"/);
+  assert.doesNotMatch(page, /plugin-settings|Paste/);
+  assert.deepEqual(admin.calls, []);
+  const editor = host({ siteId: null, key: null });
+  assert.match(text(await editor.page({ type: "block_action", action_id: "connect" })), /Ask an Administrator of this site to press Connect/);
+  assert.deepEqual(editor.calls, [], "an Editor's Connect asks DinkusKit.com nothing");
+});
+
+test("Connect: the owner approves at DinkusKit.com, the proof route vouches for this store, and the plugin keeps its own key", async () => {
+  let approved = false;
+  const issued = "dk_store_" + "n".repeat(43);
+  const h = host({ siteId: null, key: null, role: 50, dinkus: {
+    "/api/store-connections": started(),
+    "/api/store-connections/token": () => approved ? Response.json({ store_key: issued, site_id: SITE }) : Response.json({ error: "authorization_pending", interval: 5 }, { status: 400 }),
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  const pending = text(await h.page({ type: "block_action", action_id: "connect" }));
+  assert.match(pending, /Approve at DinkusKit.com/);
+  assert.match(pending, /connect\?connection_id=conn_1/);
+  const start = h.calls[0];
+  assert.equal(start.url, "https://dinkuskit.com/api/store-connections");
+  assert.deepEqual({ ...start.body, code_challenge: undefined }, { protocol_version: 2, client_id: "dinkus-ship-emdash", service: "ship", site_origin: "https://shop.example.test",
+    callback_uri: "https://shop.example.test/_emdash/admin/plugins/r_ehdlg5cxkb3ffqvr/shipping", code_challenge: undefined, code_challenge_method: "S256" });
+  const verifier = h.saved().flow.verifier;
+  assert.equal(createHash("sha256").update(verifier).digest("base64url"), start.body.code_challenge);
+  assert.doesNotMatch(JSON.stringify([...h.kv.values()]), new RegExp(verifier), "the verifier stays in the encrypted setting");
+
+  // DinkusKit.com reads the receipt from the store's own web address; nothing else is answered.
+  const receipt = await proofOf(h, { connection_id: CONNECTION });
+  assert.equal(receipt.status, 200);
+  assert.deepEqual({ ...receipt.body, code_challenge: undefined, expires_at: undefined }, { version: 2, site_id: SITE, connection_id: CONNECTION, challenge: "challenge-1",
+    client_id: "dinkus-ship-emdash", service: "ship", site_origin: "https://shop.example.test",
+    callback_uri: "https://shop.example.test/_emdash/admin/plugins/r_ehdlg5cxkb3ffqvr/shipping", code_challenge: undefined, expires_at: undefined });
+  assert.equal((await proofOf(h, { connection_id: "other" })).status, 404);
+  assert.equal((await proofOf(h, { connection_id: CONNECTION, extra: "1" })).status, 400);
+
+  // Check before the owner approves: still waiting.
+  assert.match(text(await h.page({ type: "block_action", action_id: "check" })), /Not approved yet/);
+  const tokenCall = h.calls.at(-1);
+  assert.deepEqual(tokenCall.body, { client_id: "dinkus-ship-emdash", connection_id: CONNECTION, code_verifier: verifier });
+
+  // The owner approves; DinkusKit.com sends them back and the page load finishes Connect.
+  approved = true;
+  const waiting = `state:connect:${h.saved().flow.id}`;
+  h.kv.set(waiting, { ...h.kv.get(waiting), nextPollAt: 0 });
+  const list = text(await h.page(load));
+  assert.match(list, /#1001/);
+  assert.deepEqual(h.saved(), { siteId: SITE, storeKey: issued });
+  assert.equal(h.calls.find(call => call.url === "https://dinkuskit.com/api/store-passes").authorization, `Bearer ${issued}`);
+  assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 404, "a finished Connect vouches for nothing");
+});
+
+test("Ship joins the store Commerce made: before Commerce connects, Connect says so", async () => {
+  const h = host({ siteId: null, key: null, role: 50, dinkus: { "/api/store-connections": () => Response.json({ error: "connect_commerce_first" }, { status: 409 }) } });
+  const page = text(await h.page({ type: "block_action", action_id: "connect" }));
+  assert.match(page, /Connect Commerce first/);
+  assert.deepEqual(h.saved(), {});
+});
+
+test("a refused or answered-wrong Connect starts over, and Cancel keeps the key the store already had", async () => {
+  const denied = host({ siteId: null, key: null, role: 50, dinkus: { "/api/store-connections": started(), "/api/store-connections/token": () => Response.json({ error: "access_denied" }, { status: 400 }) } });
+  await denied.page({ type: "block_action", action_id: "connect" });
+  assert.match(text(await denied.page({ type: "block_action", action_id: "check" })), /did not approve Ship/);
+  assert.equal(denied.saved().flow, undefined);
+
+  const wrongStore = host({ siteId: null, key: null, role: 50, dinkus: { "/api/store-connections": started(), "/api/store-connections/token": { store_key: KEY, site_id: "site_other" } } });
+  await wrongStore.page({ type: "block_action", action_id: "connect" });
+  assert.match(text(await wrongStore.page({ type: "block_action", action_id: "check" })), /Connect did not finish/);
+  assert.deepEqual(wrongStore.saved(), {});
+
+  const badLink = host({ siteId: null, key: null, role: 50, dinkus: { "/api/store-connections": started({ verification_uri: "https://evil.example/approve" }) } });
+  assert.match(text(await badLink.page({ type: "block_action", action_id: "connect" })), /Connect did not finish/);
+  assert.equal(badLink.saved().flow, undefined);
+
+  // Connect again on a connected store, then Cancel: the old key still buys labels.
+  const again = host({ role: 50, dinkus: { "/api/store-connections": started() }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  await again.page({ type: "block_action", action_id: "connect" });
+  assert.equal(again.saved().storeKey, KEY);
+  assert.match(text(await again.page({ type: "block_action", action_id: "cancel_connect" })), /#1001/);
+  assert.deepEqual(again.saved(), { siteId: SITE, storeKey: KEY });
+
+  // The proof route vouches only for the Connect still waiting; Cancel takes its receipt away too.
+  const kv = new Map();
+  const fenced = host({ role: 50, kv, dinkus: { "/api/store-connections": started() }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  await fenced.page({ type: "block_action", action_id: "connect" });
+  assert.equal((await proofOf(fenced, { connection_id: CONNECTION })).status, 200);
+  await fenced.page({ type: "block_action", action_id: "cancel_connect" });
+  assert.equal((await proofOf(fenced, { connection_id: CONNECTION })).status, 404);
+  assert.equal([...kv.keys()].some(name => name.startsWith("state:connect")), false, "no receipt is left behind");
+  const replaced = new Map();
+  const other = host({ role: 50, kv: replaced, dinkus: { "/api/store-connections": started() }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  await other.page({ type: "block_action", action_id: "connect" });
+  const record = `state:connect:${other.saved().flow.id}`;
+  replaced.set(record, { ...replaced.get(record), flowId: "another-flow" });
+  assert.equal((await proofOf(other, { connection_id: CONNECTION })).status, 404, "a receipt for a flow the setting no longer holds is refused");
+
+  // Only a Registry install on its https address can Connect.
+  for (const options of [{ pluginId: "something-else" }, { siteUrl: "http://shop.example.test" }]) {
+    const h = host({ siteId: null, key: null, role: 50, ...options });
+    assert.match(text(await h.page({ type: "block_action", action_id: "connect" })), /https web address/);
     assert.deepEqual(h.calls, []);
   }
-  assert.match(text(await host({ key: "sk_live_not_a_store_key" }).page(load)), /store key is not one DinkusKit.com gives/);
-  assert.match(text(await host({ siteId: "bad site" }).page(load)), /Store ID is not one DinkusKit.com gives/);
+});
+
+test("a store upgraded from 0.2.1 never uses its pasted key: it is told to Connect once, and Connect forgets the old settings", async () => {
+  const issued = "dk_store_" + "u".repeat(43);
+  const editor = host({ siteId: null, key: null, legacy: { siteId: SITE, storeKey: KEY } });
+  const page = text(await editor.page(load));
+  assert.match(page, /no longer used/);
+  assert.match(page, /Ask an Administrator of this site to press Connect/);
+  assert.deepEqual(editor.calls, [], "the pasted key is not traded for a pass");
+
+  const h = host({ siteId: null, key: null, role: 50, legacy: { siteId: SITE, storeKey: KEY }, dinkus: {
+    "/api/store-connections": started(), "/api/store-connections/token": { store_key: issued, site_id: SITE },
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  assert.match(text(await h.page(load)), /"label":"Connect again","action_id":"connect"/);
+  await h.page({ type: "block_action", action_id: "connect" });
+  assert.match(text(await h.page({ type: "block_action", action_id: "check" })), /#1001/);
+  assert.deepEqual(h.saved(), { siteId: SITE, storeKey: issued });
+  assert.equal(h.stored.has("siteId") || h.stored.has("storeKey"), false, "the 0.2.1 settings are gone once Connect finishes");
+  assert.doesNotMatch(JSON.stringify(h.calls), new RegExp(KEY), "the pasted key was never sent anywhere");
+});
+
+test("a page load while Connect again is saving never wipes the new Connect", async () => {
+  const kv = new Map();
+  const issued = "dk_store_" + "r".repeat(43);
+  let approved = false;
+  const h = host({ siteId: null, key: null, role: 50, kv, dinkus: {
+    "/api/store-connections": body => Response.json(started({ connection_id: approved ? "conn_2" : CONNECTION, verification_uri: `https://dinkuskit.com/account/connect?connection_id=${approved ? "conn_2" : CONNECTION}`, challenge: body.code_challenge.slice(0, 8) })),
+    "/api/store-connections/token": body => body.connection_id === "conn_2" ? Response.json({ store_key: issued, site_id: SITE }) : Response.json({ error: "authorization_pending" }, { status: 400 }),
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  await h.page({ type: "block_action", action_id: "connect" });
+  const first = h.saved().flow.id;
+  // Connect again; another Shipping page load runs right after the first of the two writes it makes, whichever that is.
+  approved = true;
+  const seen = [];
+  let armed = true;
+  const between = write => async (...args) => {
+    const result = await write(...args);
+    if (armed) {
+      armed = false;
+      seen.push(text(await h.page(load)));
+    }
+    return result;
+  };
+  h.ctx.kv.set = between(h.ctx.kv.set);
+  h.ctx.settings.compareAndSet = between(h.ctx.settings.compareAndSet);
+  assert.match(text(await h.page({ type: "block_action", action_id: "connect" })), /connect\?connection_id=conn_2/);
+  assert.match(seen[0], /Approve at DinkusKit.com/, "the page in between shows the Connect waiting");
+  assert.notEqual(h.saved().flow.id, first);
+  assert.deepEqual([...kv.keys()].filter(name => name.startsWith("state:connect")), [`state:connect:${h.saved().flow.id}`], "only the new Connect's waiting record is left");
+  assert.equal((await proofOf(h, { connection_id: "conn_2" })).status, 200);
+  assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 404, "the replaced Connect is not vouched for");
+  assert.match(text(await h.page({ type: "block_action", action_id: "check" })), /#1001/);
+  assert.deepEqual(h.saved(), { siteId: SITE, storeKey: issued });
+});
+
+test("a slow Check of a cancelled Connect never wipes the Connect that replaced it", async () => {
+  let answerFirst, first = true;
+  const h = host({ siteId: null, key: null, role: 50, dinkus: {
+    "/api/store-connections": () => Response.json(started(first ? {} : { connection_id: "conn_2", verification_uri: "https://dinkuskit.com/account/connect?connection_id=conn_2" })),
+    "/api/store-connections/token": body => body.connection_id === CONNECTION
+      ? new Promise(resolve => { answerFirst = () => resolve(Response.json({ error: "authorization_pending" }, { status: 400 })); })
+      : Response.json({ error: "authorization_pending" }, { status: 400 }),
+  } });
+  await h.page({ type: "block_action", action_id: "connect" });
+  const slow = h.page({ type: "block_action", action_id: "check" });
+  while (!answerFirst) await new Promise(resolve => setTimeout(resolve, 1));
+  // Another tab cancels and connects again while DinkusKit.com is still answering the first Check.
+  await h.page({ type: "block_action", action_id: "cancel_connect" }); first = false;
+  await h.page({ type: "block_action", action_id: "connect" });
+  const replacement = h.saved().flow.id;
+  answerFirst();
+  await slow;
+  assert.equal(h.saved().flow.id, replacement);
+  assert.deepEqual([...h.kv.keys()].filter(name => name.startsWith("state:connect")), [`state:connect:${replacement}`]);
+  assert.equal((await proofOf(h, { connection_id: "conn_2" })).status, 200);
+  assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 404);
+  assert.match(text(await h.page({ type: "block_action", action_id: "check" })), /Not approved yet/, "the replacement still waits for the owner");
+  assert.equal(h.saved().flow.id, replacement);
+});
+
+test("a key that arrives late for a cancelled Connect is never saved", async () => {
+  let answerFirst, first = true;
+  const late = "dk_store_" + "l".repeat(43);
+  const h = host({ role: 50, dinkus: {
+    "/api/store-connections": () => Response.json(started(first ? {} : { connection_id: "conn_2", verification_uri: "https://dinkuskit.com/account/connect?connection_id=conn_2" })),
+    "/api/store-connections/token": body => body.connection_id === CONNECTION
+      ? new Promise(resolve => { answerFirst = () => resolve(Response.json({ store_key: late, site_id: SITE })); })
+      : Response.json({ error: "authorization_pending" }, { status: 400 }),
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  await h.page({ type: "block_action", action_id: "connect" });
+  const slow = h.page({ type: "block_action", action_id: "check" });
+  while (!answerFirst) await new Promise(resolve => setTimeout(resolve, 1));
+  // The owner approved, but the Administrator cancelled and pressed Connect again before the key came back.
+  await h.page({ type: "block_action", action_id: "cancel_connect" }); first = false;
+  await h.page({ type: "block_action", action_id: "connect" });
+  const replacement = h.saved().flow.id;
+  answerFirst();
+  await slow;
+  assert.equal(h.saved().storeKey, KEY, "the key the store had stays; the late one is dropped");
+  assert.equal(h.saved().flow.id, replacement);
+  assert.deepEqual([...h.kv.keys()].filter(name => name.startsWith("state:connect")), [`state:connect:${replacement}`]);
+  assert.doesNotMatch(JSON.stringify(h.calls.filter(call => call.url === "https://dinkuskit.com/api/store-passes")), new RegExp(late), "the late key is never used");
+});
+
+test("a key DinkusKit.com no longer knows asks for Connect again", async () => {
+  for (const error of ["invalid_store_key", "site_mismatch"]) {
+    const page = text(await host({ role: 50, passes: () => Response.json({ error }, { status: 401 }) }).page(load));
+    assert.match(page, /Connect Ship again/);
+    assert.match(page, /"label":"Connect again","action_id":"connect"/);
+  }
 });
 
 test("the store key goes only to DinkusKit.com, and the pass goes only to Ship", async () => {

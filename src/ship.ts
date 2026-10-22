@@ -15,7 +15,6 @@ export const AUDIENCE = "dinkus-ship";
 export const SCOPE = "ship:admin";
 /** Ship's biggest answer is one order with its 500 lines and label history, far below this; the list is bounded rows. */
 const MAX_ANSWER_BYTES = 1024 * 1024;
-const SITE_ID = /^[A-Za-z0-9._:-]{1,200}$/;
 /** A kept pass is reused only for this long after DinkusKit.com issued it, so a revoked key stops clicks within a minute. */
 export const PASS_REUSE_SECONDS = 60;
 /** A kept pass is reused only while it has at least this long left, so a call never starts on a pass about to expire. */
@@ -25,7 +24,7 @@ export const passCacheKey = (siteId: string) => `cache:pass:${siteId}`;
 /** What is kept: the pass and a fingerprint of the key it was traded with, never the key itself. */
 interface KeptPass { token: string; key: string }
 
-/** A one-way fingerprint of the store key, so a kept pass is reused only while the same key is pasted in the settings. */
+/** A one-way fingerprint of the store key, so a kept pass is reused only while the plugin still has the same key. */
 export async function keyFingerprint(key: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(key));
   return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
@@ -72,16 +71,6 @@ export class ShipError extends Error {
   }
 }
 
-/** The plugin's settings as the owner pasted them, or null until both are there. */
-export async function connection(ctx: PluginContext): Promise<{ siteId: string; key: string } | null> {
-  const [siteId, key] = await Promise.all([ctx.settings.get<unknown>("siteId"), ctx.settings.get<unknown>("storeKey")]);
-  const site = typeof siteId === "string" ? siteId.trim() : "", secret = typeof key === "string" ? key.trim() : "";
-  if (!site || !secret) return null;
-  if (!SITE_ID.test(site)) throw new ShipError("SETTINGS", "The Store ID is not one DinkusKit.com gives. Paste the siteId line from the Set up Commerce box.");
-  if (secret.length > 512 || !/^dk_store_[A-Za-z0-9_-]+$/.test(secret)) throw new ShipError("SETTINGS", "The store key is not one DinkusKit.com gives. Paste it again from the Set up Commerce box.");
-  return { siteId: site, key: secret };
-}
-
 async function readJson(response: Response): Promise<unknown> {
   const text = await response.text();
   if (text.length > MAX_ANSWER_BYTES) throw new ShipError("ANSWER", "Ship sent an answer too large to read.");
@@ -121,8 +110,8 @@ export function admitPass(token: unknown, siteId: string, reuse = false): string
 }
 
 const PASS_REFUSALS: Record<string, string> = {
-  invalid_store_key: "DinkusKit.com does not know this store key. Paste the current one from the Set up Commerce box, or make a new key there.",
-  site_mismatch: "This store key belongs to another store. Check the Store ID and store key against the Set up Commerce box.",
+  invalid_store_key: "DinkusKit.com no longer knows this plugin's store key. An Administrator presses Connect again.",
+  site_mismatch: "This plugin's store key belongs to another store. An Administrator presses Connect again.",
   service_not_enabled: "Ship is turned off for this store. Turn it on at DinkusKit.com, then try again.",
   service_cut_off: "DinkusKit.com has cut Ship off for this store. Contact DinkusKit.",
   store_suspended: "This store is suspended at DinkusKit.com.",
@@ -146,7 +135,7 @@ export async function tradeStoreKey(ctx: PluginContext, siteId: string, key: str
   const error = typeof body === "object" && body !== null ? (body as { error?: unknown }).error : undefined;
   if (!response.ok) {
     const reason = typeof error === "string" ? PASS_REFUSALS[error] : undefined;
-    throw new ShipError("PASS", reason ?? `DinkusKit.com refused to sign a pass (${response.status}). Try again in a moment.`, response.status);
+    throw new ShipError(error === "invalid_store_key" || error === "site_mismatch" ? "RECONNECT" : "PASS", reason ?? `DinkusKit.com refused to sign a pass (${response.status}). Try again in a moment.`, response.status);
   }
   return admitPass((body as { access_token?: unknown }).access_token, siteId);
 }

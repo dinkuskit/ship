@@ -59,15 +59,31 @@ function status(order: ShipOrder | ShipOrderRow): string {
   return order.status === "completed" ? "Completed" : "No label";
 }
 
-/** The plugin is installed but not connected to this store's Ship yet. */
-export function connectPage(failure?: string): BlockResponse {
+/**
+ * The plugin is not connected to DinkusKit.com yet, or its key stopped working. An Administrator presses
+ * Connect; the business owner approves at DinkusKit.com. Commerce connects first.
+ */
+export function connectPage(isAdmin: boolean, failure?: string): BlockResponse {
   return { blocks: [
     header("Shipping"),
-    banner(failure ? "error" : "default", failure ? "Ship settings need a look" : "Connect Ship", failure ??
-      "Paste this store's Store ID and store key from the Set up Commerce box on DinkusKit.com into this plugin's settings. They are the same ones Commerce uses."),
+    banner(failure ? "error" : "default", failure ? "Connect Ship again" : "Connect Ship", failure ??
+      "Connect this plugin to DinkusKit.com so it can buy labels through Ship. Commerce connects first; the business owner approves at DinkusKit.com."),
+    isAdmin
+      ? { type: "actions", elements: [{ type: "button", label: failure ? "Connect again" : "Connect", action_id: "connect", style: "primary" }, link("DinkusKit.com", "https://dinkuskit.com/")] }
+      : context("Ask an Administrator of this site to press Connect on this page."),
+  ] };
+}
+
+/** A Connect waits for the business owner's Approve at DinkusKit.com, which sends them back here. */
+export function pendingPage(verificationUri: string, checked = false): BlockResponse {
+  return { blocks: [
+    header("Shipping"),
+    banner("default", "Approve at DinkusKit.com", "The business owner opens this link, signs in to DinkusKit.com and presses Approve. Anyone helping can send the owner the same link."),
+    ...(checked ? [context("Not approved yet.")] : []),
     { type: "actions", elements: [
-      { type: "link", label: "Open plugin settings", target: { kind: "plugin-settings" }, appearance: "primary" },
-      link("DinkusKit.com", "https://dinkuskit.com/"),
+      { type: "link", label: "Approve at DinkusKit.com", target: { kind: "external", url: verificationUri }, appearance: "primary" },
+      { type: "button", label: "Check", action_id: "check" },
+      { type: "button", label: "Cancel", action_id: "cancel_connect" },
     ] },
   ] };
 }
