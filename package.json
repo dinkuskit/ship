@@ -17,7 +17,7 @@
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test tests/*.test.mjs",
     "changeset": "changeset",
-    "release:version": "changeset version && npm install --package-lock-only --ignore-scripts",
+    "release:version": "changeset version && node scripts/sync-lock-version.mjs",
     "proof:release-authority": "node scripts/release-authority-proof.mjs",
     "verify:quick": "bin/verify-ship quick",
     "verify:full": "bin/verify-ship full"
