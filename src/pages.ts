@@ -65,7 +65,7 @@ function status(order: ShipOrder | ShipOrderRow): string {
  */
 export function connectPage(isAdmin: boolean, failure?: string): BlockResponse {
   return { blocks: [
-    header("Shipping"),
+    header("Shipments"),
     banner(failure ? "error" : "default", failure ? "Connect Ship again" : "Connect Ship", failure ??
       "Connect this plugin to DinkusKit.com so it can buy labels through Ship. Commerce connects first; the business owner approves at DinkusKit.com."),
     isAdmin
@@ -77,7 +77,7 @@ export function connectPage(isAdmin: boolean, failure?: string): BlockResponse {
 /** A Connect waits for the business owner's Approve at DinkusKit.com, which sends them back here. */
 export function pendingPage(verificationUri: string, checked = false): BlockResponse {
   return { blocks: [
-    header("Shipping"),
+    header("Shipments"),
     banner("default", "Approve at DinkusKit.com", "The business owner opens this link, signs in to DinkusKit.com and presses Approve. Anyone helping can send the owner the same link."),
     ...(checked ? [context("Not approved yet.")] : []),
     { type: "actions", elements: [
@@ -90,7 +90,7 @@ export function pendingPage(verificationUri: string, checked = false): BlockResp
 
 /** Ship could not be used for this click; the owner sees why, and Ship's own page stays one click away. */
 export function problemPage(siteId: string, title: string, message: string): BlockResponse {
-  return { blocks: [header("Shipping"), banner("error", title, message), { type: "actions", elements: [
+  return { blocks: [header("Shipments"), banner("error", title, message), { type: "actions", elements: [
     { type: "button", label: "Try again", action_id: "list" },
     link("Open Ship", shipPages(siteId).orders),
   ] }] };
@@ -99,7 +99,7 @@ export function problemPage(siteId: string, title: string, message: string): Blo
 /** Paid orders waiting to ship, newest first within each status, as hosted Ship lists them. */
 export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipSettings, toast?: Toast): BlockResponse {
   const pages = shipPages(siteId);
-  const blocks: Block[] = [header("Shipping")];
+  const blocks: Block[] = [header("Shipments")];
   if (!settings.shipFrom || settings.boxes.length === 0) {
     blocks.push(banner("alert", "Set up Ship first", "Labels need your ship-from address and at least one box size. Add them in Ship Settings; they are kept there for every order."));
   } else if (!settings.postageConnected) {
@@ -175,7 +175,7 @@ function labelForm(view: OrderView): Block[] {
 export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
   const { order, settings, siteId } = view;
   const pages = shipPages(siteId), label = order.label;
-  const blocks: Block[] = [header("Shipping"), { type: "actions", elements: [{ type: "button", label: "Back to Shipping", action_id: "list" }] }, header(`Order ${orderName(order)}`)];
+  const blocks: Block[] = [header("Shipments"), { type: "actions", elements: [{ type: "button", label: "Back to Shipments", action_id: "list" }] }, header(`Order ${orderName(order)}`)];
   if (order.test) blocks.push(banner("alert", "TEST order", "Nothing ships and nothing is charged. A TEST order gets a free Pitney Bowes sandbox label, or a practice label, never live postage."));
   if (view.failure) blocks.push(banner("error", label ? "Not done" : "No label bought", view.failure));
   blocks.push(fields(["Ship to", oneLine(order)], ["Items", items(order)], ["Items' weight", `${order.itemsWeightOz} oz`], ["Status", status(order)]));
