@@ -30,7 +30,7 @@
       }
     },
     "pages": [
-      { "path": "/shipping", "label": "Shipping", "icon": "truck" }
+      { "path": "/shipping", "label": "Shipments", "icon": "truck", "group": "Dinkus Ship" }
     ]
   }
 }
