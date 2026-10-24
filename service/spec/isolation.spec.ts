@@ -228,3 +228,58 @@ test("owner practice-label action uses verified deployment tuple and ignores cal
   expect(events[0]).toMatchObject({ ...admission, orderId: "order:fresh" });
   expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).endsWith("/jwks"))).toBe(true);
 });
+
+test("settings and box mutations stamp fresh isolated storage first and refuse cross-generation or legacy mutations without side effects", async () => {
+  const replyOutcome = await store().saveReplyTo({ replyTo: "owner@example.test" });
+  expect(replyOutcome).toMatchObject({ ok: true, status: 200 });
+
+  site = `isolated-shipfrom-${crypto.randomUUID()}`;
+  configured = { ...configured, SHIP_SITE_ID: site };
+  await setEnv();
+  const shipFromOutcome = await store().saveShipFrom({
+    name: "Fixture", line1: "1 Test Way", city: "Example", region: "CA", postalCode: "90000",
+  });
+  expect(shipFromOutcome).toMatchObject({ ok: true, status: 200 });
+
+  site = `isolated-box-${crypto.randomUUID()}`;
+  configured = { ...configured, SHIP_SITE_ID: site };
+  await setEnv();
+  const boxOutcome = await store().addBox({ name: "Small", lengthIn: "6", widthIn: "4", heightIn: "3", weightOz: "1" });
+  expect(boxOutcome).toMatchObject({ ok: true, status: 201 });
+  const boxId = (boxOutcome as { ok: true; body: { boxId: string } }).body.boxId;
+  expect((await store().getSettings()).boxes.map(box => box.boxId)).toEqual([boxId]);
+
+  const snapshot = async () => runInDurableObject(store(), async (_, state) => ({
+    meta: state.storage.sql.exec<{ key: string; value: string }>("SELECT key, value FROM store_meta ORDER BY key").toArray(),
+    boxes: state.storage.sql.exec<{ box_id: string }>("SELECT box_id FROM boxes ORDER BY box_id").toArray(),
+  }));
+  const beforeMismatch = await snapshot();
+
+  await setEnv({ ...configured, SHIP_GENERATION: "next" });
+  for (const attempt of [
+    () => store().saveReplyTo({ replyTo: "intruder@example.test" }),
+    () => store().saveShipFrom({ name: "Intruder", line1: "2 Test Way", city: "Example", region: "CA", postalCode: "90000" }),
+    () => store().addBox({ name: "Intruder", lengthIn: "6", widthIn: "4", heightIn: "3", weightOz: "1" }),
+    () => store().removeBox(boxId),
+    () => store().connectPostage({ username: "fixture", password: "fixture" }, "intruder"),
+    () => store().disconnectPostage(),
+  ]) {
+    expect(await attempt()).toMatchObject({ ok: false, status: 403, code: "FORBIDDEN" });
+  }
+  expect(await snapshot()).toEqual(beforeMismatch);
+
+  const legacy = { ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: `${issuer}/jwks` } as unknown as Env;
+  await setEnv(legacy);
+  for (const attempt of [
+    () => store().saveReplyTo({ replyTo: "legacy@example.test" }),
+    () => store().saveShipFrom({ name: "Legacy", line1: "3 Test Way", city: "Example", region: "CA", postalCode: "90000" }),
+    () => store().addBox({ name: "Legacy", lengthIn: "6", widthIn: "4", heightIn: "3", weightOz: "1" }),
+    () => store().removeBox(boxId),
+    () => store().connectPostage({ username: "fixture", password: "fixture" }, "legacy"),
+    () => store().disconnectPostage(),
+  ]) {
+    expect(await attempt()).toMatchObject({ ok: false, status: 403, code: "FORBIDDEN" });
+  }
+  expect(await snapshot()).toEqual(beforeMismatch);
+});
+
