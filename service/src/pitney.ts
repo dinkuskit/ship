@@ -195,7 +195,7 @@ export function whyNotLabel(status: number, body: unknown): string {
 function readLabel(body: unknown): PbLabel | null {
   const value = body as Record<string, unknown> | undefined;
   const documents = Array.isArray(value?.documents) ? value.documents as Record<string, unknown>[] : [];
-  const pdf = documents.find(item => item.contentType === "URL" && item.fileFormat === "PDF" && isLabelUrl(item.contents));
+  const pdf = documents.find(item => typeof item === "object" && item !== null && item.contentType === "URL" && item.fileFormat === "PDF" && isLabelUrl(item.contents));
   const rate = Array.isArray(value?.rates) ? (value.rates as Record<string, unknown>[])[0] : undefined;
   const tracking = value?.parcelTrackingNumber;
   const shipmentId = value?.shipmentId;
