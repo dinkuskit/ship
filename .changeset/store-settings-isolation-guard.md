@@ -1,4 +1,4 @@
 ---
 ---
 
-Enforce storage isolation tuple checks at the start of `StoreShipping` settings, box, postage, and session mutations before reading or mutating Durable Object SQLite tables.
+Enforce storage isolation tuple and empty-storage checks (including `tracking_work`) across `StoreShipping` settings, box, postage, session, order, label, print-link, email-status, and alarm entry points before reading or mutating Durable Object SQLite tables.
