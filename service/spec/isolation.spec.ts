@@ -228,3 +228,155 @@ test("owner practice-label action uses verified deployment tuple and ignores cal
   expect(events[0]).toMatchObject({ ...admission, orderId: "order:fresh" });
   expect(vi.mocked(fetch).mock.calls.every(([input]) => String(input).endsWith("/jwks"))).toBe(true);
 });
+
+test("settings and box mutations stamp fresh isolated storage first and refuse cross-generation or legacy mutations without side effects", async () => {
+  const replyOutcome = await store().saveReplyTo({ replyTo: "owner@example.test" });
+  expect(replyOutcome).toMatchObject({ ok: true, status: 200 });
+
+  site = `isolated-shipfrom-${crypto.randomUUID()}`;
+  configured = { ...configured, SHIP_SITE_ID: site };
+  await setEnv();
+  const shipFromOutcome = await store().saveShipFrom({
+    name: "Fixture", line1: "1 Test Way", city: "Example", region: "CA", postalCode: "90000",
+  });
+  expect(shipFromOutcome).toMatchObject({ ok: true, status: 200 });
+
+  site = `isolated-box-${crypto.randomUUID()}`;
+  configured = { ...configured, SHIP_SITE_ID: site };
+  await setEnv();
+  const boxOutcome = await store().addBox({ name: "Small", lengthIn: "6", widthIn: "4", heightIn: "3", weightOz: "1" });
+  expect(boxOutcome).toMatchObject({ ok: true, status: 201 });
+  const boxId = (boxOutcome as { ok: true; body: { boxId: string } }).body.boxId;
+  expect((await store().getSettings()).boxes.map(box => box.boxId)).toEqual([boxId]);
+
+  const snapshot = async () => runInDurableObject(store(), async (_, state) => ({
+    meta: state.storage.sql.exec<{ key: string; value: string }>("SELECT key, value FROM store_meta ORDER BY key").toArray(),
+    boxes: state.storage.sql.exec<{ box_id: string }>("SELECT box_id FROM boxes ORDER BY box_id").toArray(),
+  }));
+  const beforeMismatch = await snapshot();
+
+  await setEnv({ ...configured, SHIP_GENERATION: "next" });
+  for (const attempt of [
+    () => store().saveReplyTo({ replyTo: "intruder@example.test" }),
+    () => store().saveShipFrom({ name: "Intruder", line1: "2 Test Way", city: "Example", region: "CA", postalCode: "90000" }),
+    () => store().addBox({ name: "Intruder", lengthIn: "6", widthIn: "4", heightIn: "3", weightOz: "1" }),
+    () => store().removeBox(boxId),
+    () => store().connectPostage({ username: "fixture", password: "fixture" }, "intruder"),
+    () => store().disconnectPostage(),
+  ]) {
+    expect(await attempt()).toMatchObject({ ok: false, status: 403, code: "FORBIDDEN" });
+  }
+  expect(await snapshot()).toEqual(beforeMismatch);
+
+  const legacy = { ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: `${issuer}/jwks` } as unknown as Env;
+  await setEnv(legacy);
+  for (const attempt of [
+    () => store().saveReplyTo({ replyTo: "legacy@example.test" }),
+    () => store().saveShipFrom({ name: "Legacy", line1: "3 Test Way", city: "Example", region: "CA", postalCode: "90000" }),
+    () => store().addBox({ name: "Legacy", lengthIn: "6", widthIn: "4", heightIn: "3", weightOz: "1" }),
+    () => store().removeBox(boxId),
+    () => store().connectPostage({ username: "fixture", password: "fixture" }, "legacy"),
+    () => store().disconnectPostage(),
+  ]) {
+    expect(await attempt()).toMatchObject({ ok: false, status: 403, code: "FORBIDDEN" });
+  }
+  expect(await snapshot()).toEqual(beforeMismatch);
+});
+
+test("recordLabel, labelOrder, printLink, order reads and shippedEmailState fail closed across generations and legacy callers", async () => {
+  await call("POST", "/v1/orders", order());
+  await store().saveShipFrom({ name: "Fixture", line1: "1 Test Way", city: "Example", region: "CA", postalCode: "90000" });
+  const boxOutcome = await store().addBox({ name: "Small", lengthIn: "6", widthIn: "4", heightIn: "3", weightOz: "1" });
+  const boxId = (boxOutcome as { ok: true; body: { boxId: string } }).body.boxId;
+  const bought = await store().buyLabel({
+    orderId: "order:fresh",
+    fields: { version: "1", boxId, weightOz: "9", service: "PM", kind: "practice" },
+    uid: "fixture-owner",
+  });
+  expect(bought).toMatchObject({ ok: true, status: 201 });
+  const labelId = (bought as { ok: true; body: { labelId: string } }).body.labelId;
+  const baseline = await counts();
+
+  await setEnv({ ...configured, SHIP_GENERATION: "next" });
+  await runInDurableObject(store(), async instance => {
+    await expect(instance.recordLabel({ orderId: "order:fresh", version: 1, carrier: "USPS", tracking: "INTRUDER" }))
+      .rejects.toThrow("storage generation does not match");
+    await expect(instance.labelOrder(labelId)).rejects.toThrow("storage generation does not match");
+    await expect(instance.getOrder("order:missing")).rejects.toThrow("storage generation does not match");
+    await expect(instance.orderSummary("order:missing")).rejects.toThrow("storage generation does not match");
+    await expect(instance.shippedEmailState("order:fresh")).rejects.toThrow("storage generation does not match");
+  });
+  expect(await store().quoteLabel({ orderId: "order:missing", fields: {} })).toMatchObject({ ok: false, status: 403, code: "FORBIDDEN" });
+  expect(await store().buyLabel({ orderId: "order:missing", fields: {}, uid: "intruder" })).toMatchObject({ ok: false, status: 403, code: "FORBIDDEN" });
+  expect(await counts()).toEqual(baseline);
+
+  const legacy = {
+    ...env,
+    ACCOUNT_ISSUER: issuer,
+    ACCOUNT_AUDIENCE: "dinkus-ship",
+    ACCOUNT_JWKS_URL: `${issuer}/jwks`,
+    SHIP_SESSION_SECRET: configured.SHIP_SESSION_SECRET,
+  } as unknown as Env;
+  await setEnv(legacy);
+  await runInDurableObject(store(), async instance => {
+    await expect(instance.recordLabel({ orderId: "order:fresh", version: 1, carrier: "USPS", tracking: "LEGACY" }))
+      .rejects.toThrow("isolated storage cannot serve legacy requests");
+    await expect(instance.labelOrder(labelId)).rejects.toThrow("isolated storage cannot serve legacy requests");
+    await expect(instance.getOrder("order:missing")).rejects.toThrow("isolated storage cannot serve legacy requests");
+    await expect(instance.orderSummary("order:missing")).rejects.toThrow("isolated storage cannot serve legacy requests");
+    await expect(instance.shippedEmailState("order:fresh")).rejects.toThrow("isolated storage cannot serve legacy requests");
+  });
+  expect(await store().quoteLabel({ orderId: "order:missing", fields: {} })).toMatchObject({ ok: false, status: 403, code: "FORBIDDEN" });
+  expect(await store().buyLabel({ orderId: "order:missing", fields: {}, uid: "legacy" })).toMatchObject({ ok: false, status: 403, code: "FORBIDDEN" });
+
+  const legacyAdminPass = await new SignJWT({ site_id: site, scope: "ship:admin" })
+    .setProtectedHeader({ alg: "ES256", kid: "fixture" })
+    .setIssuer(issuer)
+    .setAudience("dinkus-ship")
+    .setSubject("fixture-business")
+    .setIssuedAt()
+    .setExpirationTime("5m")
+    .sign(signingKey);
+  const printResponse = await worker.fetch(new Request(`https://ship.dinkuskit.com/v1/admin/labels/${encodeURIComponent(labelId)}/print-link`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${legacyAdminPass}` },
+  }), legacy);
+  expect(printResponse.status).toBeGreaterThanOrEqual(400);
+  expect(await printResponse.json()).not.toHaveProperty("url");
+  expect(await counts()).toEqual(baseline);
+});
+
+test("isolated storage refuses pre-populated legacy boxes, sessions and tracking_work", async () => {
+  const legacy = { ...env } as unknown as Env;
+
+  site = `legacy-boxes-${crypto.randomUUID()}`;
+  configured = { ...configured, SHIP_SITE_ID: site };
+  await setEnv(legacy);
+  expect(await store().addBox({ name: "Legacy box", lengthIn: "6", widthIn: "4", heightIn: "3", weightOz: "1" })).toMatchObject({ ok: true, status: 201 });
+  await setEnv();
+  await runInDurableObject(store(), async instance => {
+    await expect(instance.getSettings()).rejects.toThrow("isolated storage must start empty");
+  });
+
+  site = `legacy-sessions-${crypto.randomUUID()}`;
+  configured = { ...configured, SHIP_SITE_ID: site };
+  await setEnv(legacy);
+  await store().startSession("legacy-uid", "legacy@example.test", "legacy-refresh-" + "x".repeat(40));
+  await setEnv();
+  await runInDurableObject(store(), async instance => {
+    await expect(instance.getSettings()).rejects.toThrow("isolated storage must start empty");
+  });
+
+  site = `legacy-tracking-${crypto.randomUUID()}`;
+  configured = { ...configured, SHIP_SITE_ID: site };
+  await setEnv(legacy);
+  await runInDurableObject(store(), async (_, state) => {
+    state.storage.sql.exec(
+      "INSERT INTO tracking_work (label_id, tracking, action, attempts, next_at, created_at) VALUES ('lbl_legacy', '9400100000000000000000', 'add', 0, 0, 0)",
+    );
+  });
+  await setEnv();
+  await runInDurableObject(store(), async instance => {
+    await expect(instance.getSettings()).rejects.toThrow("isolated storage must start empty");
+  });
+});
