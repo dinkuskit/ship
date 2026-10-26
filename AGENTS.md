@@ -2,6 +2,20 @@
 
 Read `README.md` and `RELEASING.md` first.
 
+## Direction and research
+
+Read the organization [vision](https://github.com/dinkuskit/.github/blob/main/VISION.md)
+and [scope and planning](https://github.com/dinkuskit/.github/blob/main/ROADMAP.md)
+with the [charter](docs/CHARTER.md) and current decisions. Wider independent-tool
+direction does not change Ship's current Commerce connection and order intake,
+provider boundary or explicit label-purchase approval.
+
+For material product or architecture questions and relevant grills, use the
+maintained [emdash-commerce research guidance](https://github.com/saariuslystoned/SaariusSkills/blob/23f2bb1208b3baa7aedaa87faec00395f9bdd061/skills/emdash-commerce/SKILL.md)
+and its selective REA reference. Keep research, accepted design, active work
+and verified behavior distinct; reuse existing issues or proposals rather than
+turning findings into an automatic implementation program.
+
 ## Reference article
 
 `docs/website/reference/ship.md` is the Ship article on dinkuskit.com/docs
