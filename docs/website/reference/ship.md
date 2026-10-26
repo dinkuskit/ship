@@ -19,22 +19,22 @@ Ship has two parts that work together:
 
 | Part | What it does |
 | --- | --- |
-| Ship plugin (`dinkus-ship`) | Adds a **Shipping** page to the store admin for Editors and Administrators. It lists the paid orders Commerce sent to Ship, shows USPS prices, and has **Buy label**, **Print label** and **Cancel label**. |
+| Ship plugin (`dinkus-ship`) | Adds a **Shipments** page, under **Dinkus Ship**, to the store admin for Editors and Administrators. It lists the paid orders Commerce sent to Ship, shows USPS prices, and has **Buy label**, **Print label** and **Cancel label**. |
 | Hosted Ship service | Takes Commerce's orders, buys, keeps and cancels labels, sends the shopper the shipped email, and serves the owner's own pages at ship.dinkuskit.com (sign in with DinkusKit.com): settings, the owner's Pitney Bowes postage account, and label history. |
 
 The plugin keeps no label data. Every click reads from, or buys through, the hosted service, so the two always agree. Ship's own pages are the full path, and the fallback when the plugin is not installed.
 
 ## Set up the plugin
 
-Install **Ship** from the plugin Registry. Connect [Commerce](/docs/reference/commerce) first, because Commerce's Connect makes the store at DinkusKit.com. Then an Administrator opens **Shipping** in the store admin and presses **Connect Ship**, and the business owner presses **Approve** at DinkusKit.com. Nothing is pasted: DinkusKit.com gives Ship its own store key, which the plugin keeps, with the Store ID, in its encrypted DinkusKit connection setting. Connect needs the store on its https web address with Ship installed from the Registry.
+Install **Ship** from the plugin Registry. Connect [Commerce](/docs/reference/commerce) first, because Commerce's Connect makes the store at DinkusKit.com. Then an Administrator opens **Dinkus Ship > Shipments** in the store admin and presses **Connect**, and the business owner presses **Approve** at DinkusKit.com. Nothing is pasted: DinkusKit.com gives Ship its own store key, which the plugin keeps, with the Store ID, in its encrypted DinkusKit connection setting. Connect needs the store on its https web address with Ship installed from the Registry.
 
-The plugin never sends the store key to Ship or to a store page. It trades the key at DinkusKit.com for a pass that lasts five minutes and reuses that pass for clicks in the next minute. A Disconnect at DinkusKit.com, or Ship switched off there, stops the Shipping page within a minute. If DinkusKit.com no longer knows the key, the page shows **Connect again**.
+The plugin never sends the store key to Ship or to a store page. It trades the key at DinkusKit.com for a pass that lasts five minutes and reuses that pass for clicks in the next minute. A Disconnect at DinkusKit.com, or Ship switched off there, stops the Shipments page within a minute. If DinkusKit.com no longer knows the key, the page shows **Connect again**.
 
-A store upgraded from `0.2.1` does not use its old pasted key. The Shipping page asks for Connect once, and Connect removes the old Store ID and store key settings.
+A store upgraded from `0.2.1` does not use its old pasted key. The Shipments page asks for Connect once, and Connect removes the old Store ID and store key settings.
 
 ## Buy a label
 
-1. Open **Shipping** in the store admin and pick a paid order.
+1. Open **Dinkus Ship > Shipments** in the store admin and pick a paid order.
 2. Check the box, the weight (items plus box) and the service: USPS Ground Advantage by default, Priority Mail or Priority Mail Express. Then review the USPS prices.
 3. Press **Buy label**. Nothing is bought without this press.
 4. Press **Print label**. The PDF opens in a new tab through a link that works for five minutes and only for that label.
@@ -66,7 +66,7 @@ Commerce calls three routes on the hosted service with a DinkusKit store pass sc
 | `GET /v1/labels` | Read label events awaiting acknowledgement. |
 | `POST /v1/labels/ack` | Acknowledge a delivered label event. |
 
-The plugin's Shipping page calls routes under `/v1/admin/` with a pass scoped `ship:admin`. The store always comes from the signed pass, never from anything in the request. Ship accepts the current or a newer order version and never overwrites it with an older one. It keeps the US delivery address, line quantities and email; billing details and payment credentials stay out of Ship. None of these is a public, unauthenticated API.
+The plugin's Shipments page calls routes under `/v1/admin/` with a pass scoped `ship:admin`. The store always comes from the signed pass, never from anything in the request. Ship accepts the current or a newer order version and never overwrites it with an older one. It keeps the US delivery address, line quantities and email; billing details and payment credentials stay out of Ship. None of these is a public, unauthenticated API.
 
 ## Sources and review scope
 
