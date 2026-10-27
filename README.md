@@ -80,6 +80,11 @@ Releases go through Changesets and the EmDash Registry: see
 
 ## Install type
 
+See [what ships and where it runs](https://dinkuskit.com/docs/developers/contribute#what-ships-and-where-it-runs)
+for the boundaries between Registry plugins, hosted services, the template,
+the playground and developer-only test tools. Beta and stable plugin artifacts
+do not include those developer preview controls.
+
 DinkusKit plugins ship as EmDash Registry plugins: sandboxed and installed from
 the plugin Registry. The Registry build is the supported product. The old
 local sandbox test plugin that used to live in this directory was removed when
