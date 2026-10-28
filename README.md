@@ -21,6 +21,16 @@ Two parts live here:
   account, refunds and label history. It is the full path and the fallback
   when the plugin is not installed.
 
+## Kit direction
+
+The organization [vision](https://github.com/dinkuskit/.github/blob/main/VISION.md)
+and [scope and planning](https://github.com/dinkuskit/.github/blob/main/ROADMAP.md)
+set the direction of independently useful, connected tools. Ship remains
+optional to install. Its current connection flow requires Commerce first and
+its intake accepts Commerce orders; broader independent onboarding or external
+order intake still needs a focused design and proof. The direction does not
+widen the current provider scope or authorize unattended label purchases.
+
 ## Status
 
 Released: the Ship plugin `dinkus-ship@0.2.0` on the EmDash Registry, 21 Oct
