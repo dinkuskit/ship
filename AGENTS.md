@@ -36,3 +36,11 @@ Reviewers, ClawSweeper included, record every PR's docs as one of:
   it does not block the merge.
 - **Docs: not applicable**: nothing an owner or developer sees changes (tests,
   CI, internal refactors).
+
+## Delegated audits
+
+- `api-oracle` ([saari-co/api-oracle](https://github.com/saari-co/api-oracle)) runs
+  delegated background audits, CI triage, and architecture checkpoints on API
+  credits. Prefer `oracle ask <lane>` for work a brief can carry, and read and
+  rate the briefs it announces. It gates nothing and does not replace
+  ClawSweeper review.
