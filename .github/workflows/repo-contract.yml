@@ -1,0 +1,40 @@
+name: Repository contract
+
+# The repository's verifier on every pull request and push to main, as dinkuskit/commerce and
+# dinkuskit/payments run theirs. The quick tier checks FEATURE_MAP.md against the tree, then
+# type-checks and builds the Registry plugin, runs the 128 KiB bundle check and the plugin's
+# tests against stand-ins for DinkusKit.com and hosted Ship. No secret is passed in and nothing
+# here reaches DinkusKit.com, ship.dinkuskit.com, Pitney Bowes or a store, so a run can never
+# buy, print or cancel a label. CI (ci.yml) keeps the hosted service's checks and the dry
+# release preparation; bin/verify-ship full runs those locally.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a PR cancels that PR's older run, which no one waits on any more.
+# Pushes to main each get their own group and are never cancelled.
+concurrency:
+  group: repo-contract-${{ github.event.pull_request.number && format('pr-{0}', github.event.pull_request.number) || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  verify-ship:
+    name: bin/verify-ship quick
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: bin/verify-ship quick

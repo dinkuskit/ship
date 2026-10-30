@@ -1,6 +1,10 @@
 # Agent notes
 
-Read `README.md` and `RELEASING.md` first.
+Read `README.md` and `RELEASING.md` first. `FEATURE_MAP.md` names each surface
+Ship implements today, its files, how to drive it and what proves it: start there to
+find the surface you are changing. `bin/verify-ship quick` checks the map against the
+tree and runs on every pull request, so a change that adds, moves or removes a verified
+file updates the map's row in the same PR.
 
 ## Direction and research
 
