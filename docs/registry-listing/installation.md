@@ -1,5 +1,5 @@
 1. Use an EmDash site with Registry sandbox support and a storefront integration.
-2. Install and connect [DinkusKit Commerce](https://plugins.emdashcms.com/plugins/@smokyco.bsky.social/dinkus-commerce) first.
+2. Install and connect [DinkusKit Commerce](https://plugins.emdashcms.com/plugins/@dinkuskit.com/dinkus-commerce) first.
 3. Install DinkusKit Ship, open its Shipments page, and choose Connect. Approve the connection at DinkusKit.com.
 4. Follow the [Ship guide](https://dinkuskit.com/docs/reference/ship) with a test order to review rates and create a sandbox or practice label.
 

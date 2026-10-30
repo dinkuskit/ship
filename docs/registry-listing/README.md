@@ -20,8 +20,8 @@ service publishes those images. Confirm the supported media-publication path
 before promising that the icon is visible in the public registry. Do not
 replace an existing immutable release to add artwork.
 
-No current Ship screenshot is included: the available historical proofs do
-not contain a reusable image of this release's installed admin. Add a real,
-sanitized screenshot from the current stable plugin, with capture and source
-provenance, before declaring the screenshot part complete. A drawing of Block
-Kit JSON is not a product screenshot.
+`assets/listing/connect-ship.png` is a real capture of the initial Connect
+screen in EmDash 1.4.0, using the built Ship 0.3.0 sandbox bundle and a local
+synthetic administrator. It illustrates initial setup, not a connected store
+or a successful label purchase. Capture provenance is recorded in
+`proof/registry-growth-20261030/PROOF.md`.

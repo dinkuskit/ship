@@ -28,6 +28,26 @@ website artwork:
 - Visually inspected: the existing orange parcel/cube artwork; no user data.
 - This is product listing artwork, not runtime/browser evidence.
 
+`assets/listing/connect-ship.png` is an actual browser capture of the initial
+Ship Connect screen, not a generated mockup:
+
+- Capture source: local EmDash 1.4.0 (10beb8c5a), Chrome, Ship 0.3.0 bundle
+  built from this branch. Synthetic administrator only; no customer data.
+- Runtime: real EmDash Cloudflare/workerd sandbox, seeded post-install plugin
+  state. This does not claim the Registry install/consent flow was exercised.
+- Loaded bundle: 25,590 bytes; SHA-256
+  `9811b2420a3336408b42befeaed8a07538bf8902d47dd263a88efa33ae41f499`.
+- Image: PNG, 2,220 × 375, 24,522 bytes; SHA-256
+  `69f07e58efd5d93a491bbb0e6c622a0a3dd46d7f31d52da5f12e1047aa7ca775`.
+- Capture is cropped at screenshot time to the plugin heading, explanatory
+  panel, Connect button and website link. It excludes unrelated local fixture
+  navigation. No pixels or UI wording were changed.
+- Full capture, accessibility tree and loaded-artifact hashes are retained in
+  the ignored local run. The image was visually inspected; no error banner,
+  customer data, credentials or invented connected state is present.
+- This proves only the initial setup display. No Connect click, account
+  authorization, shipping request, label purchase or printing was performed.
+
 ## Checks
 
 Using Node `v24.22.0` and the locked dependencies:
@@ -44,7 +64,7 @@ Using Node `v24.22.0` and the locked dependencies:
 - `git diff --check`: passed.
 - Manifest comparison excluding only display/profile/artwork fields: unchanged
   runtime/identity configuration.
-- Description: 121 graphemes. Sections: description 876, installation 761,
+- Description: 121 graphemes. Sections: description 876, installation 755,
   FAQ 853 characters, all below their caps.
 
 Raw command logs stay in the ignored `runs/registry-growth-20261030/` directory.
@@ -56,10 +76,11 @@ No live store, postage purchase, provider account, profile update, release,
 deployment or merge was performed. The copy explicitly says sandbox/practice
 labels are not valid postage; it promises no live postage or standalone intake.
 
-No current installed Ship screenshot was available in the repository. Its
-current unit fixture exercises Block Kit JSON, and historical screenshot
-references point to older ignored runs. A current sanitized installed capture
-remains outstanding; no obsolete or fabricated UI is shipped as a screenshot.
+The initial repository had no reusable current Ship screenshot. A narrow local
+fixture capture supplied the setup image above; no obsolete or fabricated UI
+is shipped. Two copied fixture attempts hit a duplicate-React development
+failure; the known working local host was handed over exclusively, used to
+load the exact Ship bundle, and its original source files restored afterward.
 
 The pinned CLI's dry `release prepare` bundles code but does not upload media.
 Profile updates and release media publication require separate approved steps;
