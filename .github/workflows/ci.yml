@@ -50,14 +50,15 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: npm run typecheck
-      # Builds the plugin, runs the 128 KiB Registry bundle check, then the tests.
-      - run: npm test
       - run: |
           set -euo pipefail
           for file in scripts/*.mjs .github/scripts/*.mjs; do
             node --check "$file"
           done
+      # The plugin's types, 128 KiB Registry bundle check and tests are bin/verify-ship quick's,
+      # run once per pull request by the Repository contract workflow (repo-contract.yml).
+      # The dry release preparation below reads dist/, so the plugin is built here.
+      - run: npm run build
       # The release workflow's preparation step, dry: the bundle is built and thrown away.
       # The checkout's version routes to dinkus-ship; a beta version would route to dinkus-ship-beta.
       - run: node .github/scripts/prepare-emdash-release.mjs --out-dir .emdash-release
