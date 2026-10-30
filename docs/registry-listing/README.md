@@ -13,12 +13,12 @@ needs a separately staged beta manifest. Do not create a new publisher or
 change either stable slug to update the display name.
 
 Artwork is release metadata, not a profile field. The pinned CLI's
-`release prepare` command produces the code tarball. The existing delegated
-workflow now passes a complete `release-file`: content-addressed, checksummed code and attestation
-assets plus image URLs pinned to the source commit. The service validates and
-stores those images. Publication still requires the existing release and
-approval flow; successful local preparation does not mean the registry is
-updated. See `RELEASING.md` for upload idempotency and permission scope.
+`release prepare` command produces the code tarball. The publish step uses the
+release-action from [emdash-cms/emdash#4467](https://github.com/emdash-cms/emdash/pull/4467),
+which uploads the bundle, its attestation and the listing images named in the
+prepared manifest; the service validates and stores those images. Publication
+still requires the existing release and approval flow; successful local
+preparation does not mean the registry is updated. See `RELEASING.md`.
 
 `assets/listing/icon.webp` is the website's
 [ship.webp](https://github.com/dinkuskit/dinkuskit/blob/920aea3f012a14beb90d1be7264121dd7a8dd105/public/brand/ship.webp)
