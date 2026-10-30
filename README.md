@@ -76,8 +76,14 @@ setup script; the session hook installs nothing on another Node.
 npm ci --ignore-scripts
 npm run typecheck
 npm test            # builds the plugin, runs the 128 KiB Registry bundle check, then the tests
-bin/verify-ship full   # the above plus the hosted service's checks and a dry release preparation
+bin/verify-ship quick  # the feature map check, then the above; CI runs this on every pull request
+bin/verify-ship full   # quick plus the hosted service's checks and a dry release preparation
 ```
+
+[FEATURE_MAP.md](FEATURE_MAP.md) maps Ship's surfaces to their files, entry points,
+driver actions, success states and verifier tier. `bin/verify-ship quick` starts by
+checking it against the tree (`scripts/check-feature-map.mjs`), and the Repository
+contract workflow runs that tier on every pull request and push to main, next to CI.
 
 `src/plugin.ts` is the Registry entry; `src/admin.ts` routes the Shipping
 page's clicks, `src/pages.ts` draws the Block Kit pages and `src/ship.ts` talks
@@ -105,6 +111,7 @@ proofs stay under `proof/` as history.
 
 - [Ship plugin in the store admin](docs/decisions/ship-registry-plugin.md)
 - [Charter](docs/CHARTER.md)
+- [Feature map](FEATURE_MAP.md)
 - [USPS feasibility research, 2026-09-30](docs/research/usps-feasibility-20260930.md)
 - [Minimal Commerce–Ship contract](docs/contracts/commerce-ship-v1.md)
 - [Vendor, account, and funding brief](docs/decisions/vendor-account-funding-brief.md)

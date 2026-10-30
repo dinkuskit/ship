@@ -8,7 +8,10 @@ mode="${1:-quick}"
 
 case "$mode" in
   quick)
-    # The Registry plugin: types, build, the 128 KiB bundle check and its tests.
+    # The feature map against the tree (FEATURE_MAP.md), then the Registry plugin: types,
+    # build, the 128 KiB bundle check and its tests. The Repository contract workflow runs
+    # this on every pull request and push to main.
+    node scripts/check-feature-map.mjs
     npm run typecheck
     npm test
     ;;
