@@ -102,10 +102,29 @@ export function workflowRunSteps(yaml) {
   return steps;
 }
 
-/** Whether a shell text runs the command, on a line of its own or in a pipeline, and not only in a comment. */
+/** Words that may stand before a command without changing which command runs. */
+const COMMAND_PREFIXES = new Set(["if", "elif", "while", "until", "then", "do", "else", "!", "exec", "npx", "node", "sh", "bash", "env", "time", "nice"]);
+const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
+const unquote = (word) => word.replace(/^(["'])(.*)\1$/, "$2");
+
+/**
+ * Whether a shell text runs the command: the command is the first word of a simple command
+ * (the start of a line, or after `&&`, `||`, `;`, `|`, `&`, a bracket, a keyword such as `then`,
+ * leading `VAR=value` assignments or a wrapper such as `npx` or `time`), bare, quoted or
+ * `./`-prefixed. The same word as an argument (`echo bin/verify-ship quick`), in a string
+ * or in a comment is not an invocation. `command` may have arguments of its own
+ * (`node scripts/check-feature-map.mjs`), which must follow it in order.
+ */
 export function shellRuns(text, command) {
-  const pattern = new RegExp(`(^|[\\s;&|(])${command.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}(?=\\s|$)`);
-  return text.split("\n").some((line) => pattern.test(line.replace(/(^|\s)#.*$/, "")));
+  const wanted = command.split(/\s+/);
+  for (const raw of text.split("\n")) {
+    for (const segment of raw.replace(/(^|\s)#.*$/, "").split(/&&|\|\||[;|&(){}]/)) {
+      const words = segment.trim().split(/\s+/).filter(Boolean).map(unquote);
+      while (words.length && words[0] !== wanted[0] && (COMMAND_PREFIXES.has(words[0]) || ASSIGNMENT.test(words[0]))) words.shift();
+      if (words.length && words[0].replace(/^\.\//, "") === wanted[0] && wanted.slice(1).every((word, at) => words[at + 1] === word)) return true;
+    }
+  }
+  return false;
 }
 
 /** The map's one table as rows keyed by column, or why it cannot be read. */
