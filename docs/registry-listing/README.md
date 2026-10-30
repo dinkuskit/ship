@@ -12,13 +12,13 @@ apply only that approved preview. The beta profile has its own identity and
 needs a separately staged beta manifest. Do not create a new publisher or
 change either stable slug to update the display name.
 
-Artwork is release metadata, not a profile field. The pinned CLI's direct
-publish path uploads images, while its `release prepare` command produces a
-code tarball. The dry prepared directory retains the referenced copy and image
-files, but successful preparation is not proof that the delegated release
-service publishes those images. Confirm the supported media-publication path
-before promising that the icon is visible in the public registry. Do not
-replace an existing immutable release to add artwork.
+Artwork is release metadata, not a profile field. The pinned CLI's
+`release prepare` command produces the code tarball. The existing delegated
+workflow now passes a complete `release-file`: checksummed code and attestation
+assets plus image URLs pinned to the source commit. The service validates and
+stores those images. Publication still requires the existing release and
+approval flow; successful local preparation does not mean the registry is
+updated. See `RELEASING.md` for upload idempotency and permission scope.
 
 `assets/listing/connect-ship.png` is a real capture of the initial Connect
 screen in EmDash 1.4.0, using the built Ship 0.3.0 sandbox bundle and a local

@@ -14,7 +14,7 @@ Status: source prepared and locally checked; not published.
 - The stable name becomes **DinkusKit Ship**; beta preparation keeps the
   distinct **DinkusKit Ship (Beta)** label and the existing beta slug.
 - Documentation impact: the listing now explains the existing released
-  behavior. `docs/website/reference/ship.md` requires no behavior/setup change.
+  behavior. `docs/website/reference/ship.md` uses the new full listing name while preserving release placeholders and existing setup behavior.
 
 ## Artwork provenance
 
@@ -53,7 +53,7 @@ Ship Connect screen, not a generated mockup:
 Using Node `v24.22.0` and the locked dependencies:
 
 - `npm ci --ignore-scripts --no-audit --no-fund`: passed.
-- `bin/verify-ship quick`: passed, 63 tests, zero failures or skips. Includes
+- `bin/verify-ship quick`: passed, 71 tests, zero failures or skips. Includes
   typecheck, manifest/build validation, feature-map check, bundle cap, and
   stable/beta release preparation regressions.
 - `node .github/scripts/prepare-emdash-release.mjs --out-dir .emdash-release`:
@@ -61,6 +61,8 @@ Using Node `v24.22.0` and the locked dependencies:
 - Regression assertions verify referenced section files and the exact icon
   bytes survive both preparation paths, including the prepared output folder.
 - `node_modules/.bin/emdash-plugin validate`: passed using CLI `0.13.5`.
+- `node --test tests/registry-release-media.test.mjs`: 8 tests passed using mocked GitHub calls.
+- `actionlint` 1.7.12 on both changed workflows: passed.
 - `git diff --check`: passed.
 - Manifest comparison excluding only display/profile/artwork fields: unchanged
   runtime/identity configuration.
@@ -83,8 +85,29 @@ failure; the known working local host was handed over exclusively, used to
 load the exact Ship bundle, and its original source files restored afterward.
 
 The pinned CLI's dry `release prepare` bundles code but does not upload media.
-Profile updates and release media publication require separate approved steps;
-the retained image/section files do not prove media visibility in the registry.
+The delegated workflow now prepares a full URL-source record with required
+provenance and checksummed, commit-pinned image URLs. Its existing action uses
+`release-file`; PDS verification includes all declared media. The tag's bundle
+and provenance uploads never replace existing bytes. Missing beta releases
+may be created as prereleases; a missing stable release fails.
+
+The publisher caller and job request `contents: write` only for those release
+assets, in addition to their existing OIDC and attestation grants. This source
+change is prepared for human review and approval; no workflow or permission
+change has been activated. No new credentials or dependencies are introduced.
+Profile updates still require their own approved step; no media visibility
+or production publication is claimed from local tests.
+
+This narrow helper and tests are adapted source-by-source from public
+[Payments ce48556](https://github.com/dinkuskit/payments/commit/ce4855646c1e4b81e8392827a62d1ea9825155bf),
+with Ship identities and local paths; no unrelated repository history is
+imported. Fresh local tests verify the adapted Ship behavior.
+
+Native review [P3 listing-name consistency](https://github.com/dinkuskit/ship/pull/84#issuecomment-6528196917)
+was accepted as `required_fix`: the website installation instruction and beta
+release examples now use the new DinkusKit names. The old verdict does not
+cover this revised head.
+
 See [listing maintenance](../../docs/registry-listing/README.md).
 
 Review, approved media/profile publication, and public-render verification are
