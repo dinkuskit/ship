@@ -17,9 +17,11 @@ import { fileURLToPath } from "node:url";
  * - a file under a verified root is owned by no row, or by more than one;
  * - a row's verifier is not one backticked `bin/verify-ship <tier>` with a tier the script accepts;
  * - FEATURE_MAP.md exists but is empty or has no table;
- * - bin/verify-ship no longer runs this check as a command (a comment does not count), or the
- *   Repository contract workflow has no job step whose `run:` invokes bin/verify-ship (a job
- *   name, a YAML comment or a commented-out line does not count).
+ * - bin/verify-ship's quick tier, or the Repository contract workflow's job steps, no longer hold
+ *   plain wiring: lines that start with a short allowlist of commands, one of them exactly
+ *   `node scripts/check-feature-map.mjs` or `bin/verify-ship quick`, unquoted. A job name, a
+ *   YAML comment, a commented-out line, an argument (`echo bin/verify-ship quick`), a string
+ *   (`echo "x; bin/verify-ship quick"`) or a substitution does not count.
  */
 export const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -102,29 +104,116 @@ export function workflowRunSteps(yaml) {
   return steps;
 }
 
-/** Words that may stand before a command without changing which command runs. */
-const COMMAND_PREFIXES = new Set(["if", "elif", "while", "until", "then", "do", "else", "!", "exec", "npx", "node", "sh", "bash", "env", "time", "nice"]);
+/** What a plain wiring line in the Repository contract workflow's step may start with. */
+export const WORKFLOW_LEADS = new Set(["set", "export", "cd", "echo", "true", "npm", "node", "bin/verify-ship"]);
+/** What a plain wiring line in bin/verify-ship's quick tier may start with. */
+export const VERIFIER_LEADS = new Set(["set", "export", "cd", "echo", "true", "npm", "node"]);
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
-const unquote = (word) => word.replace(/^(["'])(.*)\1$/, "$2");
 
 /**
- * Whether a shell text runs the command: the command is the first word of a simple command
- * (the start of a line, or after `&&`, `||`, `;`, `|`, `&`, a bracket, a keyword such as `then`,
- * leading `VAR=value` assignments or a wrapper such as `npx` or `time`), bare, quoted or
- * `./`-prefixed. The same word as an argument (`echo bin/verify-ship quick`), in a string
- * or in a comment is not an invocation. `command` may have arguments of its own
- * (`node scripts/check-feature-map.mjs`), which must follow it in order.
+ * One shell line split into its simple commands at `&&`, `||`, `;`, `|`, `&` and brackets, with
+ * single and double quotes, backticks, `$( … )` and `${ … }` opaque, so a separator inside a
+ * string or a substitution never starts a command.
  */
-export function shellRuns(text, command) {
-  const wanted = command.split(/\s+/);
-  for (const raw of text.split("\n")) {
-    for (const segment of raw.replace(/(^|\s)#.*$/, "").split(/&&|\|\||[;|&(){}]/)) {
-      const words = segment.trim().split(/\s+/).filter(Boolean).map(unquote);
-      while (words.length && words[0] !== wanted[0] && (COMMAND_PREFIXES.has(words[0]) || ASSIGNMENT.test(words[0]))) words.shift();
-      if (words.length && words[0].replace(/^\.\//, "") === wanted[0] && wanted.slice(1).every((word, at) => words[at + 1] === word)) return true;
+export function simpleCommands(line) {
+  const commands = [];
+  let current = "";
+  let quote = null;
+  let depth = 0;
+  let closer = null;
+  for (let at = 0; at < line.length; at += 1) {
+    const char = line[at];
+    const next = line[at + 1];
+    if (quote) {
+      current += char;
+      if (char === "\\" && quote === '"' && next !== undefined) {
+        current += next;
+        at += 1;
+      } else if (char === quote) quote = null;
+      continue;
     }
+    if (depth) {
+      current += char;
+      if (char === closer[0]) depth += 1;
+      else if (char === closer[1]) depth -= 1;
+      continue;
+    }
+    if (char === "\\" && next !== undefined) {
+      current += char + next;
+      at += 1;
+      continue;
+    }
+    if (char === "'" || char === '"' || char === "`") {
+      quote = char;
+      current += char;
+      continue;
+    }
+    if (char === "$" && (next === "(" || next === "{")) {
+      closer = next === "(" ? "()" : "{}";
+      depth = 1;
+      current += char + next;
+      at += 1;
+      continue;
+    }
+    if ((char === "&" || char === "|") && next === char) {
+      commands.push(current);
+      current = "";
+      at += 1;
+      continue;
+    }
+    if (";|&(){}".includes(char)) {
+      commands.push(current);
+      current = "";
+      continue;
+    }
+    current += char;
   }
-  return false;
+  commands.push(current);
+  return commands.map((command) => command.trim()).filter(Boolean);
+}
+
+/** A simple command's words once leading VAR=value assignments and an npx or npm exec wrapper are gone. */
+function commandWords(command) {
+  const words = command.split(/\s+/).filter(Boolean);
+  while (words.length && ASSIGNMENT.test(words[0])) words.shift();
+  if (words[0] === "npx") words.shift();
+  else if (words[0] === "npm" && words[1] === "exec") words.splice(0, 2);
+  else return words;
+  if (words[0] === "--") words.shift();
+  return words;
+}
+
+/**
+ * Whether a shell text is plain wiring that runs `command`: once shell comments and blank lines
+ * are gone, every line's first simple command starts with one of `leads`, one simple command is
+ * exactly `command` (optionally behind npx, npm exec or VAR=value), and no line that mentions
+ * the command's name holds a quote, a backtick or a `$` substitution, since a quoted or
+ * substituted invocation is never the invocation required. Arguments, strings and comments
+ * never count; neither does a near-miss such as a redirection or a `./` prefix.
+ */
+export function shellWiring(text, command, leads) {
+  const wanted = command.split(/\s+/);
+  const lines = text.split("\n").map((line) => line.replace(/(^|\s)#.*$/, "").trim()).filter(Boolean);
+  let found = false;
+  for (const line of lines) {
+    if (line.includes(wanted[0]) && /["'`$]/.test(line)) return false;
+    const commands = simpleCommands(line);
+    if (commands.length === 0 || !leads.has(commandWords(commands[0])[0])) return false;
+    if (commands.some((simple) => {
+      const words = commandWords(simple);
+      return words.length === wanted.length && words.every((word, at) => word === wanted[at]);
+    })) found = true;
+  }
+  return found;
+}
+
+/** The lines of bin/verify-ship's quick tier, from its `quick)` case label to the `;;` that ends it. */
+export function quickTier(sh) {
+  const lines = sh.split("\n");
+  const start = lines.findIndex((line) => /^\s*quick\)\s*$/.test(line));
+  if (start < 0) return null;
+  const end = lines.findIndex((line, at) => at > start && /^\s*;;\s*$/.test(line));
+  return lines.slice(start + 1, end < 0 ? lines.length : end).join("\n");
 }
 
 /** The map's one table as rows keyed by column, or why it cannot be read. */
@@ -200,11 +289,13 @@ export async function auditFeatureMap(root = repositoryRoot) {
   const verifier = await read(root, VERIFIER_SCRIPT);
   const tiers = new Set(Array.from(verifier.matchAll(/^\s*([a-z]+)\)\s*$/gm), (match) => match[1]));
   if (tiers.size === 0) findings.push(`${VERIFIER_SCRIPT} declares no tier (expected case labels such as quick) and full))`);
-  if (!shellRuns(verifier, "node scripts/check-feature-map.mjs") && !shellRuns(verifier, "npm run audit:features")) {
-    findings.push(`${VERIFIER_SCRIPT} no longer runs scripts/check-feature-map.mjs as a command`);
+  const tier = quickTier(verifier);
+  if (tier === null) findings.push(`${VERIFIER_SCRIPT} has no quick) tier`);
+  else if (!shellWiring(tier, "node scripts/check-feature-map.mjs", VERIFIER_LEADS)) {
+    findings.push(`${VERIFIER_SCRIPT} no longer runs scripts/check-feature-map.mjs as a command in its quick tier (plain lines starting with ${[...VERIFIER_LEADS].join(", ")}; one exactly "node scripts/check-feature-map.mjs", unquoted)`);
   }
-  if (!workflowRunSteps(await read(root, PR_WORKFLOW)).some((step) => shellRuns(step, VERIFIER_SCRIPT))) {
-    findings.push(`${PR_WORKFLOW} no longer runs ${VERIFIER_SCRIPT} in a run step of a job`);
+  if (!workflowRunSteps(await read(root, PR_WORKFLOW)).some((step) => shellWiring(step, `${VERIFIER_SCRIPT} quick`, WORKFLOW_LEADS))) {
+    findings.push(`${PR_WORKFLOW} no longer runs ${VERIFIER_SCRIPT} in a run step of a job (a step counts only as plain lines starting with ${[...WORKFLOW_LEADS].join(", ")}; one exactly "bin/verify-ship quick", unquoted)`);
   }
 
   const ids = new Set();
