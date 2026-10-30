@@ -1,6 +1,6 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
-import { connectPage, listPage, pendingPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, type OrderView, type Toast } from "./pages.js";
+import { connectPage, listPage, pageStart, pendingPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, type OrderView, type Toast } from "./pages.js";
 import { cancelConnect, connectionState, startConnect, type ConnectView } from "./connect.js";
 import { adminPageFrom, adminUserFrom, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
 
@@ -142,7 +142,8 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
     const list = await hosted.orders();
     // Commerce's "Create shipping label" button went to Ship's own order page, which sent the owner here: open that order.
     if (list.open) return await openOrder(hosted, list.open);
-    return listPage(hosted.siteId, list.orders, list.settings);
+    const from = input.type === "block_action" && input.action_id === "list" ? pageStart(input.value) : 0;
+    return listPage(hosted.siteId, list.orders, list.settings, undefined, from);
   } catch (error) {
     if (error instanceof ShipError) {
       if (error.code === "RECONNECT") return connectPage(isAdmin, error.message);

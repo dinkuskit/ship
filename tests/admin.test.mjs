@@ -665,3 +665,31 @@ test("a live label's delivery shows in the list and on the order, and a label wi
   assert.match(page, /"label":"Delivery","value":"Delivered, 2026-10-22 18:02 UTC"/);
   assert.match(page, /"label":"Status","value":"Delivered"/);
 });
+
+test("a store with more orders than EmDash can draw at once gets them 50 at a time, newest first", async () => {
+  // Hosted Ship sends up to 200 orders; EmDash refuses a page of more than 2,000 parts (about 175 rows).
+  const orders = Array.from({ length: 200 }, (_, i) => row({ orderId: `order:${i}`, number: 2000 + i }));
+  const h = host({ ship: { "GET /v1/admin/orders": { orders, settings } } });
+  const table = response => response.blocks.find(block => block.type === "table");
+  const first = await h.page(load);
+  assert.equal(table(first).rows.length, 50);
+  assert.equal(table(first).next_cursor, "50");
+  assert.match(text(first), /Orders 1 to 50 of 200, newest first/);
+  const second = await h.page({ type: "block_action", action_id: "list", value: { cursor: "50", sort: null } });
+  assert.equal(table(second).rows.length, 50);
+  assert.notEqual(table(second).rows[0].order, table(first).rows[0].order);
+  assert.match(text(second), /Orders 51 to 100 of 200/);
+  const last = await h.page({ type: "block_action", action_id: "list", value: { cursor: "150" } });
+  assert.equal(table(last).rows.length, 50);
+  assert.equal(table(last).next_cursor, undefined, "the last page offers no Load more");
+  // Refresh, a sort, or a cursor past the end or not a number goes back to the newest orders.
+  for (const value of [undefined, { sort: { key: "order", dir: "asc" } }, { cursor: "900" }, { cursor: "-5" }, { cursor: "1e3" }]) {
+    assert.match(text(await h.page({ type: "block_action", action_id: "list", value })), /Orders 1 to 50 of 200/, JSON.stringify(value));
+  }
+  // A store with 50 or fewer orders sees them all, with no page line.
+  const few = host({ ship: { "GET /v1/admin/orders": { orders: orders.slice(0, 50), settings } } });
+  const all = await few.page(load);
+  assert.equal(table(all).rows.length, 50);
+  assert.equal(table(all).next_cursor, undefined);
+  assert.doesNotMatch(text(all), /Orders 1 to/);
+});

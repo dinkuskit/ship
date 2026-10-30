@@ -19,7 +19,7 @@ Ship has two parts that work together:
 
 | Part | What it does |
 | --- | --- |
-| Ship plugin (`dinkus-ship`) | Adds a **Shipments** page, under **Dinkus Ship**, to the store admin for Editors and Administrators. It lists the paid orders Commerce sent to Ship, shows USPS prices, and has **Buy label**, **Print label** and **Cancel label**. |
+| Ship plugin (`dinkus-ship`) | Adds a **Shipments** page, under **Dinkus Ship**, to the store admin for Editors and Administrators. It lists the paid orders Commerce sent to Ship, newest first and 50 at a time with **Load more**, shows USPS prices, and has **Buy label**, **Print label** and **Cancel label**. |
 | Hosted Ship service | Takes Commerce's orders, buys, keeps and cancels labels, sends the shopper the shipped email, and serves the owner's own pages at ship.dinkuskit.com (sign in with DinkusKit.com): settings, the owner's Pitney Bowes postage account, and label history. |
 
 The plugin keeps no label data. Every click reads from, or buys through, the hosted service, so the two always agree. Ship's own pages are the full path, and the fallback when the plugin is not installed.
