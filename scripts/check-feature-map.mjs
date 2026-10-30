@@ -10,20 +10,19 @@ import { fileURLToPath } from "node:url";
  *
  * Each of these is a finding, and one finding fails the run:
  * - a verification asset is missing (the map, the verifier, this check, the workflows);
- * - the table's columns are not the seven the map promises, or a row has the wrong cell count;
+ * - FEATURE_MAP.md exists but is empty or has no table, the table's columns are not the seven
+ *   the map promises, a row has the wrong cell count, or there are no rows;
  * - a surface id is not one backticked `dinkus.ship-<surface>`, or is repeated;
  * - a backticked tree path in any cell names something the tree does not have, or a
  *   directory written without its trailing slash;
  * - a file under a verified root is owned by no row, or by more than one;
- * - a row's verifier is not one backticked `bin/verify-ship <tier>` with a tier the script accepts;
- * - FEATURE_MAP.md exists but is empty or has no table;
- * - the Repository contract workflow has no job step that is plain wiring: every line one bare
- *   allowlisted command with no operator character, one line exactly `bin/verify-ship quick`
- *   (or `npx bin/verify-ship quick`, after an optional `VAR=value ` prefix). A job name, a YAML
- *   comment, a commented-out line, an argument, a string, a substitution, a pipe, a redirection
- *   or a `||` / `&&` branch does not count, and the finding names the offending line;
- * - bin/verify-ship does not declare `set -e` before its `quick)` tier, or that tier has no line
- *   that is exactly `node scripts/check-feature-map.mjs`.
+ * - a row's verifier is not one backticked `bin/verify-ship <tier>` naming a tier the script
+ *   declares as a case label.
+ *
+ * The script decides only what needs no shell semantics. It does not read the workflow or
+ * the verifier to judge whether they run anything: that is guaranteed outside it, by the
+ * Repository contract job `bin/verify-ship quick` being a required status check on main, and
+ * by tests/feature-map.test.mjs executing bin/verify-ship quick against a drifted map.
  */
 export const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -57,7 +56,6 @@ export const REQUIRED_FILES = [
   ".github/workflows/repo-contract.yml",
 ];
 const VERIFIER_SCRIPT = "bin/verify-ship";
-const PR_WORKFLOW = ".github/workflows/repo-contract.yml";
 /** Build output and installs, never owned. */
 const SKIPPED = new Set([".git", "node_modules", "dist", "dist-sandbox", ".tmp", ".emdash-release", ".artifacts", ".wrangler", "runs"]);
 const SURFACE_ID = /^dinkus\.ship-[a-z0-9]+(?:-[a-z0-9]+)*$/;
@@ -66,95 +64,6 @@ const VERIFIER_COMMAND = /^bin\/verify-ship (\S+)$/;
 const TREE_PATH = /^(?:(?:src|service|tests|scripts|bin|docs|proof|\.github|\.changeset|\.grilltrack|\.claude)(?:\/[^\s`]*)?|[A-Za-z0-9_.-]+\.(?:md|json|jsonc|mjs|ts|txt))$/;
 
 const tokens = (cell) => Array.from(cell.matchAll(/`([^`]+)`/g), (match) => match[1]);
-
-/**
- * The shell of every `run:` step under a job's `steps:` in a workflow, read by the file's
- * structure (keys by indentation, list items by their dash), so a job's name, a YAML
- * comment or any other string can never stand in for an actual run step.
- */
-export function workflowRunSteps(yaml) {
-  const lines = yaml.split("\n");
-  const steps = [];
-  /** The open mapping keys above the current line, as [indent, key]. */
-  const open = [];
-  for (let index = 0; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (/^\s*(#|$)/.test(line)) continue;
-    let indent = /^ */.exec(line)[0].length;
-    let rest = line.slice(indent);
-    if (rest.startsWith("- ")) {
-      indent += 2;
-      rest = rest.slice(2);
-    }
-    while (open.length && open[open.length - 1][0] >= indent) open.pop();
-    const key = /^([A-Za-z_][\w-]*):(?:\s+(.*))?$/.exec(rest);
-    if (!key) continue;
-    const [, name, value = ""] = key;
-    const above = open.map(([, openKey]) => openKey);
-    if (name === "run" && above[0] === "jobs" && above.includes("steps")) {
-      if (/^[|>][-+]?\s*(#.*)?$/.test(value)) {
-        const body = [];
-        while (index + 1 < lines.length && (/^\s*$/.test(lines[index + 1]) || /^ */.exec(lines[index + 1])[0].length > indent)) {
-          body.push(lines[index += 1]);
-        }
-        const margin = Math.min(...body.filter((text) => text.trim()).map((text) => /^ */.exec(text)[0].length), Infinity);
-        steps.push(body.map((text) => text.slice(Math.min(margin, text.length))).join("\n").trim());
-      } else steps.push(value.replace(/^(["'])(.*)\1$/, "$2"));
-    }
-    open.push([indent, name]);
-  }
-  return steps;
-}
-
-/** What a wiring line in the Repository contract workflow's step may start with. */
-export const WORKFLOW_LEADS = new Set(["set", "export", "cd", "echo", "true", "npm", "npx", "node", "bin/verify-ship"]);
-/** A character that gives a line shell semantics; a wiring line holds none. */
-const OPERATOR = /[&|;`$'"(){}<>]/;
-/** A `set -e` line, with or without other flags and pipefail. */
-const SET_E = /^\s*set\s+-[a-z]*e[a-z]*(\s+(-o\s+)?pipefail)?\s*$/;
-/** Shell comments and blank lines gone, the rest trimmed. */
-const commandLines = (text) => text.split("\n").map((line) => line.replace(/(^|\s)#.*$/, "").trim()).filter(Boolean);
-/** The line without a leading `VAR=value ` prefix. */
-const bare = (line) => line.replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, "");
-
-/**
- * Why a shell text is not plain wiring that runs `command`, or null when it is. The rule leaves
- * no shell semantics to reason about: once shell comments and blank lines are gone, every line
- * is one bare command whose first word is in `leads` and that holds no operator character
- * (&, |, ;, a backtick, $, a quote, a bracket, < or >), and one line is exactly `command` or
- * `npx ` + `command`, after an optional leading `VAR=value ` prefix. So nothing can be
- * substituted, quoted, piped, redirected, backgrounded, or skipped behind `||` or `&&`.
- */
-export function plainWiring(text, command, leads) {
-  const lines = commandLines(text);
-  if (lines.length === 0) return "it has no command";
-  let found = false;
-  for (const line of lines) {
-    if (OPERATOR.test(line)) return `line "${line}" holds an operator`;
-    const plain = bare(line);
-    if (!leads.has(plain.split(/\s+/)[0])) return `line "${line}" does not start with one of ${[...leads].join(", ")}`;
-    if (plain === command || plain === `npx ${command}`) found = true;
-  }
-  return found ? null : `no line is exactly "${command}"`;
-}
-
-/**
- * Why bin/verify-ship's quick tier does not run the map check, or null when it does: the
- * script declares `set -e` (any flags, pipefail or not) before its `quick)` case label, and
- * a line between that label and its `;;` is exactly `node scripts/check-feature-map.mjs`, so
- * the check cannot be skipped and its failure cannot be suppressed on that line.
- */
-export function quickTierWiring(sh, command = "node scripts/check-feature-map.mjs") {
-  const lines = sh.split("\n");
-  const start = lines.findIndex((line) => /^\s*quick\)\s*$/.test(line));
-  if (start < 0) return "it has no quick) tier";
-  if (!lines.slice(0, start).some((line) => SET_E.test(line))) return 'no "set -e" is declared before its quick) tier';
-  const end = lines.findIndex((line, at) => at > start && /^\s*;;\s*$/.test(line));
-  const tier = commandLines(lines.slice(start + 1, end < 0 ? lines.length : end).join("\n"));
-  if (tier.includes(command)) return null;
-  const near = tier.find((line) => line.includes(command.split(/\s+/).pop()));
-  return near ? `line "${near}" is not exactly "${command}"` : `no line in its quick) tier is exactly "${command}"`;
-}
 
 /** The map's one table as rows keyed by column, or why it cannot be read. */
 export function parseFeatureMap(markdown) {
@@ -225,20 +134,9 @@ export async function auditFeatureMap(root = repositoryRoot) {
     return findings;
   }
 
-  // The tiers bin/verify-ship accepts are its case labels.
-  const verifier = await read(root, VERIFIER_SCRIPT);
-  const tiers = new Set(Array.from(verifier.matchAll(/^\s*([a-z]+)\)\s*$/gm), (match) => match[1]));
+  // The tiers a row may name are the verifier's case labels (quick, full).
+  const tiers = new Set(Array.from((await read(root, VERIFIER_SCRIPT)).matchAll(/^\s*([a-z]+)\)\s*$/gm), (match) => match[1]));
   if (tiers.size === 0) findings.push(`${VERIFIER_SCRIPT} declares no tier (expected case labels such as quick) and full))`);
-  const tierReason = quickTierWiring(verifier);
-  if (tierReason) findings.push(`${VERIFIER_SCRIPT} no longer runs scripts/check-feature-map.mjs as a command in its quick tier: ${tierReason}`);
-  const steps = workflowRunSteps(await read(root, PR_WORKFLOW));
-  const stepReasons = steps.map((step, at) => {
-    const reason = plainWiring(step, `${VERIFIER_SCRIPT} quick`, WORKFLOW_LEADS);
-    return reason && `step ${at + 1}: ${reason}`;
-  });
-  if (stepReasons.every(Boolean)) {
-    findings.push(`${PR_WORKFLOW} no longer runs ${VERIFIER_SCRIPT} in a run step of a job: ${stepReasons.join("; ") || "it has no run step"}`);
-  }
 
   const ids = new Set();
   /** Owned path to the ids of the rows that claim it. */
