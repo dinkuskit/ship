@@ -741,6 +741,15 @@ test("prepareRegistryWorkspace stages isolated beta and stable manifests without
     assert.equal(betaManifest.slug, BETA_REGISTRY_SLUG);
     assert.equal(betaManifest.name, BETA_PLUGIN_NAME);
     assert.equal(betaManifest.version, "0.1.1-beta.1");
+    assert.equal(betaManifest.name, "DinkusKit Ship (Beta)");
+    assert.equal(betaManifest.author.url, "https://dinkuskit.com");
+    for (const section of Object.values(betaManifest.sections)) {
+      assert.ok((await readFile(join(betaDir, section.file), "utf8")).length > 0);
+    }
+    assert.deepEqual(
+      await readFile(join(betaDir, betaManifest.release.artifacts.icon.file)),
+      await readFile(join(repositoryRoot, betaManifest.release.artifacts.icon.file)),
+    );
 
     const stableDir = join(tempDir, "stable");
     const stableStaged = await prepareRegistryWorkspace({
@@ -750,6 +759,7 @@ test("prepareRegistryWorkspace stages isolated beta and stable manifests without
     });
     assert.equal(stableStaged.slug, STABLE_REGISTRY_SLUG);
     assert.equal(stableStaged.name, STABLE_PLUGIN_NAME);
+    assert.equal(stableStaged.name, "DinkusKit Ship");
 
     const rootManifest = JSON.parse(await readFile(join(repositoryRoot, "emdash-plugin.jsonc"), "utf8"));
     assert.equal(rootManifest.slug, STABLE_REGISTRY_SLUG);
@@ -784,6 +794,15 @@ test("prepare-emdash-release.mjs builds official emdash-plugin release prepare t
     const betaTarballPath = join(betaDir, "dinkus-ship-beta-0.1.1-beta.1.tar.gz");
     const betaTarStat = await stat(betaTarballPath);
     assert.ok(betaTarStat.isFile() && betaTarStat.size > 0);
+    const preparedManifest = JSON.parse(await readFile(join(betaDir, "emdash-plugin.jsonc"), "utf8"));
+    assert.equal(preparedManifest.name, "DinkusKit Ship (Beta)");
+    for (const section of Object.values(preparedManifest.sections)) {
+      assert.ok((await readFile(join(betaDir, section.file), "utf8")).length > 0);
+    }
+    assert.deepEqual(
+      await readFile(join(betaDir, preparedManifest.release.artifacts.icon.file)),
+      await readFile(join(repositoryRoot, preparedManifest.release.artifacts.icon.file)),
+    );
 
     const betaOutputText = await readFile(betaOut, "utf8");
     assert.match(betaOutputText, /^package-slug=dinkus-ship-beta$/m);
