@@ -2,12 +2,24 @@
   "$schema": "./node_modules/@emdash-cms/plugin-cli/schemas/emdash-plugin.schema.json",
   "slug": "dinkus-ship",
   "publisher": "did:plc:ekk4pjmkh3k3ql2kfoex3qt4",
-  "name": "Ship",
-  "description": "Buy, print and cancel USPS shipping labels for paid orders in EmDash, through the hosted DinkusKit Ship service.",
+  "name": "DinkusKit Ship",
+  "description": "Compare USPS rates and practise buying, printing and cancelling labels in EmDash. Sandbox labels only; not valid postage.",
+  "keywords": ["shipping", "USPS", "shipping labels", "fulfillment", "ecommerce"],
+  "sections": {
+    "description": { "file": "./docs/registry-listing/description.md" },
+    "installation": { "file": "./docs/registry-listing/installation.md" },
+    "faq": { "file": "./docs/registry-listing/faq.md" }
+  },
+  "release": {
+    "artifacts": {
+      "icon": { "file": "./assets/listing/icon.webp" },
+      "screenshots": [{ "file": "./assets/listing/connect-ship.jpg", "lang": "en" }]
+    }
+  },
   "license": "MIT",
   "author": {
     "name": "DinkusKit",
-    "url": "https://github.com/dinkuskit"
+    "url": "https://dinkuskit.com"
   },
   "security": {
     "url": "https://github.com/dinkuskit/ship/security"

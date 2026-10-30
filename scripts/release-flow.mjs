@@ -14,8 +14,8 @@ export const STABLE_REGISTRY_SLUG = "dinkus-ship";
 export const BETA_REGISTRY_SLUG = "dinkus-ship-beta";
 export const STABLE_INSTALLED_PLUGIN_ID = "r_ehdlg5cxkb3ffqvr";
 export const BETA_INSTALLED_PLUGIN_ID = "r_nhb4yqdnowdmkxyu";
-export const STABLE_PLUGIN_NAME = "Ship";
-export const BETA_PLUGIN_NAME = "Ship Beta";
+export const STABLE_PLUGIN_NAME = "DinkusKit Ship";
+export const BETA_PLUGIN_NAME = "DinkusKit Ship (Beta)";
 export const BASELINE_VERSION = "0.1.0";
 export const BASELINE_TAG = "v0.1.0";
 export const MAX_PLUGIN_BUNDLE_BYTES = 131_072;
@@ -739,7 +739,8 @@ export async function prepareRegistryWorkspace({
   await rm(workspaceDir, { recursive: true, force: true });
   await mkdir(workspaceDir, { recursive: true });
 
-  for (const entry of ["src", "README.md", "LICENSE", "tsconfig.json"]) {
+  for (const entry of ["src", "README.md", "LICENSE", "tsconfig.json", "docs/registry-listing", "assets/listing"]) {
+    await mkdir(dirname(join(workspaceDir, entry)), { recursive: true });
     await cp(join(root, entry), join(workspaceDir, entry), { recursive: true });
   }
 

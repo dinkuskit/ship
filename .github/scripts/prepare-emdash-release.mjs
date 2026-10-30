@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { appendFile, copyFile, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { appendFile, copyFile, cp, mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,9 +7,9 @@ import { fileURLToPath } from "node:url";
 const MAX_PLUGIN_BYTES = 131_072;
 const SEMVER_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const STABLE_SLUG = "dinkus-ship";
-const STABLE_NAME = "Ship";
+const STABLE_NAME = "DinkusKit Ship";
 const BETA_SLUG = "dinkus-ship-beta";
-const BETA_NAME = "Ship Beta";
+const BETA_NAME = "DinkusKit Ship (Beta)";
 
 function parseArgs(argv) {
   const options = {
@@ -138,6 +138,12 @@ try {
   await mkdir(join(tempDir, "src"), { recursive: true });
   await copyFile(builtPluginPath, join(tempDir, "src/plugin.ts"));
 
+  // The manifest's listing references must survive the isolated release build.
+  for (const directory of ["docs/registry-listing", "assets/listing"]) {
+    await mkdir(dirname(join(tempDir, directory)), { recursive: true });
+    await cp(resolve(rootDir, directory), join(tempDir, directory), { recursive: true });
+  }
+
   for (const filename of ["README.md", "LICENSE"]) {
     const sourcePath = resolve(rootDir, filename);
     const stats = await stat(sourcePath).catch(() => null);
@@ -190,6 +196,10 @@ try {
 
   await rm(releaseDir, { recursive: true, force: true });
   await mkdir(releaseDir, { recursive: true });
+  for (const directory of ["docs/registry-listing", "assets/listing"]) {
+    await mkdir(dirname(join(releaseDir, directory)), { recursive: true });
+    await cp(join(tempDir, directory), join(releaseDir, directory), { recursive: true });
+  }
 
   const bundleFilename = basename(expectedBundle);
   const outputBundlePath = resolve(releaseDir, bundleFilename);
