@@ -74,8 +74,10 @@ This plugin-only change does not execute the hosted-service full verifier.
 
 ## Limits and next action
 
-No live store, postage purchase, provider account, profile update, release,
-deployment or merge was performed. The copy explicitly says sandbox/practice
+The local validation did not call a live store, purchase postage, change a
+provider account, update a profile, publish a release, deploy or merge. The
+coordinating campaign separately published the approved stable profile text
+and links; this branch's artwork and release-code rollout remains unmerged. The copy explicitly says sandbox/practice
 labels are not valid postage; it promises no live postage or standalone intake.
 
 The initial repository had no reusable current Ship screenshot. A narrow local
@@ -122,3 +124,22 @@ finding. The asset is renamed to `connect-ship.jpg` and every source reference
 and format claim is corrected. The original bytes and SHA-256 are preserved.
 Manifest validation, dry preparation and targeted media/preparation checks were
 repeated for the corrected path. A new exact-head review is required.
+
+## Same-tag archive retry repair
+
+The shared helper's [P1 review finding](https://github.com/dinkuskit/commerce/pull/225#issuecomment-6528581958)
+was accepted as `required_fix`: a package filename containing only the version
+can collide with different valid archive bytes after an interrupted publish and
+a rebuild of the same tag. Package assets now include SHA-256 of their bytes,
+just as provenance assets already do. No existing asset is overwritten.
+
+The regression prepares one release, changes only the archive bytes, prepares
+the same tag again, and confirms distinct package URLs/checksums, preserved
+first-upload bytes and reused provenance. A third identical preparation reuses
+the second package asset without another upload. Existing no-clobber, source
+identity, provenance and media-verification tests remain intact.
+
+`node --test tests/registry-release-media.test.mjs` passes all 8 tests, including
+the new same-tag assertions. `bin/verify-ship quick` passed all 71 tests for
+this repair (zero failures or skips). The JPEG screenshot and its original bytes are unchanged. No beta
+branch, tag, release or published record is changed by this source repair.

@@ -14,7 +14,7 @@ change either stable slug to update the display name.
 
 Artwork is release metadata, not a profile field. The pinned CLI's
 `release prepare` command produces the code tarball. The existing delegated
-workflow now passes a complete `release-file`: checksummed code and attestation
+workflow now passes a complete `release-file`: content-addressed, checksummed code and attestation
 assets plus image URLs pinned to the source commit. The service validates and
 stores those images. Publication still requires the existing release and
 approval flow; successful local preparation does not mean the registry is

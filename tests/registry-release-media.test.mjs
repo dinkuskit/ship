@@ -101,7 +101,7 @@ test("PDS verification rejects missing or changed listing images", () => {
   assert.equal(recordMatches(record, expected).ok, false);
 });
 
-test("preparation binds all media to the source commit and checks input before uploads", async () => {
+test("preparation binds media to the source commit and safely retries rebuilt same-tag bundles", async () => {
   const root = await mkdtemp(join(tmpdir(), "ship-media-preparation-"));
   try {
     await mkdir(join(root, "out"));
@@ -131,8 +131,25 @@ test("preparation binds all media to the source commit and checks input before u
     assert.equal(record.artifacts.icon.url, `https://raw.githubusercontent.com/${repository}/${options.sha}/demo.jpg`);
     assert.equal(record.artifacts.screenshots[0].lang, "en");
     assert.equal(assets.length, 2);
+    assert.match(assets[0].name, /-0\.5\.0-[a-f0-9]{64}\.tar\.gz$/);
     assert.match(assets[1].name, /provenance-[a-f0-9]{64}\.json$/);
     assert.deepEqual(JSON.parse(await readFile(join(root, options.outputFile))), record);
+
+    // An interrupted publish can leave this tag's first valid archive uploaded.
+    // Rebuilding that same source may change archive bytes; neither artifact is replaced.
+    const rebuiltBytes = Buffer.from("same plugin, rebuilt archive bytes");
+    await writeFile(join(root, "bundle.tar.gz"), rebuiltBytes);
+    const rebuilt = await prepareMediaRelease(options);
+    assert.notEqual(rebuilt.artifacts.package.url, record.artifacts.package.url);
+    assert.equal(rebuilt.artifacts.package.checksum, computePackageChecksum(rebuiltBytes));
+    assert.equal(assets.length, 3);
+    assert.deepEqual(uploaded.get(1), bytes);
+    assert.deepEqual(uploaded.get(3), rebuiltBytes);
+
+    const retry = await prepareMediaRelease(options);
+    assert.deepEqual(retry, rebuilt);
+    assert.equal(assets.length, 3, "identical archive retry must reuse both existing assets");
+
     calls = 0;
     await assert.rejects(prepareMediaRelease({ ...options, ref: "refs/heads/main" }), /workflow identity|gated tag/);
     assert.equal(calls, 0);
