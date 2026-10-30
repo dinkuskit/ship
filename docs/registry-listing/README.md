@@ -20,6 +20,12 @@ stores those images. Publication still requires the existing release and
 approval flow; successful local preparation does not mean the registry is
 updated. See `RELEASING.md` for upload idempotency and permission scope.
 
+`assets/listing/icon.webp` is the website's
+[ship.webp](https://github.com/dinkuskit/dinkuskit/blob/920aea3f012a14beb90d1be7264121dd7a8dd105/public/brand/ship.webp)
+(234 × 256) centred on a transparent 256 × 256 square, because the Registry
+crops icons to a square. The artwork pixels are unchanged (lossless WebP,
+37,382 bytes, SHA-256 `a6079e76b12e7ccccdfa91a0c046214d8ccacc43324193e6bbb04a2dddba21ad`).
+
 `assets/listing/connect-ship.jpg` is a real capture of the initial Connect
 screen in EmDash 1.4.0, using the built Ship 0.3.0 sandbox bundle and a local
 synthetic administrator. It illustrates initial setup, not a connected store
