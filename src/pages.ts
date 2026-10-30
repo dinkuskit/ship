@@ -97,8 +97,23 @@ export function problemPage(siteId: string, title: string, message: string): Blo
 }
 
 /** Paid orders waiting to ship, newest first within each status, as hosted Ship lists them. */
-export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipSettings, toast?: Toast): BlockResponse {
+/**
+ * Orders per Shipping page. EmDash refuses a Block Kit page of more than 2,000 parts, which is about
+ * 175 order rows, and hosted Ship sends up to 200, so the list shows them a page at a time.
+ */
+export const ORDERS_PER_PAGE = 50;
+
+/** The list page's start, from the cursor its Load more sends; the first page for anything else. */
+export function pageStart(value: unknown): number {
+  const cursor = typeof value === "object" && value !== null ? (value as { cursor?: unknown }).cursor : undefined;
+  return typeof cursor === "string" && /^\d{1,4}$/.test(cursor) ? Number(cursor) : 0;
+}
+
+export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipSettings, toast?: Toast, from = 0): BlockResponse {
   const pages = shipPages(siteId);
+  const start = from < orders.length ? from : 0;
+  const shown = orders.slice(start, start + ORDERS_PER_PAGE);
+  const next = start + ORDERS_PER_PAGE < orders.length ? String(start + ORDERS_PER_PAGE) : undefined;
   const blocks: Block[] = [header("Shipments")];
   if (!settings.shipFrom || settings.boxes.length === 0) {
     blocks.push(banner("alert", "Set up Ship first", "Labels need your ship-from address and at least one box size. Add them in Ship Settings; they are kept there for every order."));
@@ -110,11 +125,13 @@ export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipS
       { key: "order", label: "Order" }, { key: "to", label: "Ship to" }, { key: "items", label: "Items" },
       { key: "status", label: "Status", format: "badge" }, { key: "open", label: "", format: "element" },
     ],
-    rows: orders.map(order => ({
+    ...(next ? { next_cursor: next } : {}),
+    rows: shown.map(order => ({
       order: orderName(order), to: oneLine(order), items: order.items, status: status(order),
       open: { type: "button", label: "Open", action_id: "open", value: order.orderId, style: order.labelStatus === "bought" || order.status === "completed" ? "secondary" : "primary" },
     })),
   });
+  if (orders.length > ORDERS_PER_PAGE) blocks.push(context(`Orders ${start + 1} to ${start + shown.length} of ${orders.length}, newest first. Refresh goes back to the newest.`));
   blocks.push(context("Refunds, label history, Settings and your Pitney Bowes account are on Ship's own page."), { type: "actions", elements: [
     { type: "button", label: "Refresh", action_id: "list" },
     link("Open Ship", pages.orders), link("Ship Settings", pages.settings),
