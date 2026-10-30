@@ -20,7 +20,7 @@ stores those images. Publication still requires the existing release and
 approval flow; successful local preparation does not mean the registry is
 updated. See `RELEASING.md` for upload idempotency and permission scope.
 
-`assets/listing/connect-ship.png` is a real capture of the initial Connect
+`assets/listing/connect-ship.jpg` is a real capture of the initial Connect
 screen in EmDash 1.4.0, using the built Ship 0.3.0 sandbox bundle and a local
 synthetic administrator. It illustrates initial setup, not a connected store
 or a successful label purchase. Capture provenance is recorded in

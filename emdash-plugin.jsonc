@@ -13,7 +13,7 @@
   "release": {
     "artifacts": {
       "icon": { "file": "./assets/listing/icon.webp" },
-      "screenshots": [{ "file": "./assets/listing/connect-ship.png", "lang": "en" }]
+      "screenshots": [{ "file": "./assets/listing/connect-ship.jpg", "lang": "en" }]
     }
   },
   "license": "MIT",

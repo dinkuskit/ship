@@ -28,7 +28,7 @@ website artwork:
 - Visually inspected: the existing orange parcel/cube artwork; no user data.
 - This is product listing artwork, not runtime/browser evidence.
 
-`assets/listing/connect-ship.png` is an actual browser capture of the initial
+`assets/listing/connect-ship.jpg` is an actual browser capture of the initial
 Ship Connect screen, not a generated mockup:
 
 - Capture source: local EmDash 1.4.0 (10beb8c5a), Chrome, Ship 0.3.0 bundle
@@ -37,7 +37,7 @@ Ship Connect screen, not a generated mockup:
   state. This does not claim the Registry install/consent flow was exercised.
 - Loaded bundle: 25,590 bytes; SHA-256
   `9811b2420a3336408b42befeaed8a07538bf8902d47dd263a88efa33ae41f499`.
-- Image: PNG, 2,220 × 375, 24,522 bytes; SHA-256
+- Image: JPEG, 2,220 × 375, 24,522 bytes; SHA-256
   `69f07e58efd5d93a491bbb0e6c622a0a3dd46d7f31d52da5f12e1047aa7ca775`.
 - Capture is cropped at screenshot time to the plugin heading, explanatory
   panel, Connect button and website link. It excludes unrelated local fixture
@@ -112,3 +112,13 @@ See [listing maintenance](../../docs/registry-listing/README.md).
 
 Review, approved media/profile publication, and public-render verification are
 still required. A successful local build is not a published listing.
+
+## Review-admission repair
+
+The comprehensive review admission refused the previous `.png` screenshot
+path because the file bytes are JPEG (JFIF), not PNG. No model review occurred
+in that attempt; this is a file-format admission mismatch, not a functional
+finding. The asset is renamed to `connect-ship.jpg` and every source reference
+and format claim is corrected. The original bytes and SHA-256 are preserved.
+Manifest validation, dry preparation and targeted media/preparation checks were
+repeated for the corrected path. A new exact-head review is required.
