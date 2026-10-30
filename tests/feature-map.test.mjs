@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { auditFeatureMap, parseFeatureMap, repositoryRoot } from "../scripts/check-feature-map.mjs";
+import { auditFeatureMap, parseFeatureMap, repositoryRoot, shellRuns, workflowRunSteps } from "../scripts/check-feature-map.mjs";
 
 // The feature map check bin/verify-ship quick runs first: this repository's map is clean,
 // and a map that drifts from its tree, in either direction, is reported.
@@ -16,13 +16,32 @@ const PLUGIN_ROW =
 const CONTRACT_ROW =
   "| `dinkus.ship-repo-contract` | The contract | `bin/verify-ship`; `scripts/check-feature-map.mjs`; `FEATURE_MAP.md`; `.github/workflows/` | `bin/verify-ship quick` | a pull request | `feature_map=clean` | `bin/verify-ship quick` |\n";
 
+/** The Repository contract workflow, as the repository's one is shaped. */
+const WORKFLOW = [
+  "name: Repository contract",
+  "# bin/verify-ship quick runs below; this comment is not a step.",
+  "on:",
+  "  pull_request:",
+  "jobs:",
+  "  verify-ship:",
+  "    name: bin/verify-ship quick",
+  "    runs-on: ubuntu-24.04",
+  "    steps:",
+  "      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0",
+  "        with:",
+  "          persist-credentials: false",
+  "      - run: npm ci --ignore-scripts --no-audit --no-fund",
+  "      - run: bin/verify-ship quick",
+  "",
+].join("\n");
+
 /** A tree the map above describes exactly. */
 const BASE = {
   "FEATURE_MAP.md": HEADER + PLUGIN_ROW + CONTRACT_ROW,
   "bin/verify-ship": 'case "$mode" in\n  quick)\n    node scripts/check-feature-map.mjs\n    ;;\n  full)\n    ;;\nesac\n',
   "scripts/check-feature-map.mjs": "// stand-in\n",
   ".github/workflows/ci.yml": "name: CI\n",
-  ".github/workflows/repo-contract.yml": "      - run: bin/verify-ship quick\n",
+  ".github/workflows/repo-contract.yml": WORKFLOW,
   "src/plugin.ts": "export default {};\n",
   "tests/plugin.test.mjs": "// stand-in\n",
 };
@@ -84,6 +103,44 @@ test("the verifier and the pull request workflow must keep running the check, an
   has(findings, "bin/verify-ship no longer runs scripts/check-feature-map.mjs");
   has(findings, ".github/workflows/repo-contract.yml no longer runs bin/verify-ship");
   has(await audit({ ".github/workflows/ci.yml": null }), "missing verification asset: .github/workflows/ci.yml");
+});
+
+test("a workflow that names the verifier only in a job name, a comment or a commented-out line has no run step that invokes it", async () => {
+  // ClawSweeper on #83 (P2): the run step removed, the job name and the comment still saying bin/verify-ship quick.
+  const withoutStep = WORKFLOW.replace("      - run: bin/verify-ship quick\n", "");
+  assert.ok(!withoutStep.includes("- run: bin/verify-ship"), "the step is gone");
+  assert.ok(withoutStep.includes("bin/verify-ship quick"), "the string is still there");
+  has(await audit({ ".github/workflows/repo-contract.yml": withoutStep }), ".github/workflows/repo-contract.yml no longer runs bin/verify-ship in a run step of a job");
+  const commentedOut = WORKFLOW.replace("      - run: bin/verify-ship quick\n", "      - run: |\n          set -eu\n          # bin/verify-ship quick\n          npm test\n");
+  has(await audit({ ".github/workflows/repo-contract.yml": commentedOut }), "no longer runs bin/verify-ship in a run step of a job");
+  const outsideJobs = WORKFLOW.replace("      - run: bin/verify-ship quick\n", "") + "run: bin/verify-ship quick\n";
+  has(await audit({ ".github/workflows/repo-contract.yml": outsideJobs }), "no longer runs bin/verify-ship in a run step of a job");
+  // A real run step passes however it is written: plain, quoted, or in a block scalar after other commands.
+  assert.deepEqual(await audit({ ".github/workflows/repo-contract.yml": WORKFLOW.replace("- run: bin/verify-ship quick", '- run: "bin/verify-ship quick"') }), []);
+  assert.deepEqual(await audit({ ".github/workflows/repo-contract.yml": WORKFLOW.replace("      - run: bin/verify-ship quick\n", "      - name: Verify\n        run: |\n          set -eu\n          npm run typecheck\n          bin/verify-ship quick 2>&1 | tee verify.log\n") }), []);
+});
+
+test("workflowRunSteps reads run steps by structure and shellRuns ignores comments", () => {
+  assert.deepEqual(workflowRunSteps(WORKFLOW), ["npm ci --ignore-scripts --no-audit --no-fund", "bin/verify-ship quick"]);
+  assert.deepEqual(workflowRunSteps("name: x\nrun: bin/verify-ship quick\njobs:\n  a:\n    run: not-a-step\n"), []);
+  assert.deepEqual(workflowRunSteps("jobs:\n  a:\n    steps:\n      - run: |\n          one\n\n          two\n      - uses: x\n"), ["one\n\ntwo"]);
+  assert.equal(shellRuns("set -eu\nnode scripts/check-feature-map.mjs\n", "node scripts/check-feature-map.mjs"), true);
+  assert.equal(shellRuns("# node scripts/check-feature-map.mjs\nnpm test\n", "node scripts/check-feature-map.mjs"), false);
+  assert.equal(shellRuns("npm test # bin/verify-ship quick\n", "bin/verify-ship"), false);
+  assert.equal(shellRuns("cd x && bin/verify-ship quick", "bin/verify-ship"), true);
+  assert.equal(shellRuns("./bin/verify-ship-other quick", "bin/verify-ship"), false);
+});
+
+test("a verifier that only mentions the check in a comment no longer runs it", async () => {
+  has(await audit({ "bin/verify-ship": "quick)\n  # node scripts/check-feature-map.mjs used to run here\n  npm test\n  ;;\nfull)\n  ;;\n" }), "bin/verify-ship no longer runs scripts/check-feature-map.mjs as a command");
+  assert.deepEqual(await audit({ "bin/verify-ship": "quick)\n  npm run audit:features\n  npm test\n  ;;\nfull)\n  ;;\n" }), []);
+});
+
+test("an empty, table-less or row-less FEATURE_MAP.md is drift, not a pass", async () => {
+  // ClawSweeper on #83 (P3): a zero-byte map used to audit clean.
+  has(await audit({ "FEATURE_MAP.md": "" }), "FEATURE_MAP.md has no table");
+  has(await audit({ "FEATURE_MAP.md": "# Feature map\n\nProse only.\n" }), "FEATURE_MAP.md has no table");
+  has(await audit({ "FEATURE_MAP.md": HEADER }), "FEATURE_MAP.md has no surface rows");
 });
 
 test("parseFeatureMap reads the one table, keyed by column", () => {

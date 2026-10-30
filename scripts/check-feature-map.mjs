@@ -16,8 +16,10 @@ import { fileURLToPath } from "node:url";
  *   directory written without its trailing slash;
  * - a file under a verified root is owned by no row, or by more than one;
  * - a row's verifier is not one backticked `bin/verify-ship <tier>` with a tier the script accepts;
- * - bin/verify-ship no longer runs this check, or the Repository contract workflow no longer
- *   runs bin/verify-ship.
+ * - FEATURE_MAP.md exists but is empty or has no table;
+ * - bin/verify-ship no longer runs this check as a command (a comment does not count), or the
+ *   Repository contract workflow has no job step whose `run:` invokes bin/verify-ship (a job
+ *   name, a YAML comment or a commented-out line does not count).
  */
 export const repositoryRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -60,6 +62,51 @@ const VERIFIER_COMMAND = /^bin\/verify-ship (\S+)$/;
 const TREE_PATH = /^(?:(?:src|service|tests|scripts|bin|docs|proof|\.github|\.changeset|\.grilltrack|\.claude)(?:\/[^\s`]*)?|[A-Za-z0-9_.-]+\.(?:md|json|jsonc|mjs|ts|txt))$/;
 
 const tokens = (cell) => Array.from(cell.matchAll(/`([^`]+)`/g), (match) => match[1]);
+
+/**
+ * The shell of every `run:` step under a job's `steps:` in a workflow, read by the file's
+ * structure (keys by indentation, list items by their dash), so a job's name, a YAML
+ * comment or any other string can never stand in for an actual run step.
+ */
+export function workflowRunSteps(yaml) {
+  const lines = yaml.split("\n");
+  const steps = [];
+  /** The open mapping keys above the current line, as [indent, key]. */
+  const open = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\s*(#|$)/.test(line)) continue;
+    let indent = /^ */.exec(line)[0].length;
+    let rest = line.slice(indent);
+    if (rest.startsWith("- ")) {
+      indent += 2;
+      rest = rest.slice(2);
+    }
+    while (open.length && open[open.length - 1][0] >= indent) open.pop();
+    const key = /^([A-Za-z_][\w-]*):(?:\s+(.*))?$/.exec(rest);
+    if (!key) continue;
+    const [, name, value = ""] = key;
+    const above = open.map(([, openKey]) => openKey);
+    if (name === "run" && above[0] === "jobs" && above.includes("steps")) {
+      if (/^[|>][-+]?\s*(#.*)?$/.test(value)) {
+        const body = [];
+        while (index + 1 < lines.length && (/^\s*$/.test(lines[index + 1]) || /^ */.exec(lines[index + 1])[0].length > indent)) {
+          body.push(lines[index += 1]);
+        }
+        const margin = Math.min(...body.filter((text) => text.trim()).map((text) => /^ */.exec(text)[0].length), Infinity);
+        steps.push(body.map((text) => text.slice(Math.min(margin, text.length))).join("\n").trim());
+      } else steps.push(value.replace(/^(["'])(.*)\1$/, "$2"));
+    }
+    open.push([indent, name]);
+  }
+  return steps;
+}
+
+/** Whether a shell text runs the command, on a line of its own or in a pipeline, and not only in a comment. */
+export function shellRuns(text, command) {
+  const pattern = new RegExp(`(^|[\\s;&|(])${command.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}(?=\\s|$)`);
+  return text.split("\n").some((line) => pattern.test(line.replace(/(^|\s)#.*$/, "")));
+}
 
 /** The map's one table as rows keyed by column, or why it cannot be read. */
 export function parseFeatureMap(markdown) {
@@ -123,9 +170,8 @@ export async function auditFeatureMap(root = repositoryRoot) {
   for (const required of REQUIRED_FILES) {
     if ((await kind(root, required)) !== "file") findings.push(`missing verification asset: ${required}`);
   }
-  const markdown = await read(root, "FEATURE_MAP.md");
-  if (!markdown) return findings;
-  const parsed = parseFeatureMap(markdown);
+  if ((await kind(root, "FEATURE_MAP.md")) !== "file") return findings;
+  const parsed = parseFeatureMap(await read(root, "FEATURE_MAP.md"));
   if (parsed.error) {
     findings.push(parsed.error);
     return findings;
@@ -135,8 +181,12 @@ export async function auditFeatureMap(root = repositoryRoot) {
   const verifier = await read(root, VERIFIER_SCRIPT);
   const tiers = new Set(Array.from(verifier.matchAll(/^\s*([a-z]+)\)\s*$/gm), (match) => match[1]));
   if (tiers.size === 0) findings.push(`${VERIFIER_SCRIPT} declares no tier (expected case labels such as quick) and full))`);
-  if (!verifier.includes("check-feature-map.mjs")) findings.push(`${VERIFIER_SCRIPT} no longer runs scripts/check-feature-map.mjs`);
-  if (!(await read(root, PR_WORKFLOW)).includes(VERIFIER_SCRIPT)) findings.push(`${PR_WORKFLOW} no longer runs ${VERIFIER_SCRIPT}`);
+  if (!shellRuns(verifier, "node scripts/check-feature-map.mjs") && !shellRuns(verifier, "npm run audit:features")) {
+    findings.push(`${VERIFIER_SCRIPT} no longer runs scripts/check-feature-map.mjs as a command`);
+  }
+  if (!workflowRunSteps(await read(root, PR_WORKFLOW)).some((step) => shellRuns(step, VERIFIER_SCRIPT))) {
+    findings.push(`${PR_WORKFLOW} no longer runs ${VERIFIER_SCRIPT} in a run step of a job`);
+  }
 
   const ids = new Set();
   /** Owned path to the ids of the rows that claim it. */
