@@ -392,6 +392,20 @@
           "note": "fork composition invalidates prior current proof",
           "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
           "to": "needs_reverification"
+        },
+        {
+          "at": "2026-11-01T04:28:00+00:00",
+          "choice": "Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0.",
+          "from": "needs_reverification",
+          "implementation_ref": "file:README.md",
+          "note": "It says 'Only neutral charter, research, and contract documents are authorized now. No label kernel or fake APIs. Package remains private 0.0.0', but later verified and implemented decisions (installed workflow, Registry plugin, tracking) authorize exactly that code, so a reviewer could wrongly reject it.",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "superseded",
+          "verification_ref": null
         }
       ],
       "id": "docs-only-slice",
@@ -421,9 +435,9 @@
       "review_ref": null,
       "review_result": null,
       "review_source_identity": null,
-      "status": "needs_reverification",
-      "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
+      "status": "superseded",
+      "superseded_by": "ship-registry-plugin-001",
+      "updated_at": "2026-11-01T04:28:00+00:00",
       "verification_ref": null
     },
     {
@@ -1002,6 +1016,20 @@
           "note": "fork composition invalidates prior current proof",
           "source_snapshot_ref": ".grilltrack/lineage/ace25278ce8c819c1b7bafd74119b3b0e7af32670ef2ff5766628d8c54611495",
           "to": "needs_reverification"
+        },
+        {
+          "at": "2026-11-01T04:28:00+00:00",
+          "choice": "Loopback-only synthetic USPS PM/PKG PB sandbox adapter with server-owned durable state, explicit review, and no live proof claim.",
+          "from": "needs_reverification",
+          "implementation_ref": "src/public/index.html,test-support/fixture-pdf.js,test-support/fixture-server.js,test/pb-sandbox.test.js,.github/workflows/ci.yml,README.md,proof/2026-09-30-pitney-bowes-sandbox/PROOF.md",
+          "note": "It describes a 'Loopback-only synthetic USPS PM/PKG PB sandbox adapter' and says 'PR2 remains frozen', a narrow exception that later Registry plugin, installed workflow and hosted PB decisions have overtaken, so it implies a retired sandbox surface is still the governing boundary.",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "superseded",
+          "verification_ref": null
         }
       ],
       "id": "pb-sandbox-contract-001",
@@ -1045,9 +1073,9 @@
       "review_ref": null,
       "review_result": null,
       "review_source_identity": null,
-      "status": "needs_reverification",
-      "superseded_by": null,
-      "updated_at": "2026-10-01T02:35:23+00:00",
+      "status": "superseded",
+      "superseded_by": "ship-registry-plugin-001",
+      "updated_at": "2026-11-01T04:28:00+00:00",
       "verification_ref": null
     },
     {
@@ -1457,6 +1485,7 @@
       "review_ref": null,
       "review_result": null,
       "review_source_identity": null,
+      "scope": "slice",
       "status": "verified",
       "superseded_by": null,
       "updated_at": "2026-10-01T23:41:23+00:00",
@@ -1570,6 +1599,20 @@
           "review_source_identity": null,
           "to": "verified",
           "verification_ref": "runs/ignoredruns/order-sandbox-quotes-20261006/PROOF.md;npm test (22 passed);verify:sandbox package_install=passed sandbox_execution=not_claimed"
+        },
+        {
+          "at": "2026-11-01T04:28:00+00:00",
+          "choice": "Synthetic fixture-only Ship sandbox BlockKit package editing and validation for US domestic weight/dimensions, with fixed fixture destination and immutable paid totals; quote prerequisite remains Commerce-unavailable and original provider unknown remains blocked.",
+          "from": "verified",
+          "implementation_ref": "src/plugin.js,src/package-validation.js,scripts/verify-sandbox-package.mjs,test/sandbox-plugin.test.js",
+          "note": "It calls a 'Synthetic fixture-only Ship sandbox BlockKit package' the 'current authorized Ship implementation slice' and says the 'quote prerequisite remains Commerce-unavailable', yet the real hosted-Ship Registry plugin with quotes and purchase has since been locked and implemented.",
+          "repair_required": false,
+          "review_classifications": [],
+          "review_ref": null,
+          "review_result": null,
+          "review_source_identity": null,
+          "to": "superseded",
+          "verification_ref": "proof/2026-10-06-package-form/PROOF.md"
         }
       ],
       "id": "ship-order-sandbox-quotes-001",
@@ -1582,9 +1625,9 @@
       "review_ref": null,
       "review_result": null,
       "review_source_identity": null,
-      "status": "verified",
-      "superseded_by": null,
-      "updated_at": "2026-10-07T02:47:44+00:00",
+      "status": "superseded",
+      "superseded_by": "ship-registry-plugin-001",
+      "updated_at": "2026-11-01T04:28:00+00:00",
       "verification_ref": "proof/2026-10-06-package-form/PROOF.md"
     },
     {
@@ -2024,6 +2067,7 @@
       "review_ref": null,
       "review_result": null,
       "review_source_identity": null,
+      "scope": "slice",
       "status": "verified",
       "superseded_by": null,
       "updated_at": "2026-10-08T14:39:27+00:00",
@@ -2163,6 +2207,7 @@
       "review_ref": "file:.grilltrack/proof/browser-label-assets-20261008.md",
       "review_result": "clean",
       "review_source_identity": "git:0a4137c66dc8e0224c307d2f881de25099095cef",
+      "scope": "slice",
       "status": "verified",
       "superseded_by": null,
       "updated_at": "2026-10-08T18:26:34+00:00",
@@ -2296,6 +2341,7 @@
       "review_ref": ".grilltrack/proof/registry-artifact-20261008.md#canonical-review",
       "review_result": "clean",
       "review_source_identity": "git:b0af506b210a954e06f6d74044e3ad411795b376",
+      "scope": "slice",
       "status": "verified",
       "superseded_by": null,
       "updated_at": "2026-10-08T21:40:15+00:00",
@@ -2762,5 +2808,5 @@
   "status": "active",
   "title": "Ship PR4 reconciliation",
   "track_id": "gt-join-ace25278ce8c819c1b7bafd74119b3b0",
-  "updated_at": "2026-10-21T01:12:38+00:00"
+  "updated_at": "2026-11-01T04:28:00+00:00"
 }
