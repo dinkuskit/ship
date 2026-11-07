@@ -5,8 +5,9 @@ name: Repository contract
 # type-checks and builds the Registry plugin, runs the 128 KiB bundle check and the plugin's
 # tests against stand-ins for DinkusKit.com and hosted Ship. No secret is passed in and nothing
 # here reaches DinkusKit.com, ship.dinkuskit.com, Pitney Bowes or a store, so a run can never
-# buy, print or cancel a label. CI (ci.yml) keeps the hosted service's checks and the dry
-# release preparation; bin/verify-ship full runs those locally.
+# buy, print or cancel a label. This job also checks release-script syntax and prepares a
+# dry release from that same plugin build. CI (ci.yml) keeps the hosted service's checks;
+# bin/verify-ship full runs the plugin, service and dry preparation locally.
 on:
   pull_request:
   push:
@@ -37,4 +38,12 @@ jobs:
           node-version-file: .nvmrc
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: |
+          set -euo pipefail
+          for file in scripts/*.mjs .github/scripts/*.mjs; do
+            node --check "$file"
+          done
       - run: bin/verify-ship quick
+      # Reuse quick's fresh, size-checked build for the release workflow's dry preparation.
+      # The checkout's version routes to dinkus-ship; a beta version routes to dinkus-ship-beta.
+      - run: node .github/scripts/prepare-emdash-release.mjs --out-dir .emdash-release
