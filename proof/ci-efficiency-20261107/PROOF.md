@@ -45,7 +45,7 @@ it was not counted as a successful proof.
 The real dry preparation produced the Registry tarball from those unchanged
 outputs. Existing preparation checks still reject missing or mismatched builds.
 
-## Validation and pending measurement
+## Validation
 
 `bin/verify-ship full` passed after the workflow edits: 67 Node cases, 86 service
 cases, feature-map validation, typechecking, plugin size checks, both service
@@ -56,11 +56,40 @@ speed comparison because the local full command is unchanged.
 
 The copied syntax loop passed. Parsed workflow comparison confirmed that only
 the duplicate job and the two moved steps changed; other jobs and workflow
-controls match the base. Exact pinned actionlint remains a hosted check; no
-local binary was available.
+controls match the base. Pinned actionlint passed in the measured candidate
+Workflow-validation jobs; no local binary was available.
 
-Hosted B,C,C,B qualification remains pending. Require at least 15 seconds and
+The predeclared hosted B,C,C,B threshold required at least 15 seconds and
 20% lower median summed allocated job time across CI and Repository contract,
 with combined completion time regressing no more than `max(2 seconds, 5%)`.
-Retain all test identities and failures. Queue, job allocation, elapsed time and
-any billing claim are separate; no measured CI or monetary saving is claimed yet.
+
+## Hosted measurement
+
+Baseline source is the base above; candidate source is
+`7cfdee0218673a74bbc964b169ed5fb8fadc51fd`. All four samples passed every
+workflow job: 67 Node cases with zero failures/skips, 86 service cases, and
+the 15 release-authority scenarios within the unchanged Node suite. Both raw
+bundle checks passed with `outboundExceptJwks: 0` in every sample.
+
+| Sample | CI attempt | Repository-contract attempt | Sum of job seconds | Combined elapsed seconds |
+| --- | --- | --- | ---: | ---: |
+| B1 | [2](https://github.com/dinkuskit/ship/actions/runs/41310487874/attempts/2) | [2](https://github.com/dinkuskit/ship/actions/runs/41310487840/attempts/2) | 89 | 39 |
+| C1 | [1](https://github.com/dinkuskit/ship/actions/runs/42386788653/attempts/1) | [1](https://github.com/dinkuskit/ship/actions/runs/42386788643/attempts/1) | 63 | 39 |
+| C2 | [2](https://github.com/dinkuskit/ship/actions/runs/42386788653/attempts/2) | [2](https://github.com/dinkuskit/ship/actions/runs/42386788643/attempts/2) | 57 | 31 |
+| B2 | [3](https://github.com/dinkuskit/ship/actions/runs/41310487874/attempts/3) | [3](https://github.com/dinkuskit/ship/actions/runs/41310487840/attempts/3) | 94 | 43 |
+
+Median allocated job time fell **91.5 → 60 seconds**, a **31.5-second / 34.43%**
+reduction. Median combined elapsed time fell **41 → 35 seconds**, a
+**6-second / 14.63%** reduction. This comparison meets the declared threshold.
+The allocated job count fell from four to three: the removed duplicate job
+took 24 and 22 seconds in the baselines. Other jobs also varied, so the entire
+observed delta cannot be attributed solely to that removal.
+
+Job time sums each job's recorded start-to-end interval across these two
+workflows. Combined elapsed runs from the earlier recorded workflow start to
+the last job end; it includes delays after that start, but not preceding queue
+time. These are two samples per variant on different hosted VMs, with
+second-resolution timestamps and uncontrolled cache/network variation. They
+do not establish long-term latency, CPU or invoice savings. This proof-only
+update preserves the measured workflow bytes; final-head CI and review remain
+separate gates.
