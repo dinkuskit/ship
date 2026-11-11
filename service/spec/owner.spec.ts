@@ -187,6 +187,21 @@ test("signing in goes through DinkusKit.com with PKCE and comes back to the page
   expect(await page.text()).toContain("owner@example.test");
 });
 
+test("settings labels identify distinct ship-from and box-name controls", async () => {
+  const cookie = await signedIn();
+  const response = await request("GET", `/stores/${site}/settings`, { cookie });
+  expect(response.status).toBe(200);
+  const html = await response.text();
+  const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map(match => match[1]);
+  expect(new Set(ids).size).toBe(ids.length);
+  const nameId = html.match(/<label for="([^"]+)">Name<\/label>/)![1];
+  const boxId = html.match(/<label for="([^"]+)">Box name<\/label>/)![1];
+  expect(boxId).not.toBe(nameId);
+  // Labels change their DOM targets, not the existing POST field names.
+  expect(html).toContain(`<input id="${nameId}" name="name"`);
+  expect(html).toContain(`<input id="${boxId}" name="name"`);
+});
+
 test("a callback without the browser's sign-in cookie offers to start again", async () => {
   const response = await request("GET", "/auth/callback?code=one-time&state=elsewhere");
   expect(response.status).toBe(400);
