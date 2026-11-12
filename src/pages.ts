@@ -192,10 +192,14 @@ function labelForm(view: OrderView): Block[] {
 export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
   const { order, settings, siteId } = view;
   const pages = shipPages(siteId), label = order.label;
+  const missingWeight = order.lines.some(line => line.weightOz === null);
   const blocks: Block[] = [header("Shipments"), { type: "actions", elements: [{ type: "button", label: "Back to Shipments", action_id: "list" }] }, header(`Order ${orderName(order)}`)];
   if (order.test) blocks.push(banner("alert", "TEST order", "Nothing ships and nothing is charged. A TEST order gets a free Pitney Bowes sandbox label, or a practice label, never live postage."));
   if (view.failure) blocks.push(banner("error", label ? "Not done" : "No label bought", view.failure));
-  blocks.push(fields(["Ship to", oneLine(order)], ["Items", items(order)], ["Items' weight", `${order.itemsWeightOz} oz`], ["Status", status(order)]));
+  blocks.push(fields(["Ship to", oneLine(order)], ["Items", items(order)], ["Items' weight", `${order.itemsWeightOz} oz${missingWeight ? " (incomplete)" : ""}`], ["Status", status(order)]));
+  if (missingWeight && !label && order.status === "processing") {
+    blocks.push(banner("alert", "Item weights missing", "Some items have no weight in Commerce. Weigh the whole package and update Package weight before checking prices or buying a label."));
+  }
   if (order.addressProblem && !label) {
     blocks.push(banner("error", "This address cannot take a label yet", `${order.addressProblem} Commerce sends Ship the corrected address.`));
   }
