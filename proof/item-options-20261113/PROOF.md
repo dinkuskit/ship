@@ -22,3 +22,20 @@ Tests: `service/spec/intake.spec.ts` (kept, trimmed; a line break, over 200
 characters or a non-string is dropped and the order is still taken),
 `service/spec/pages.spec.ts` (grey line, escaped), `tests/admin.test.mjs`
 (Item cell text; `null` and missing `options` show the name alone).
+
+## Upgrade compatibility
+
+No storage schema changes: `options` is one more optional key inside the order
+record JSON, and nothing is migrated. Proven in the Workers test runtime
+(`@cloudflare/vitest-plugin`, real Durable Object SQLite storage):
+
+- `service/spec/admin.spec.ts` "orders, labels and settings stored before item
+  options keep working...": a store with an order, a bought label, a ship-from
+  address and a box; a row written in the previous format (no `options` key,
+  checked) is read through `GET /v1/admin/orders/:id` with `options: null`; the
+  earlier order keeps its bought label and settings; a later Commerce version
+  with options comes back through the admin routes; the old label still prints
+  through its five-minute link and cancels.
+- `service/spec/owner.spec.ts`: Ship's own signed-in order page
+  (`GET /stores/:site/orders/:id`) shows `Size: M` / `Size: L` under the tee
+  names, and an order without options renders as before.

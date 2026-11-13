@@ -864,3 +864,16 @@ test("an answer Ship cannot read as a label says which part was missing, in plai
     expect(text).not.toContain("token=secret");
   }
 });
+
+test("Ship's own order page shows the options Commerce sent under each item, and an order sent without them as before (commerce#264)", async () => {
+  const cookie = await signedIn();
+  await sendOrder({ lines: [
+    { catalogItemId: "item_tee_m", name: "Wrong Turn Tee", quantity: 1, weightOz: 6.5, options: "Size: M" },
+    { catalogItemId: "item_tee_l", name: "Wrong Turn Tee", quantity: 1, weightOz: 6.5, options: "Size: L" }] });
+  await sendOrder({ orderId: "order:def", number: 1002 });
+  const tees = await (await request("GET", `/stores/${site}/orders/order%3Aabc`, { cookie })).text();
+  expect(tees).toContain('<td>Wrong Turn Tee<br><span class="muted">Size: M</span></td>');
+  expect(tees).toContain('<td>Wrong Turn Tee<br><span class="muted">Size: L</span></td>');
+  const mug = await (await request("GET", `/stores/${site}/orders/order%3Adef`, { cookie })).text();
+  expect(mug).toContain("<td>Demo Mug</td>");
+});
