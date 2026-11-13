@@ -194,12 +194,12 @@ export const ROWS_SHOWN = 50;
 const more = (total: number, noun: string, plural: string): Block[] => total > ROWS_SHOWN
   ? [context(`Plus ${total - ROWS_SHOWN} more ${total - ROWS_SHOWN === 1 ? noun : plural}. Open in Ship lists every ${noun}.`)] : [];
 
-/** Every label Ship made for the order, newest first, as one table (the live one included), cut at ROWS_SHOWN. */
+/** Every label Ship made for the order as one table (the live one included), newest first whatever order Ship sends them in, cut at ROWS_SHOWN. */
 function labelsTable(labels: Label[]): Block {
   return { type: "table", page_action_id: "labels", columns: [
     { key: "bought", label: "Bought" }, { key: "service", label: "Service" }, { key: "tracking", label: "Tracking number" },
     { key: "status", label: "Status" },
-  ], rows: labels.slice(0, ROWS_SHOWN).map(label => ({
+  ], rows: [...labels].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, ROWS_SHOWN).map(label => ({
     bought: day(label.createdAt), service: `${SERVICES[label.service] ?? label.service}, ${postage(label)}`, tracking: grouped(label), status: dotted(labelStatus(label)),
   })) };
 }

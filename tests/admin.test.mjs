@@ -451,9 +451,15 @@ test("an order at Ship's 500-line limit still renders, with Print and Cancel, an
   assert.match(actions, /"label":"Cancel label"/);
   const history = opened.blocks.find(block => block.type === "table" && block.page_action_id === "labels");
   assert.equal(history.rows.length, 31);
-  assert.doesNotMatch(actions, /more labels/);  const relabeled = order({ labels: Array.from({ length: 60 }, (_, index) => label({ labelId: `old_${index}`, status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z" })) });
+  assert.doesNotMatch(actions, /more labels/);  // Hosted Ship sends labels oldest first; the table keeps the 50 newest, newest at the top.
+  const relabeled = order({ labels: Array.from({ length: 60 }, (_, index) => label({ labelId: `old_${index}`, tracking: `9400${String(index).padStart(18, "0")}`,
+    createdAt: new Date(Date.UTC(2026, 9, 1) + index * 3_600_000).toISOString(), status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z" })) });
   const many = await host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: relabeled, settings } } }).page({ type: "block_action", action_id: "open", value: "order:abc" });
-  assert.equal(many.blocks.find(block => block.type === "table" && block.page_action_id === "labels").rows.length, ITEMS_SHOWN);
+  const shown = many.blocks.find(block => block.type === "table" && block.page_action_id === "labels").rows;
+  assert.equal(shown.length, ITEMS_SHOWN);
+  const grouped = index => `9400${String(index).padStart(18, "0")} (test, not trackable)`;
+  assert.deepEqual([shown[0].tracking, shown.at(-1).tracking], [grouped(59), grouped(10)]);
+  assert.equal(relabeled.labels[0].labelId, "old_0", "the order's own label list is left as Ship sent it");
   assert.match(text(many), /Plus 10 more labels\. Open in Ship lists every label\./);
 });
 
