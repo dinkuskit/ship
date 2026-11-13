@@ -335,7 +335,7 @@ test("the store key goes only to DinkusKit.com, and the pass goes only to Ship",
   const page = text(await h.page(load));
   assert.match(page, /#1001 \(TEST\)/);
   assert.match(page, /"status":"No label"/);
-  assert.match(page, /"items":"1 × Hat, \+3 more","status":"Label bought"/);
+  assert.match(page, /"label":"#1002 \(TEST\)","action_id":"open","value":"order:def"\},"to":"Demo Shopper · Testville, CA","status":"Label bought"/);
   assert.equal(h.calls.length, 2);
   assert.deepEqual(h.calls[0], { url: "https://dinkuskit.com/api/store-passes", method: "POST", authorization: `Bearer ${KEY}`, body: { site_id: SITE, scope: "ship:admin", audience: "dinkus-ship" } });
   assert.equal(h.calls[1].url, "https://ship.dinkuskit.com/v1/admin/orders");
@@ -436,7 +436,8 @@ test("missing item weights are incomplete, not zero; the warning keeps the label
     const warning = opened.blocks.find(block => block.type === "banner" && block.title === "Item weights missing");
     assert.ok(warning);
     assert.match(text(warning), /Weigh the whole package and update Package weight/);
-    assert.match(text(opened), new RegExp(`${known} oz \\(incomplete\\)`));
+    assert.match(text(opened), known ? /Items weigh 1 lb 9 oz/ : /No item weights in Commerce/);
+    assert.match(text(opened), /"each":"Not set","total":"Not set"/);
     const form = opened.blocks.find(block => block.type === "form");
     assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, String(known + box.weightOz));
     assert.equal(form.submit.label, "See prices");
@@ -457,8 +458,8 @@ test("known item weights keep the old total; labelled and completed orders need 
     const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
     assert.doesNotMatch(text(opened), /Item weights missing|Weigh the whole package/);
     if (current.itemsWeightOz === 25) {
-      assert.match(text(opened), /25 oz/);
-      assert.doesNotMatch(text(opened), /incomplete/);
+      assert.match(text(opened), /Items weigh 1 lb 9 oz/);
+      assert.doesNotMatch(text(opened), /Not set|no weight/);
     }
   }
 });
@@ -486,7 +487,8 @@ test("opening an order shows the form with the items plus box weight, then price
   assert.equal(buy.submit.action_id, "buy:1:order%3Aabc");
   assert.equal(buy.fields[1].initial_value, "30");
   const service = buy.fields.find(field => field.action_id === "service");
-  assert.deepEqual(service.options.map(option => option.label), ["USPS Ground Advantage: $5.10", "USPS Priority Mail: $9.35", "USPS Priority Mail Express: not available for this package"]);
+  assert.deepEqual(service.options.map(option => option.label), ["USPS Ground Advantage · $5.10", "USPS Priority Mail · $9.35", "USPS Priority Mail Express · not available for this package"]);
+  assert.equal(service.type, "radio", "every service and its price stay in view, as Shopify and WooCommerce Shipping list rates");
 
   const bought = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, service: "PM", kind: "sandbox" } });
   assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", by: "staff@example.test" });
@@ -509,7 +511,7 @@ test("a labelled order shows the label with a five-minute print link and a guard
   assert.equal(cancel.action_id, "cancel:order%3Aabc");
   assert.equal(cancel.value, "label_1");
   assert.equal(cancel.confirm.style, "danger");
-  assert.match(text(page), /"label":"Status","value":"Label bought"/);
+  assert.match(text(page), /"text":"2 items · Label bought"/);
   assert.match(text(page), /SANDBOX-TRACKING-A \(test, not trackable\)/);
   assert.ok(!actions.some(element => element.label === "Track on USPS"));
   assert.ok(!page.blocks.some(block => block.type === "form"));
@@ -532,16 +534,16 @@ test("cancelling a live label promises the USPS refund; a cancelled sandbox labe
   const cancelled = await h.page({ type: "block_action", action_id: "cancel:order%3Aabc", value: "label_2" });
   assert.equal(cancelled.toast.message, "Label cancelled. USPS refunds the postage account within about 14 days.");
   const sandboxRow = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc" }));
-  assert.match(sandboxRow, /"label":"Cancelled","value":"2026-10-19 22:30"/);
-  assert.doesNotMatch(sandboxRow, /2026-10-19 22:30, refund/);
+  assert.match(sandboxRow, /"tracking":"SANDBOX-TRACKING-A \(test, not trackable\)","status":"Cancelled"\}/);
+  assert.doesNotMatch(sandboxRow, /SANDBOX-TRACKING-A \(test, not trackable\)","status":"Cancelled, refund/);
 
   const after = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false, label: null, labels: [sandboxCancelled, liveCancelled] }), settings } } });
   const page = text(await after.page({ type: "block_action", action_id: "open", value: "order:abc" }));
-  assert.match(page, /"label":"Cancelled","value":"2026-10-19 22:40, refund initiated"/);
-  assert.doesNotMatch(page, /22:30, refund/);
+  assert.match(page, /"tracking":"9400 1000 0000 0000 0000 02","status":"Cancelled, refund initiated"/);
+  assert.match(page, /"tracking":"SANDBOX-TRACKING-A \(test, not trackable\)","status":"Cancelled"\}/);
 });
 
-test("a live label's tracking number links to USPS, for the live label and the earlier ones", async () => {
+test("the live label's tracking number links to USPS, and every label's number shows in the Labels table", async () => {
   const live = label({ labelId: "label_2", test: false, tracking: "9400100000000000000002" });
   const old = label({ labelId: "label_1", test: false, tracking: "9400100000000000000001", status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z", refund: "INITIATED" });
   const h = host({ ship: {
@@ -550,7 +552,8 @@ test("a live label's tracking number links to USPS, for the live label and the e
   } });
   const page = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
   const links = text(page).match(/https:\/\/tools\.usps\.com\/go\/TrackConfirmAction\?tLabels=[0-9]+/g);
-  assert.deepEqual(links, ["https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000002", "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000001"]);
+  assert.deepEqual(links, ["https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000002"]);
+  assert.match(text(page), /"tracking":"9400 1000 0000 0000 0000 01","status":"Cancelled, refund initiated"/);
   assert.match(text(page), /\$9\.35 from your Pitney Bowes postage account/);
 });
 
@@ -680,7 +683,7 @@ test("without a usable request URL no page is sent, and a list without an open o
   for (const requestUrl of ["", "http://shop.example.test/_emdash/api/plugins/dinkus-ship-1/admin", "https://shop.example.test/other"]) {
     const h = host({ requestUrl, ship: { "GET /v1/admin/orders": { orders: [row()], settings, open: null } } });
     const page = text(await h.page(load));
-    assert.match(page, /Demo Mug/);
+    assert.match(page, /"label":"#1001 \(TEST\)","action_id":"open"/);
     assert.doesNotMatch(page, /prices:/);
     assert.ok(h.calls.every(call => call.adminPage === undefined), requestUrl);
   }
@@ -701,8 +704,8 @@ test("a live label's delivery shows in the list and on the order, and a label wi
   assert.doesNotMatch(list, /Delivery attempted/, "the list keeps the one word; the order page has the reason");
   assert.match(list, /"Label bought"/);
   const page = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc", page: "/shipping" }));
-  assert.match(page, /"label":"Delivery","value":"Delivered, 2026-10-22 18:02 UTC"/);
-  assert.match(page, /"label":"Status","value":"Delivered"/);
+  assert.match(page, /"text":"Delivered · Oct 22, 2026, 6:02 PM UTC"/);
+  assert.match(page, /"text":"2 items · Delivered"/);
 });
 
 test("a store with more orders than EmDash can draw at once gets them 50 at a time, newest first", async () => {
