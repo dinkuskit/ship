@@ -41,6 +41,8 @@ A store upgraded from `0.2.1` does not use its old pasted key. The Shipments pag
 
 Within a few minutes Commerce picks the label up from Ship and marks the order Completed with USPS and the tracking number, the same as when the label is bought on Ship's own page. **Cancel label** cancels the label only; it does not cancel or refund the Commerce order. Payment refunds belong to the payment and order workflow.
 
+If any item has no weight in Commerce, the plugin marks the items' weight as incomplete and warns you to weigh the whole package. The prefilled package weight includes only known item weights and the empty box; update it before checking prices or buying a label.
+
 On Ship's own order page, **Labels** keeps the full tracking number, package, postage and **Open PDF to print** / **Cancel label** actions together. On phones each label's fields stack rather than pushing its actions offscreen. Printing reopens the label already bought; it does not buy another one.
 
 If a label purchase's answer is lost, Ship reconciles the original purchase before allowing a new one.

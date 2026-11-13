@@ -207,8 +207,8 @@ function postageBox(base: string, email: string, settings: Settings): string {
 
 export function settingsPage(site: string, email: string, settings: Settings, error?: string): string {
   const from = settings.shipFrom;
-  const field = (name: string, label: string, value = "", required = true) =>
-    `<div><label for="${name}">${esc(label)}</label><input id="${name}" name="${name}" value="${esc(value)}"${required ? " required" : ""}></div>`;
+  const field = (name: string, label: string, value = "", required = true, id = name) =>
+    `<div><label for="${id}">${esc(label)}</label><input id="${id}" name="${name}" value="${esc(value)}"${required ? " required" : ""}></div>`;
   const base = `/stores/${encodeURIComponent(site)}/settings`;
   const boxes = settings.boxes.map(box => `<tr><td>${esc(box.name)}</td><td>${box.lengthIn} × ${box.widthIn} × ${box.heightIn} in</td><td>${box.weightOz} oz</td>
     <td><form class="inline" method="post" action="${base}/boxes/${encodeURIComponent(box.boxId)}/remove"><button class="secondary" style="margin:0">Remove</button></form></td></tr>`).join("");
@@ -224,7 +224,7 @@ export function settingsPage(site: string, email: string, settings: Settings, er
     <form method="post" action="${base}/reply-to">${field("replyTo", "Reply-to email", settings.replyTo ?? "")}
       <button>Save reply-to email</button></form>
     <h2>Box sizes</h2>${boxes ? `<table><thead><tr><th>Name</th><th>Size</th><th>Empty weight</th><th></th></tr></thead><tbody>${boxes}</tbody></table>` : '<p class="muted">No box sizes yet.</p>'}
-    <form method="post" action="${base}/boxes">${field("name", "Box name")}
+    <form method="post" action="${base}/boxes">${field("name", "Box name", "", true, "boxName")}
       <div class="row">${field("lengthIn", "Length (in)")}${field("widthIn", "Width (in)")}${field("heightIn", "Height (in)")}${field("weightOz", "Empty weight (oz)", "0")}</div>
       <button>Add box size</button></form>`, { site, email });
 }

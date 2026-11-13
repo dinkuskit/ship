@@ -424,6 +424,45 @@ test("DinkusKit.com's refusals and bad passes stop the click with a plain reason
   assert.match(text(down), /DinkusKit.com could not be reached/);
 });
 
+test("missing item weights are incomplete, not zero; the warning keeps the label form through validation", async () => {
+  for (const [lines, known] of [
+    [[{ name: "Demo Tee", quantity: 2, weightOz: null }], 0],
+    [[{ name: "Demo Mug", quantity: 2, weightOz: 12.5 }, { name: "Demo Tee", quantity: 1, weightOz: null }], 25],
+  ]) {
+    const current = order({ lines, itemsWeightOz: known });
+    const before = structuredClone(current);
+    const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: current, settings } } });
+    const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+    const warning = opened.blocks.find(block => block.type === "banner" && block.title === "Item weights missing");
+    assert.ok(warning);
+    assert.match(text(warning), /Weigh the whole package and update Package weight/);
+    assert.match(text(opened), new RegExp(`${known} oz \\(incomplete\\)`));
+    const form = opened.blocks.find(block => block.type === "form");
+    assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, String(known + box.weightOz));
+    assert.equal(form.submit.label, "See prices");
+    assert.ok(opened.blocks.indexOf(warning) < opened.blocks.indexOf(form));
+    const refused = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: "weigh me", kind: "sandbox" } });
+    assert.match(text(refused), /Item weights missing/);
+    assert.match(text(refused), /Enter the package weight in ounces/);
+    assert.ok(refused.blocks.some(block => block.type === "form"));
+    assert.deepEqual(current, before, "the view never fills missing item weights or changes the order");
+    assert.ok(h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com")).every(call => call.method === "GET"), "opening and local validation send no price or label request");
+  }
+});
+
+test("known item weights keep the old total; labelled and completed orders need no new weighing prompt", async () => {
+  for (const current of [order(), order({ label: label(), lines: [{ name: "Demo Tee", quantity: 1, weightOz: null }], itemsWeightOz: 0 }),
+    order({ status: "completed", lines: [{ name: "Demo Tee", quantity: 1, weightOz: null }], itemsWeightOz: 0 })]) {
+    const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: current, settings } } });
+    const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+    assert.doesNotMatch(text(opened), /Item weights missing|Weigh the whole package/);
+    if (current.itemsWeightOz === 25) {
+      assert.match(text(opened), /25 oz/);
+      assert.doesNotMatch(text(opened), /incomplete/);
+    }
+  }
+});
+
 test("opening an order shows the form with the items plus box weight, then prices, then buys with who pressed the button", async () => {
   const sent = [];
   const h = host({ ship: {
