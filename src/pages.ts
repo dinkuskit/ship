@@ -57,8 +57,8 @@ function price(label: Label): string {
   return label.priceCents === null ? "Charged to your Pitney Bowes postage account" : `${money(label.priceCents)} from your Pitney Bowes postage account`;
 }
 
-const DELIVERY: Record<Delivery["state"], string> = { in_transit: "In transit", out_for_delivery: "Out for delivery", delivered: "Delivered", problem: "Problem" };
-/** "Delivered", or "Problem: Delivery attempted", with the scan's day when asked. */
+const DELIVERY: Record<Delivery["state"], string> = { in_transit: "In transit", out_for_delivery: "Out for delivery", delivered: "Delivered", problem: "Delivery problem" };
+/** "Delivered", or "Delivery problem: Delivery attempted", with the scan's day when asked. */
 function deliveryText(delivery: Delivery, withNote = false): string {
   const phrase = withNote && delivery.note && delivery.state === "problem" ? `${DELIVERY[delivery.state]}: ${delivery.note}` : DELIVERY[delivery.state];
   return withNote ? `${phrase}, ${delivery.at.replace("T", " ").slice(0, 16)} UTC` : phrase;
@@ -71,7 +71,18 @@ function status(order: ShipOrder | ShipOrderRow): string {
   if (labelStatus === "bought") return "Label bought";
   if (order.addressProblem && order.status === "processing") return "Fix address";
   if (labelStatus === "cancelled") return "Label cancelled";
-  return order.status === "completed" ? "Completed" : "No label";
+  return order.status === "completed" ? "Completed" : "Needs label";
+}
+
+/**
+ * A status with a coloured dot, as Shopify and WooCommerce colour theirs: yellow waits on you, red needs fixing,
+ * blue is on its way, green arrived, white is done elsewhere. Block Kit 1.4 draws every badge black, so the colour
+ * travels in the text until EmDash lets a table badge pick a colour.
+ */
+function dotted(text: string): string {
+  const dot = /^Needs label/.test(text) ? "🟡" : /^(Fix address|Delivery problem|Label cancelled|Cancelled)/.test(text) ? "🔴"
+    : /^Delivered/.test(text) ? "🟢" : /^(Label bought|Bought|In transit|Out for delivery)/.test(text) ? "🔵" : "⚪";
+  return `${dot} ${text}`;
 }
 
 /**
@@ -152,11 +163,11 @@ export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipS
   blocks.push({ type: "table", page_action_id: "list", empty_text: "No paid orders have reached Ship yet. Commerce sends each paid order with a US address here within a few minutes.",
     columns: [
       // The order number opens the order, as in Shopify's list; blue while it waits for a label. Three columns fit a phone.
-      { key: "order", label: "Order", format: "element" }, { key: "to", label: "Ship to" }, { key: "status", label: "Status", format: "badge" },
+      { key: "order", label: "Order", format: "element" }, { key: "to", label: "Ship to" }, { key: "status", label: "Status" },
     ],
     ...(next ? { next_cursor: next } : {}),
     rows: shown.map(order => ({
-      order: { type: "button", label: orderName(order), action_id: "open", value: order.orderId, ...(toShip(order) ? { style: "primary" } : {}) }, to: `${order.shipTo.name} · ${order.shipTo.city}${order.shipTo.region ? `, ${order.shipTo.region}` : ""}`, status: status(order),
+      order: { type: "button", label: orderName(order), action_id: "open", value: order.orderId,  }, to: `${order.shipTo.name} · ${order.shipTo.city}${order.shipTo.region ? `, ${order.shipTo.region}` : ""}`, status: dotted(status(order)),
     })),
   });
   if (orders.length > ORDERS_PER_PAGE) blocks.push(context(`Orders ${start + 1} to ${start + shown.length} of ${orders.length}, newest first. Refresh goes back to the newest.`));
@@ -177,9 +188,9 @@ function labelStatus(label: Label): string {
 function labelsTable(labels: Label[]): Block {
   return { type: "table", page_action_id: "labels", columns: [
     { key: "bought", label: "Bought" }, { key: "service", label: "Service" }, { key: "tracking", label: "Tracking number" },
-    { key: "status", label: "Status", format: "badge" },
+    { key: "status", label: "Status" },
   ], rows: labels.map(label => ({
-    bought: day(label.createdAt), service: `${SERVICES[label.service] ?? label.service}, ${postage(label)}`, tracking: grouped(label), status: labelStatus(label),
+    bought: day(label.createdAt), service: `${SERVICES[label.service] ?? label.service}, ${postage(label)}`, tracking: grouped(label), status: dotted(labelStatus(label)),
   })) };
 }
 
@@ -252,14 +263,15 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
         section(missing ? `${missing === 1 ? "1 item has" : `${missing} items have`} no weight: weigh the package` : "Plus the box, added when you buy")],
   ] }, { type: "divider" });
   if (label) {
+    // Print label is the one main button, beside the line saying what was bought, as Complete order sits on Commerce's page.
+    const bought: Block = { type: "section", text: `Label bought ${when(label.createdAt)} · ${price(label)}`, ...(view.printUrl ? { accessory: link("Print label", view.printUrl, "primary") } : {}) };
     const actions: Block & { type: "actions" } = { type: "actions", elements: [] };
-    if (view.printUrl) actions.elements.push(link("Print label", view.printUrl, "primary"));
     if (!label.test) actions.elements.push(link("Track on USPS", trackUrl(label)));
-    actions.elements.push({ type: "button", label: "Cancel label", action_id: `cancel:${encodeURIComponent(order.orderId)}`, value: label.labelId, style: "danger",
+    actions.elements.push({ type: "button", label: "Cancel label", action_id: `cancel:${encodeURIComponent(order.orderId)}`, value: label.labelId,
       confirm: { title: "Cancel this label?", text: label.practice ? "The practice label is thrown away. The order stays as it is in Commerce." :
         label.test ? "The sandbox label is voided with Pitney Bowes. The order stays as it is in Commerce." :
         "The label is voided with Pitney Bowes and USPS refunds your postage account within about 14 days. The order stays as it is in Commerce.", confirm: "Cancel label", deny: "Keep label", style: "danger" } });
-    blocks.push(section(`Label bought ${when(label.createdAt)} · ${price(label)}`), actions,
+    blocks.push(bought, actions,
       context(view.printUrl ? "Print label opens the PDF in a new tab. The link works for 5 minutes; open the order again for a fresh one."
         : "Ship could not make a print link just now. Open the order again, or print from Ship's own page."));
   } else if (order.status === "completed") {

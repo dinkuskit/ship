@@ -34,13 +34,13 @@ A store upgraded from `0.2.1` does not use its old pasted key. The Shipments pag
 
 ## Buy a label
 
-1. Open **Dinkus Ship > Shipments** in the store admin. Counts at the top show how many orders are **To ship**, need you to **Fix address**, and are **On the way**. Each row shows the order number, who it goes to (name and city) and its status. An order still waiting for a label has a blue order number; press it to open the order.
+1. Open **Dinkus Ship > Shipments** in the store admin. Counts at the top show how many orders are **To ship**, need you to **Fix address**, and are **On the way**. Each row shows the order number (press it to open the order), who it goes to (name and city) and a status with a coloured dot: yellow **Needs label**; red **Fix address**, **Label cancelled** or **Delivery problem**; blue **Label bought**, **In transit** or **Out for delivery**; green **Delivered**; white **Completed** (finished in Commerce without a Ship label).
 2. The order page shows **Ship to** on its address lines beside **Package** (the item count and what the items weigh), then the items with their weights. Weights read in pounds and ounces, such as 1 lb 4.5 oz.
 3. Under **Buy a label**, check the box and the package weight in ounces (items plus box), then press **See prices**. Pick a USPS service from the list, which shows each service with its price: USPS Ground Advantage (the default), Priority Mail or Priority Mail Express.
 4. Press **Buy label**. Nothing is bought without this press.
 5. Press **Print label**. The PDF opens in a new tab through a link that works for five minutes and only for that label.
 
-Once a label is bought, the order page shows the **Label** beside Ship to (service, tracking number, box and weight, and where the parcel is), then the date and price with **Print label**, **Track on USPS** and **Cancel label**. The **Labels** table lists every label Ship made for the order, cancelled ones included.
+Once a label is bought, the order page shows the **Label** beside Ship to (service, tracking number, box and weight, and where the parcel is), then the date and price with **Print label** beside them, and **Track on USPS** and **Cancel label** below. The **Labels** table lists every label Ship made for the order, cancelled ones included.
 
 Within a few minutes Commerce picks the label up from Ship and marks the order Completed with USPS and the tracking number, the same as when the label is bought on Ship's own page. **Cancel label** cancels the label only; it does not cancel or refund the Commerce order. Payment refunds belong to the payment and order workflow.
 

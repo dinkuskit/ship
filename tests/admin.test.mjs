@@ -334,8 +334,8 @@ test("the store key goes only to DinkusKit.com, and the pass goes only to Ship",
   const h = host({ ship: { "GET /v1/admin/orders": { orders: [row(), row({ orderId: "order:def", number: 1002, labelStatus: "bought", items: "1 × Hat, +3 more" })], settings } } });
   const page = text(await h.page(load));
   assert.match(page, /#1001 \(TEST\)/);
-  assert.match(page, /"status":"No label"/);
-  assert.match(page, /"label":"#1002 \(TEST\)","action_id":"open","value":"order:def"\},"to":"Demo Shopper · Testville, CA","status":"Label bought"/);
+  assert.match(page, /"status":"🟡 Needs label"/);
+  assert.match(page, /"label":"#1002 \(TEST\)","action_id":"open","value":"order:def"\},"to":"Demo Shopper · Testville, CA","status":"🔵 Label bought"/);
   assert.equal(h.calls.length, 2);
   assert.deepEqual(h.calls[0], { url: "https://dinkuskit.com/api/store-passes", method: "POST", authorization: `Bearer ${KEY}`, body: { site_id: SITE, scope: "ship:admin", audience: "dinkus-ship" } });
   assert.equal(h.calls[1].url, "https://ship.dinkuskit.com/v1/admin/orders");
@@ -504,8 +504,9 @@ test("a labelled order shows the label with a five-minute print link and a guard
     "POST /v1/admin/labels/label_1/cancel": { labelId: "label_1", refund: "INITIATED" },
   } });
   const page = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
-  const actions = page.blocks.filter(block => block.type === "actions").flatMap(block => block.elements);
+  const actions = page.blocks.flatMap(block => block.type === "actions" ? block.elements : block.type === "section" && block.accessory ? [block.accessory] : []);
   const print = actions.find(element => element.label === "Print label");
+  assert.equal(page.blocks.find(block => block.accessory === print)?.type, "section", "Print label sits beside the Label bought line");
   assert.deepEqual(print.target, { kind: "external", url: "https://ship.dinkuskit.com/print/tok.sig" });
   const cancel = actions.find(element => element.label === "Cancel label");
   assert.equal(cancel.action_id, "cancel:order%3Aabc");
@@ -534,13 +535,13 @@ test("cancelling a live label promises the USPS refund; a cancelled sandbox labe
   const cancelled = await h.page({ type: "block_action", action_id: "cancel:order%3Aabc", value: "label_2" });
   assert.equal(cancelled.toast.message, "Label cancelled. USPS refunds the postage account within about 14 days.");
   const sandboxRow = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc" }));
-  assert.match(sandboxRow, /"tracking":"SANDBOX-TRACKING-A \(test, not trackable\)","status":"Cancelled"\}/);
-  assert.doesNotMatch(sandboxRow, /SANDBOX-TRACKING-A \(test, not trackable\)","status":"Cancelled, refund/);
+  assert.match(sandboxRow, /"tracking":"SANDBOX-TRACKING-A \(test, not trackable\)","status":"🔴 Cancelled"\}/);
+  assert.doesNotMatch(sandboxRow, /SANDBOX-TRACKING-A \(test, not trackable\)","status":"🔴 Cancelled, refund/);
 
   const after = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false, label: null, labels: [sandboxCancelled, liveCancelled] }), settings } } });
   const page = text(await after.page({ type: "block_action", action_id: "open", value: "order:abc" }));
-  assert.match(page, /"tracking":"9400 1000 0000 0000 0000 02","status":"Cancelled, refund initiated"/);
-  assert.match(page, /"tracking":"SANDBOX-TRACKING-A \(test, not trackable\)","status":"Cancelled"\}/);
+  assert.match(page, /"tracking":"9400 1000 0000 0000 0000 02","status":"🔴 Cancelled, refund initiated"/);
+  assert.match(page, /"tracking":"SANDBOX-TRACKING-A \(test, not trackable\)","status":"🔴 Cancelled"\}/);
 });
 
 test("the live label's tracking number links to USPS, and every label's number shows in the Labels table", async () => {
@@ -553,7 +554,7 @@ test("the live label's tracking number links to USPS, and every label's number s
   const page = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
   const links = text(page).match(/https:\/\/tools\.usps\.com\/go\/TrackConfirmAction\?tLabels=[0-9]+/g);
   assert.deepEqual(links, ["https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000002"]);
-  assert.match(text(page), /"tracking":"9400 1000 0000 0000 0000 01","status":"Cancelled, refund initiated"/);
+  assert.match(text(page), /"tracking":"9400 1000 0000 0000 0000 01","status":"🔴 Cancelled, refund initiated"/);
   assert.match(text(page), /\$9\.35 from your Pitney Bowes postage account/);
 });
 
@@ -606,7 +607,7 @@ test("a Completed order keeps its label's Print and Cancel, and gets no form", a
     "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
   } });
   const page = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
-  const actions = page.blocks.filter(block => block.type === "actions").flatMap(block => block.elements);
+  const actions = page.blocks.flatMap(block => block.type === "actions" ? block.elements : block.type === "section" && block.accessory ? [block.accessory] : []);
   assert.ok(actions.some(element => element.label === "Print label"));
   assert.ok(actions.some(element => element.label === "Cancel label"));
   assert.ok(!page.blocks.some(block => block.type === "form"));
@@ -699,10 +700,10 @@ test("a live label's delivery shows in the list and on the order, and a label wi
     "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/t", expiresAt: "2026-10-19T22:05:00.000Z" },
   } });
   const list = text(await h.page(load));
-  assert.match(list, /"Delivered"/);
-  assert.match(list, /"Problem"/);
+  assert.match(list, /"🟢 Delivered"/);
+  assert.match(list, /"🔴 Delivery problem"/);
   assert.doesNotMatch(list, /Delivery attempted/, "the list keeps the one word; the order page has the reason");
-  assert.match(list, /"Label bought"/);
+  assert.match(list, /"🔵 Label bought"/);
   const page = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc", page: "/shipping" }));
   assert.match(page, /"text":"Delivered · Oct 22, 2026, 6:02 PM UTC"/);
   assert.match(page, /"text":"2 items · Delivered"/);
