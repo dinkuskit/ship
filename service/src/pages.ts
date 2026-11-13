@@ -14,9 +14,21 @@ const STYLE = `
 @media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#ececf0;--muted:#a0a0a8;--line:#34343a;--accent:#6aa7ff;--warn:#ffcf8a;--warnbg:#3a2a10;--bad:#ff8a8f}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
 header{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-header nav{display:flex;gap:16px;align-items:center}main{max-width:880px;margin:0 auto;padding:16px}
+header nav{display:flex;gap:16px;align-items:center;flex-wrap:wrap;overflow-wrap:anywhere}main{max-width:880px;margin:0 auto;padding:16px}
 a{color:var(--accent)}h1{font-size:22px;margin:8px 0 16px}h2{font-size:17px;margin:24px 0 8px}
 table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 6px;border-bottom:1px solid var(--line);vertical-align:top}
+.label-history{overflow-wrap:anywhere}.label-field{display:none}
+.label-actions{display:flex;gap:8px 12px;flex-wrap:wrap;align-items:center}
+.label-actions a{display:inline-flex;align-items:center;min-height:44px}
+.label-actions button{margin:0;min-height:44px}
+@media (max-width:600px){
+.label-history thead{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.label-history tbody{display:block}
+.label-history tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px 16px;padding:12px 0;border-bottom:1px solid var(--line)}
+.label-history td{display:block;padding:0;border:0;min-width:0}
+.label-history td:first-child,.label-history td:nth-child(2),.label-history td:last-child{grid-column:1/-1}
+.label-field{display:block;font-weight:600;margin-bottom:2px}
+}
 .muted{color:var(--muted)}.tag{display:inline-block;padding:0 6px;border-radius:4px;border:1px solid var(--line);font-size:12px}
 .test{background:var(--warnbg);color:var(--warn);border-color:var(--warn)}.notice{background:var(--warnbg);color:var(--warn);padding:10px 12px;border-radius:6px;margin:12px 0}
 .error{color:var(--bad);font-weight:600}form.inline{display:inline}label{display:block;margin:8px 0 2px;font-weight:600}
@@ -84,12 +96,12 @@ const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 function labelRow(site: string, label: Label, current: boolean): string {
   const base = `/stores/${encodeURIComponent(site)}/labels/${encodeURIComponent(label.labelId)}`;
   const actions = label.status === "bought"
-    ? `<a href="${base}.pdf" target="_blank" rel="noopener">Open PDF to print</a>
-       <form class="inline" method="post" action="${base}/cancel"><button class="secondary" style="margin:0 0 0 12px">Cancel label</button></form>`
+    ? `<div class="label-actions"><a href="${base}.pdf" target="_blank" rel="noopener">Open PDF to print</a>
+       <form class="inline" method="post" action="${base}/cancel"><button class="secondary">Cancel label</button></form></div>`
     : `<span class="muted">Cancelled${label.refund && !label.test ? ". USPS refunds your postage account, which can take up to 14 days." : ""}</span>`;
-  return `<tr><td>${esc(SERVICES[label.service])}${label.practice ? ' <span class="tag test">PRACTICE</span>' : label.test ? ' <span class="tag test">TEST SANDBOX</span>' : ""}${current ? "" : ' <span class="muted">(older order version)</span>'}</td>
-    <td>${esc(label.tracking)}${label.delivery ? `<br><span class="muted">${esc(deliveryText(label.delivery))}, ${esc(label.delivery.at.replace("T", " ").slice(0, 16))} UTC</span>` : ""}</td><td>${esc(label.box.name)}, ${esc(label.weightOz)} oz</td>
-    <td>${label.priceCents === null ? '<span class="muted">—</span>' : `${money(label.priceCents)}${label.test ? ' <span class="muted">(sandbox, not charged)</span>' : ""}`}</td><td>${actions}</td></tr>`;
+  return `<tr role="row"><td role="cell"><span class="label-field" aria-hidden="true">Service</span>${esc(SERVICES[label.service])}${label.practice ? ' <span class="tag test">PRACTICE</span>' : label.test ? ' <span class="tag test">TEST SANDBOX</span>' : ""}${current ? "" : ' <span class="muted">(older order version)</span>'}</td>
+    <td role="cell"><span class="label-field" aria-hidden="true">Tracking</span>${esc(label.tracking)}${label.delivery ? `<br><span class="muted">${esc(deliveryText(label.delivery))}, ${esc(label.delivery.at.replace("T", " ").slice(0, 16))} UTC</span>` : ""}</td><td role="cell"><span class="label-field" aria-hidden="true">Package</span>${esc(label.box.name)}, ${esc(label.weightOz)} oz</td>
+    <td role="cell"><span class="label-field" aria-hidden="true">Postage</span>${label.priceCents === null ? '<span class="muted">—</span>' : `${money(label.priceCents)}${label.test ? ' <span class="muted">(sandbox, not charged)</span>' : ""}`}</td><td role="cell"><span class="label-field" aria-hidden="true">Actions</span>${actions}</td></tr>`;
 }
 
 /** What the label form shows besides the order: an error, the owner's last choices, prices. */
@@ -158,7 +170,7 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
       : `<p class="muted">${quotes ? "Prices come from your Pitney Bowes postage account." : "Check prices before buying, or buy at the price Pitney Bowes charges."} Postage is paid from your Pitney Bowes postage account.</p>
       <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> <button${blocked ? " disabled" : ""}>Buy label</button>`}</form>`;
   const labels = summary.labels.length
-    ? `<h2>Labels</h2><table><thead><tr><th>Service</th><th>Tracking</th><th>Package</th><th>Postage</th><th></th></tr></thead><tbody>${summary.labels.map(item => labelRow(site, item, item.version === order.version)).join("")}</tbody></table>`
+    ? `<h2 id="labels-heading">Labels</h2><table class="label-history" role="table" aria-labelledby="labels-heading"><thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Service</th><th role="columnheader" scope="col">Tracking</th><th role="columnheader" scope="col">Package</th><th role="columnheader" scope="col">Postage</th><th role="columnheader" scope="col">Actions</th></tr></thead><tbody role="rowgroup">${summary.labels.map(item => labelRow(site, item, item.version === order.version)).join("")}</tbody></table>`
     : "";
   return page(`Order ${orderName(order)}`, `<p><a href="/stores/${encodeURIComponent(site)}/orders">← Orders</a></p>
     <h1>Order ${esc(orderName(order))}${order.test ? ' <span class="tag test">TEST</span>' : ""}</h1>
