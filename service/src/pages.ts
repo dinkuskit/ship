@@ -125,7 +125,7 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
   const label = liveLabel(summary);
   const knownWeight = order.lines.reduce((sum, line) => sum + (line.weightOz ?? 0) * line.quantity, 0);
   const missingWeight = order.lines.some(line => line.weightOz === undefined);
-  const lines = order.lines.map(line => `<tr><td>${esc(line.name)}</td><td>${line.quantity}</td>
+  const lines = order.lines.map(line => `<tr><td>${esc(line.name)}${line.options ? `<br><span class="muted">${esc(line.options)}</span>` : ""}</td><td>${line.quantity}</td>
     <td>${line.weightOz === undefined ? '<span class="muted">not set</span>' : `${esc(line.weightOz)} oz`}</td>
     <td>${line.unitPrice ? `$${(Number(line.unitPrice.minor) / 100).toFixed(2)}` : '<span class="muted">—</span>'}</td></tr>`).join("");
   const notices: string[] = [];

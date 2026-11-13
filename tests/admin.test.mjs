@@ -424,6 +424,15 @@ test("DinkusKit.com's refusals and bad passes stop the click with a plain reason
   assert.match(text(down), /DinkusKit.com could not be reached/);
 });
 
+test("each item shows the options the shopper chose beside its name, so two sizes never look alike (commerce#264)", async () => {
+  const lines = [{ name: "Wrong Turn Tee", options: "Size: M", quantity: 1, weightOz: 6.5 }, { name: "Wrong Turn Tee", options: "Size: L", quantity: 1, weightOz: 6.5 },
+    { name: "Demo Mug", options: null, quantity: 1, weightOz: 12 }, { name: "Older Ship Mug", quantity: 1, weightOz: 12 }];
+  const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order({ lines, itemsWeightOz: 37 }), settings } } });
+  const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  const items = opened.blocks.find(block => block.type === "table" && block.page_action_id === "items");
+  assert.deepEqual(items.rows.map(row => row.item), ["Wrong Turn Tee · Size: M", "Wrong Turn Tee · Size: L", "Demo Mug", "Older Ship Mug"]);
+});
+
 test("missing item weights are incomplete, not zero; the warning keeps the label form through validation", async () => {
   for (const [lines, known] of [
     [[{ name: "Demo Tee", quantity: 2, weightOz: null }], 0],

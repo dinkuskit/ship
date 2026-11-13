@@ -39,7 +39,7 @@ Other failures:
 - `shipTo`: name, line1, optional line2, city, optional region, postalCode, and country `US`.
 - `email`.
 - `storeName`, optional: the store's EmDash Site title (`ctx.site.name`), used as the shipped email's sender name. A missing or unusable one is dropped and never refuses the order.
-- `lines`: catalogItemId, name, quantity, optional `weightOz`, and optional `unitPrice` (`{ currency: "USD", minor }`, the whole cents paid per unit before any order-level discount). Commerce starts sending `unitPrice` in the PR after commerce#98.
+- `lines`: catalogItemId, name, quantity, optional `weightOz`, and optional `unitPrice` (`{ currency: "USD", minor }`, the whole cents paid per unit before any order-level discount). Commerce starts sending `unitPrice` in the PR after commerce#98. Optional `options` is the shopper's variant choices as one line, such as `Size: M · Colour: Red` (at most 200 characters, from commerce#264); Ship drops an unusable one rather than refusing the order, and shows it with the item name.
 
 Ship drops every other field. Billing address, payment details, totals, tax and phone are never kept.
 
