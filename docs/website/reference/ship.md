@@ -34,14 +34,17 @@ A store upgraded from `0.2.1` does not use its old pasted key. The Shipments pag
 
 ## Buy a label
 
-1. Open **Dinkus Ship > Shipments** in the store admin and pick a paid order.
-2. Check the box, the weight (items plus box) and the service: USPS Ground Advantage by default, Priority Mail or Priority Mail Express. Then review the USPS prices.
-3. Press **Buy label**. Nothing is bought without this press.
-4. Press **Print label**. The PDF opens in a new tab through a link that works for five minutes and only for that label.
+1. Open **Dinkus Ship > Shipments** in the store admin. Counts at the top show how many orders are **To ship**, need you to **Fix address**, and are **On the way**. Each row shows the order number (press it to open the order), who it goes to (name and city) and a status with a coloured dot: yellow **Needs label**; red **Fix address**, **Label cancelled** or **Delivery problem**; blue **Label bought**, **In transit** or **Out for delivery**; green **Delivered**; white **Completed** (finished in Commerce without a Ship label).
+2. The order page shows **Ship to** on its address lines beside **Package** (the item count and what the items weigh), then the items with their weights. When any item has options, an **Options** column shows the shopper's choices, such as Size: M, so two sizes of one product show apart (Ship's own order page shows them in grey under the name). Weights read in pounds and ounces, such as 1 lb 4.5 oz. A very large order shows its first 50 items and its 50 newest labels, then says how many more there are; **Open in Ship** lists them all.
+3. Under **Buy a label**, check the box and the package weight in ounces (items plus box), then press **See prices**. Pick a USPS service from the list, which shows each service with its price: USPS Ground Advantage (the default), Priority Mail or Priority Mail Express.
+4. Press **Buy label**. Nothing is bought without this press.
+5. Press **Print label**. The PDF opens in a new tab through a link that works for five minutes and only for that label.
+
+Once a label is bought, the order page shows the **Label** beside Ship to (service, tracking number, box and weight, and where the parcel is), then the date and price with **Print label** beside them, and **Track on USPS** and **Cancel label** below. The **Labels** table lists every label Ship made for the order, cancelled ones included.
 
 Within a few minutes Commerce picks the label up from Ship and marks the order Completed with USPS and the tracking number, the same as when the label is bought on Ship's own page. **Cancel label** cancels the label only; it does not cancel or refund the Commerce order. Payment refunds belong to the payment and order workflow.
 
-If any item has no weight in Commerce, the plugin marks the items' weight as incomplete and warns you to weigh the whole package. The prefilled package weight includes only known item weights and the empty box; update it before checking prices or buying a label.
+If any item has no weight in Commerce, the plugin shows its weight as **Not set** and warns you to weigh the whole package. The prefilled package weight includes only known item weights and the empty box; update it before checking prices or buying a label.
 
 On Ship's own order page, **Labels** keeps the full tracking number, package, postage and **Open PDF to print** / **Cancel label** actions together. On phones each label's fields stack rather than pushing its actions offscreen. Printing reopens the label already bought; it does not buy another one.
 

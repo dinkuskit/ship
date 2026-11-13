@@ -24,7 +24,8 @@ export interface AdminOrder {
   shipTo: { name: string; lines: string[]; city: string; region: string; postalCode: string };
   /** Why no label can be made for this address yet (fixed in Commerce), or null. */
   addressProblem: string | null;
-  lines: { name: string; quantity: number; weightOz: number | null }[];
+  /** options is the shopper's choices, such as "Size: M", or null for a product without options. */
+  lines: { name: string; options: string | null; quantity: number; weightOz: number | null }[];
   /** The items' shipping weight; the plugin adds the chosen box's empty weight. */
   itemsWeightOz: number;
   /**
@@ -74,7 +75,7 @@ function adminOrder(summary: OrderSummary): AdminOrder {
     orderId: order.orderId, number: order.number, version: order.version, status: order.status, test: order.test,
     shipTo: { name: to.name, lines: [to.line1, to.line2].filter((line): line is string => Boolean(line)), city: to.city, region: to.region ?? "", postalCode: to.postalCode },
     addressProblem: address.ok ? null : address.problem,
-    lines: order.lines.map(line => ({ name: line.name, quantity: line.quantity, weightOz: line.weightOz ?? null })),
+    lines: order.lines.map(line => ({ name: line.name, options: line.options ?? null, quantity: line.quantity, weightOz: line.weightOz ?? null })),
     itemsWeightOz: order.lines.reduce((total, line) => total + (line.weightOz ?? 0) * line.quantity, 0),
     label: orderLabel(order, labels),
     labels,

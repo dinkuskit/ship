@@ -19,6 +19,8 @@ export interface OrderLine {
   name: string;
   quantity: number;
   weightOz?: number;
+  /** The options the shopper chose, as Commerce's order page shows them ("Size: M"). Commerce adds it for commerce#264. */
+  options?: string;
   /** Price paid per unit, before any order-level discount. Commerce adds it after commerce#98. */
   unitPrice?: { currency: "USD"; minor: string };
 }
@@ -103,6 +105,9 @@ function line(value: unknown, index: number): OrderLine {
     }
     result.weightOz = entry.weightOz;
   }
+  // Only shown beside the item name: a missing or unusable one never stops a label.
+  const options = typeof entry.options === "string" ? entry.options.trim() : "";
+  if (options && options.length <= 200 && !NOT_ONE_LINE.test(options)) result.options = options;
   if (entry.unitPrice !== undefined && entry.unitPrice !== null) {
     const price = object(entry.unitPrice, `${field}.unitPrice`);
     if (price.currency !== "USD" || typeof price.minor !== "string" || !/^(0|[1-9][0-9]{0,14})$/.test(price.minor)) {

@@ -44,7 +44,8 @@ export interface ShipOrder {
   orderId: string; number: number | null; version: number; status: "processing" | "completed"; test: boolean;
   shipTo: { name: string; lines: string[]; city: string; region: string; postalCode: string };
   addressProblem: string | null;
-  lines: { name: string; quantity: number; weightOz: number | null }[];
+  /** options: the shopper's choices, such as "Size: M"; null or missing for a product without options or an older Ship. */
+  lines: { name: string; options?: string | null; quantity: number; weightOz: number | null }[];
   itemsWeightOz: number;
   label: Label | null;
   labels: Label[];

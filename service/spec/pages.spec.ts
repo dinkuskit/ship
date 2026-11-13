@@ -25,6 +25,15 @@ const summary: OrderSummary = {
 };
 const render = (labels: Label[]) => orderPage("site:one", "owner@example.test", { ...summary, labels }, settings);
 
+test("In the box shows the options the shopper chose under each item's name, escaped, and nothing extra without them", () => {
+  const lines = [{ catalogItemId: "tee-m", name: "Wrong Turn Tee", quantity: 1, options: "Size: M <tall>" }, { catalogItemId: "tee-l", name: "Wrong Turn Tee", quantity: 1, options: "Size: L" },
+    { catalogItemId: "item-1", name: "Demo Mug", quantity: 1, weightOz: 13 }];
+  const html = orderPage("site:one", "owner@example.test", { ...summary, order: { ...summary.order, lines } }, settings);
+  expect(html).toContain('<td>Wrong Turn Tee<br><span class="muted">Size: M &lt;tall&gt;</span></td>');
+  expect(html).toContain('<td>Wrong Turn Tee<br><span class="muted">Size: L</span></td>');
+  expect(html).toContain("<td>Demo Mug</td>");
+});
+
 test("label history keeps table semantics and field names when rows reflow on phones", () => {
   const html = render([label]);
   expect(html).toContain('<h2 id="labels-heading">Labels</h2><table class="label-history" role="table" aria-labelledby="labels-heading">');

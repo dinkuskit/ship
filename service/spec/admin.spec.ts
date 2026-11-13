@@ -148,6 +148,42 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).json.error.code).toBe("NOT_FOUND");
 });
 
+test("orders, labels and settings stored before item options keep working, and options sent later come through the real routes (commerce#264)", async () => {
+  // A store as it stands before this change: an order without options, a bought label, ship-from and a box.
+  await sendOrder();
+  const boxId = await setUp();
+  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" } });
+  expect(bought.status).toBe(201);
+  // A row exactly as the previous Ship wrote it: the stored record has no options key at all.
+  await runInDurableObject(shipStore(), async (_instance, state) => {
+    const row = state.storage.sql.exec<{ record: string }>("SELECT record FROM orders WHERE order_id = 'order:abc'").one();
+    const record = JSON.parse(row.record);
+    expect(record.lines.some((line: Record<string, unknown>) => "options" in line)).toBe(false);
+    const old = { ...record, orderId: "order:old", number: 1000, lines: [{ catalogItemId: "item_tee_m", name: "Wrong Turn Tee", quantity: 1, weightOz: 6.5, unitPrice: { currency: "USD", minor: "3400" } }] };
+    state.storage.sql.exec("INSERT INTO orders (order_id, version, record, first_received_at, updated_at) VALUES ('order:old', 1, ?, '2026-11-01T00:00:00.000Z', '2026-11-01T00:00:00.000Z')", JSON.stringify(old));
+  });
+  const oldOrder = await call("GET", "/v1/admin/orders/order%3Aold");
+  expect(oldOrder.status).toBe(200);
+  expect(oldOrder.json.order.lines).toEqual([{ name: "Wrong Turn Tee", options: null, quantity: 1, weightOz: 6.5 }]);
+  const kept = await call("GET", "/v1/admin/orders/order%3Aabc");
+  expect(kept.json.order.label).toMatchObject({ labelId: bought.json.label.labelId, status: "bought" });
+  expect(kept.json.order.lines).toEqual([{ name: "Demo Mug", options: null, quantity: 2, weightOz: 12.5 }]);
+  expect(kept.json.settings).toMatchObject({ shipFrom: true, boxes: [{ boxId }] });
+  // Commerce's next version of an order carries the options; they survive storage and reach the plugin.
+  await sendOrder({ orderId: "order:tees", number: 1002, lines: [
+    { catalogItemId: "item_tee_m", name: "Wrong Turn Tee", quantity: 1, weightOz: 6.5, options: "Size: M" },
+    { catalogItemId: "item_tee_l", name: "Wrong Turn Tee", quantity: 1, weightOz: 6.5, options: "Size: L" }] });
+  const tees = await call("GET", "/v1/admin/orders/order%3Atees");
+  expect(tees.json.order.lines.map((line: { options: string | null }) => line.options)).toEqual(["Size: M", "Size: L"]);
+  const list = await call("GET", "/v1/admin/orders");
+  expect(list.json.orders.map((row: { orderId: string; labelStatus: string | null }) => [row.orderId, row.labelStatus]).sort())
+    .toEqual([["order:abc", "bought"], ["order:old", null], ["order:tees", null]]);
+  // The label bought before the change still prints and cancels.
+  const link = await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/print-link`);
+  expect((await worker.fetch(new Request(link.json.url), configured())).status).toBe(200);
+  expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).json).toEqual({ labelId: bought.json.label.labelId, refund: "INITIATED" });
+});
+
 test("after Commerce completes the order with the label, the Shipping page can still print and cancel it", async () => {
   await sendOrder();
   const boxId = await setUp();

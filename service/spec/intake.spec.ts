@@ -84,6 +84,15 @@ test("lines without a price, weight or region are kept: Commerce sends prices on
   expect(kept?.shipTo.region).toBeUndefined();
 });
 
+test("each line keeps the options the shopper chose, and an unusable one is dropped without stopping the order (commerce#264)", async () => {
+  const tee = (catalogItemId: string, options: unknown) => ({ catalogItemId, name: "Wrong Turn Tee", quantity: 1, options });
+  const sent = order({ lines: [tee("tee_m", "Size: M"), tee("tee_l", " Size: L · Colour: Red "), tee("tee_x", "Line\nbreak"), tee("tee_y", "x".repeat(201)), tee("tee_z", 7), { catalogItemId: "mug", name: "Mug", quantity: 1 }] });
+  expect((await call("POST", "/v1/orders", sent)).status).toBe(200);
+  const kept = await store().getOrder("order:abc");
+  expect(kept?.lines.map(line => line.options)).toEqual(["Size: M", "Size: L · Colour: Red", undefined, undefined, undefined, undefined]);
+  expect(kept?.lines.map(line => "options" in line)).toEqual([true, true, false, false, false, false]);
+});
+
 test("a newer version replaces the order, an older retry changes nothing, a repeat is still a success", async () => {
   expect((await call("POST", "/v1/orders", order({ version: 2 }))).json).toEqual({ orderId: "order:abc", version: 2 });
   expect((await call("POST", "/v1/orders", order({ version: 1, shipTo: { ...order().shipTo, line1: "Old Street" } }))).json)

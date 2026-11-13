@@ -334,8 +334,8 @@ test("the store key goes only to DinkusKit.com, and the pass goes only to Ship",
   const h = host({ ship: { "GET /v1/admin/orders": { orders: [row(), row({ orderId: "order:def", number: 1002, labelStatus: "bought", items: "1 × Hat, +3 more" })], settings } } });
   const page = text(await h.page(load));
   assert.match(page, /#1001 \(TEST\)/);
-  assert.match(page, /"status":"No label"/);
-  assert.match(page, /"items":"1 × Hat, \+3 more","status":"Label bought"/);
+  assert.match(page, /"status":"🟡 Needs label"/);
+  assert.match(page, /"label":"#1002 \(TEST\)","action_id":"open","value":"order:def"\},"to":"Demo Shopper · Testville, CA","status":"🔵 Label bought"/);
   assert.equal(h.calls.length, 2);
   assert.deepEqual(h.calls[0], { url: "https://dinkuskit.com/api/store-passes", method: "POST", authorization: `Bearer ${KEY}`, body: { site_id: SITE, scope: "ship:admin", audience: "dinkus-ship" } });
   assert.equal(h.calls[1].url, "https://ship.dinkuskit.com/v1/admin/orders");
@@ -424,6 +424,53 @@ test("DinkusKit.com's refusals and bad passes stop the click with a plain reason
   assert.match(text(down), /DinkusKit.com could not be reached/);
 });
 
+test("each item shows the options the shopper chose in its own Options column, so two sizes never look alike (commerce#264)", async () => {
+  const lines = [{ name: "Wrong Turn Tee", options: "Size: M", quantity: 1, weightOz: 6.5 }, { name: "Wrong Turn Tee", options: "Size: L", quantity: 1, weightOz: 6.5 },
+    { name: "Demo Mug", options: null, quantity: 1, weightOz: 12 }, { name: "Older Ship Mug", quantity: 1, weightOz: 12 }];
+  const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order({ lines, itemsWeightOz: 37 }), settings } } });
+  const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  const items = opened.blocks.find(block => block.type === "table" && block.page_action_id === "items");
+  assert.deepEqual(items.columns.map(column => column.label), ["Item", "Options", "Qty", "Weight each", "Weight"]);
+  assert.deepEqual(items.rows.map(row => [row.item, row.options]), [["Wrong Turn Tee", "Size: M"], ["Wrong Turn Tee", "Size: L"], ["Demo Mug", ""], ["Older Ship Mug", ""]]);
+});
+
+test("an order with no options has no empty Options column", async () => {
+  const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order({ lines: [{ name: "Demo Mug", options: null, quantity: 1, weightOz: 12 }], itemsWeightOz: 12 }), settings } } });
+  const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  const items = opened.blocks.find(block => block.type === "table" && block.page_action_id === "items");
+  assert.deepEqual(items.columns.map(column => column.label), ["Item", "Qty", "Weight each", "Weight"]);
+});
+
+const ITEMS_SHOWN = 50;
+test("an order at Ship's 500-line limit still renders, with Print and Cancel, and says where the rest of the items are", async () => {
+  const lines = Array.from({ length: 500 }, (_, index) => ({ name: `Item ${index} `.padEnd(200, "x"), options: "Size: M · ".padEnd(200, "y"), quantity: 1, weightOz: 1 }));
+  const current = order({ lines, itemsWeightOz: 500, label: label(), labels: [label(), ...Array.from({ length: 30 }, (_, index) => label({ labelId: `old_${index}`, status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z" }))] });
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: current, settings },
+    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
+  } });
+  // h.page throws unless validateBlockResponse accepts the whole page.
+  const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  const items = opened.blocks.find(block => block.type === "table" && block.page_action_id === "items");
+  assert.equal(items.rows.length, ITEMS_SHOWN);
+  assert.match(text(opened), new RegExp(`Plus ${500 - ITEMS_SHOWN} more items\\. Open in Ship lists every item\\.`));
+  const actions = text(opened);
+  assert.match(actions, /"label":"Print label"/);
+  assert.match(actions, /"label":"Cancel label"/);
+  const history = opened.blocks.find(block => block.type === "table" && block.page_action_id === "labels");
+  assert.equal(history.rows.length, 31);
+  assert.doesNotMatch(actions, /more labels/);  // Hosted Ship sends labels oldest first; the table keeps the 50 newest, newest at the top.
+  const relabeled = order({ labels: Array.from({ length: 60 }, (_, index) => label({ labelId: `old_${index}`, tracking: `9400${String(index).padStart(18, "0")}`,
+    createdAt: new Date(Date.UTC(2026, 9, 1) + index * 3_600_000).toISOString(), status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z" })) });
+  const many = await host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: relabeled, settings } } }).page({ type: "block_action", action_id: "open", value: "order:abc" });
+  const shown = many.blocks.find(block => block.type === "table" && block.page_action_id === "labels").rows;
+  assert.equal(shown.length, ITEMS_SHOWN);
+  const grouped = index => `9400${String(index).padStart(18, "0")} (test, not trackable)`;
+  assert.deepEqual([shown[0].tracking, shown.at(-1).tracking], [grouped(59), grouped(10)]);
+  assert.equal(relabeled.labels[0].labelId, "old_0", "the order's own label list is left as Ship sent it");
+  assert.match(text(many), /Plus 10 more labels\. Open in Ship lists every label\./);
+});
+
 test("missing item weights are incomplete, not zero; the warning keeps the label form through validation", async () => {
   for (const [lines, known] of [
     [[{ name: "Demo Tee", quantity: 2, weightOz: null }], 0],
@@ -436,7 +483,8 @@ test("missing item weights are incomplete, not zero; the warning keeps the label
     const warning = opened.blocks.find(block => block.type === "banner" && block.title === "Item weights missing");
     assert.ok(warning);
     assert.match(text(warning), /Weigh the whole package and update Package weight/);
-    assert.match(text(opened), new RegExp(`${known} oz \\(incomplete\\)`));
+    assert.match(text(opened), known ? /Items weigh 1 lb 9 oz/ : /No item weights in Commerce/);
+    assert.match(text(opened), /"each":"Not set","total":"Not set"/);
     const form = opened.blocks.find(block => block.type === "form");
     assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, String(known + box.weightOz));
     assert.equal(form.submit.label, "See prices");
@@ -457,8 +505,8 @@ test("known item weights keep the old total; labelled and completed orders need 
     const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
     assert.doesNotMatch(text(opened), /Item weights missing|Weigh the whole package/);
     if (current.itemsWeightOz === 25) {
-      assert.match(text(opened), /25 oz/);
-      assert.doesNotMatch(text(opened), /incomplete/);
+      assert.match(text(opened), /Items weigh 1 lb 9 oz/);
+      assert.doesNotMatch(text(opened), /Not set|no weight/);
     }
   }
 });
@@ -486,7 +534,8 @@ test("opening an order shows the form with the items plus box weight, then price
   assert.equal(buy.submit.action_id, "buy:1:order%3Aabc");
   assert.equal(buy.fields[1].initial_value, "30");
   const service = buy.fields.find(field => field.action_id === "service");
-  assert.deepEqual(service.options.map(option => option.label), ["USPS Ground Advantage: $5.10", "USPS Priority Mail: $9.35", "USPS Priority Mail Express: not available for this package"]);
+  assert.deepEqual(service.options.map(option => option.label), ["USPS Ground Advantage · $5.10", "USPS Priority Mail · $9.35", "USPS Priority Mail Express · not available for this package"]);
+  assert.equal(service.type, "radio", "every service and its price stay in view, as Shopify and WooCommerce Shipping list rates");
 
   const bought = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, service: "PM", kind: "sandbox" } });
   assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", by: "staff@example.test" });
@@ -502,14 +551,15 @@ test("a labelled order shows the label with a five-minute print link and a guard
     "POST /v1/admin/labels/label_1/cancel": { labelId: "label_1", refund: "INITIATED" },
   } });
   const page = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
-  const actions = page.blocks.filter(block => block.type === "actions").flatMap(block => block.elements);
+  const actions = page.blocks.flatMap(block => block.type === "actions" ? block.elements : block.type === "section" && block.accessory ? [block.accessory] : []);
   const print = actions.find(element => element.label === "Print label");
+  assert.equal(page.blocks.find(block => block.accessory === print)?.type, "section", "Print label sits beside the Label bought line");
   assert.deepEqual(print.target, { kind: "external", url: "https://ship.dinkuskit.com/print/tok.sig" });
   const cancel = actions.find(element => element.label === "Cancel label");
   assert.equal(cancel.action_id, "cancel:order%3Aabc");
   assert.equal(cancel.value, "label_1");
   assert.equal(cancel.confirm.style, "danger");
-  assert.match(text(page), /"label":"Status","value":"Label bought"/);
+  assert.match(text(page), /"text":"2 items · Label bought"/);
   assert.match(text(page), /SANDBOX-TRACKING-A \(test, not trackable\)/);
   assert.ok(!actions.some(element => element.label === "Track on USPS"));
   assert.ok(!page.blocks.some(block => block.type === "form"));
@@ -532,16 +582,16 @@ test("cancelling a live label promises the USPS refund; a cancelled sandbox labe
   const cancelled = await h.page({ type: "block_action", action_id: "cancel:order%3Aabc", value: "label_2" });
   assert.equal(cancelled.toast.message, "Label cancelled. USPS refunds the postage account within about 14 days.");
   const sandboxRow = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc" }));
-  assert.match(sandboxRow, /"label":"Cancelled","value":"2026-10-19 22:30"/);
-  assert.doesNotMatch(sandboxRow, /2026-10-19 22:30, refund/);
+  assert.match(sandboxRow, /"tracking":"SANDBOX-TRACKING-A \(test, not trackable\)","status":"🔴 Cancelled"\}/);
+  assert.doesNotMatch(sandboxRow, /SANDBOX-TRACKING-A \(test, not trackable\)","status":"🔴 Cancelled, refund/);
 
   const after = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false, label: null, labels: [sandboxCancelled, liveCancelled] }), settings } } });
   const page = text(await after.page({ type: "block_action", action_id: "open", value: "order:abc" }));
-  assert.match(page, /"label":"Cancelled","value":"2026-10-19 22:40, refund initiated"/);
-  assert.doesNotMatch(page, /22:30, refund/);
+  assert.match(page, /"tracking":"9400 1000 0000 0000 0000 02","status":"🔴 Cancelled, refund initiated"/);
+  assert.match(page, /"tracking":"SANDBOX-TRACKING-A \(test, not trackable\)","status":"🔴 Cancelled"\}/);
 });
 
-test("a live label's tracking number links to USPS, for the live label and the earlier ones", async () => {
+test("the live label's tracking number links to USPS, and every label's number shows in the Labels table", async () => {
   const live = label({ labelId: "label_2", test: false, tracking: "9400100000000000000002" });
   const old = label({ labelId: "label_1", test: false, tracking: "9400100000000000000001", status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z", refund: "INITIATED" });
   const h = host({ ship: {
@@ -550,7 +600,8 @@ test("a live label's tracking number links to USPS, for the live label and the e
   } });
   const page = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
   const links = text(page).match(/https:\/\/tools\.usps\.com\/go\/TrackConfirmAction\?tLabels=[0-9]+/g);
-  assert.deepEqual(links, ["https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000002", "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000001"]);
+  assert.deepEqual(links, ["https://tools.usps.com/go/TrackConfirmAction?tLabels=9400100000000000000002"]);
+  assert.match(text(page), /"tracking":"9400 1000 0000 0000 0000 01","status":"🔴 Cancelled, refund initiated"/);
   assert.match(text(page), /\$9\.35 from your Pitney Bowes postage account/);
 });
 
@@ -603,7 +654,7 @@ test("a Completed order keeps its label's Print and Cancel, and gets no form", a
     "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
   } });
   const page = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
-  const actions = page.blocks.filter(block => block.type === "actions").flatMap(block => block.elements);
+  const actions = page.blocks.flatMap(block => block.type === "actions" ? block.elements : block.type === "section" && block.accessory ? [block.accessory] : []);
   assert.ok(actions.some(element => element.label === "Print label"));
   assert.ok(actions.some(element => element.label === "Cancel label"));
   assert.ok(!page.blocks.some(block => block.type === "form"));
@@ -680,7 +731,7 @@ test("without a usable request URL no page is sent, and a list without an open o
   for (const requestUrl of ["", "http://shop.example.test/_emdash/api/plugins/dinkus-ship-1/admin", "https://shop.example.test/other"]) {
     const h = host({ requestUrl, ship: { "GET /v1/admin/orders": { orders: [row()], settings, open: null } } });
     const page = text(await h.page(load));
-    assert.match(page, /Demo Mug/);
+    assert.match(page, /"label":"#1001 \(TEST\)","action_id":"open"/);
     assert.doesNotMatch(page, /prices:/);
     assert.ok(h.calls.every(call => call.adminPage === undefined), requestUrl);
   }
@@ -696,13 +747,13 @@ test("a live label's delivery shows in the list and on the order, and a label wi
     "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/t", expiresAt: "2026-10-19T22:05:00.000Z" },
   } });
   const list = text(await h.page(load));
-  assert.match(list, /"Delivered"/);
-  assert.match(list, /"Problem"/);
+  assert.match(list, /"🟢 Delivered"/);
+  assert.match(list, /"🔴 Delivery problem"/);
   assert.doesNotMatch(list, /Delivery attempted/, "the list keeps the one word; the order page has the reason");
-  assert.match(list, /"Label bought"/);
+  assert.match(list, /"🔵 Label bought"/);
   const page = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc", page: "/shipping" }));
-  assert.match(page, /"label":"Delivery","value":"Delivered, 2026-10-22 18:02 UTC"/);
-  assert.match(page, /"label":"Status","value":"Delivered"/);
+  assert.match(page, /"text":"Delivered · Oct 22, 2026, 6:02 PM UTC"/);
+  assert.match(page, /"text":"2 items · Delivered"/);
 });
 
 test("a store with more orders than EmDash can draw at once gets them 50 at a time, newest first", async () => {
