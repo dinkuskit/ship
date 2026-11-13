@@ -184,12 +184,22 @@ function labelStatus(label: Label): string {
   return label.delivery ? deliveryText(label.delivery) : label.practice ? "Practice" : "Bought";
 }
 
-/** Every label Ship made for the order, newest first, as one table (the live one included). */
+/**
+ * Item and label rows per order page. EmDash refuses a Block Kit page of more than 2,000 parts and Ship
+ * takes orders of up to 500 lines, so each table shows this many and says that Open in Ship has the rest.
+ */
+export const ROWS_SHOWN = 50;
+
+/** "Plus 3 more items. Open in Ship lists every item." under a table cut at ROWS_SHOWN, or nothing. */
+const more = (total: number, noun: string, plural: string): Block[] => total > ROWS_SHOWN
+  ? [context(`Plus ${total - ROWS_SHOWN} more ${total - ROWS_SHOWN === 1 ? noun : plural}. Open in Ship lists every ${noun}.`)] : [];
+
+/** Every label Ship made for the order, newest first, as one table (the live one included), cut at ROWS_SHOWN. */
 function labelsTable(labels: Label[]): Block {
   return { type: "table", page_action_id: "labels", columns: [
     { key: "bought", label: "Bought" }, { key: "service", label: "Service" }, { key: "tracking", label: "Tracking number" },
     { key: "status", label: "Status" },
-  ], rows: labels.map(label => ({
+  ], rows: labels.slice(0, ROWS_SHOWN).map(label => ({
     bought: day(label.createdAt), service: `${SERVICES[label.service] ?? label.service}, ${postage(label)}`, tracking: grouped(label), status: dotted(labelStatus(label)),
   })) };
 }
@@ -279,8 +289,8 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
   }
   blocks.push({ type: "table", page_action_id: "items", columns: [
     { key: "item", label: "Item" }, { key: "quantity", label: "Qty" }, { key: "each", label: "Weight each" }, { key: "total", label: "Weight" },
-  ], rows: order.lines.map(line => ({ item: line.options ? `${line.name} · ${line.options}` : line.name, quantity: `× ${line.quantity}`,
-    each: line.weightOz === null ? "Not set" : weight(line.weightOz), total: line.weightOz === null ? "Not set" : weight(line.weightOz * line.quantity) })) });
+  ], rows: order.lines.slice(0, ROWS_SHOWN).map(line => ({ item: line.options ? `${line.name} · ${line.options}` : line.name, quantity: `× ${line.quantity}`,
+    each: line.weightOz === null ? "Not set" : weight(line.weightOz), total: line.weightOz === null ? "Not set" : weight(line.weightOz * line.quantity) })) }, ...more(order.lines.length, "item", "items"));
   if (missing && !label && order.status === "processing") {
     blocks.push(banner("alert", "Item weights missing", "Some items have no weight in Commerce. Weigh the whole package and update Package weight before checking prices or buying a label."));
   }
@@ -293,7 +303,7 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
       blocks.push(header(order.labels.length ? "Buy a new label" : "Buy a label"), ...labelForm(view));
     }
   }
-  if (order.labels.length) blocks.push(header("Labels"), labelsTable(order.labels));
+  if (order.labels.length) blocks.push(header("Labels"), labelsTable(order.labels), ...more(order.labels.length, "label", "labels"));
   blocks.push({ type: "actions", elements: [link("Open in Ship", pages.order(order.orderId)), link("Ship Settings", pages.settings)] });
   return { blocks, ...(toast ? { toast } : {}) };
 }

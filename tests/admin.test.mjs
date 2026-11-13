@@ -433,6 +433,30 @@ test("each item shows the options the shopper chose beside its name, so two size
   assert.deepEqual(items.rows.map(row => row.item), ["Wrong Turn Tee · Size: M", "Wrong Turn Tee · Size: L", "Demo Mug", "Older Ship Mug"]);
 });
 
+const ITEMS_SHOWN = 50;
+test("an order at Ship's 500-line limit still renders, with Print and Cancel, and says where the rest of the items are", async () => {
+  const lines = Array.from({ length: 500 }, (_, index) => ({ name: `Item ${index} `.padEnd(200, "x"), options: "Size: M · ".padEnd(200, "y"), quantity: 1, weightOz: 1 }));
+  const current = order({ lines, itemsWeightOz: 500, label: label(), labels: [label(), ...Array.from({ length: 30 }, (_, index) => label({ labelId: `old_${index}`, status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z" }))] });
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: current, settings },
+    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
+  } });
+  // h.page throws unless validateBlockResponse accepts the whole page.
+  const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  const items = opened.blocks.find(block => block.type === "table" && block.page_action_id === "items");
+  assert.equal(items.rows.length, ITEMS_SHOWN);
+  assert.match(text(opened), new RegExp(`Plus ${500 - ITEMS_SHOWN} more items\\. Open in Ship lists every item\\.`));
+  const actions = text(opened);
+  assert.match(actions, /"label":"Print label"/);
+  assert.match(actions, /"label":"Cancel label"/);
+  const history = opened.blocks.find(block => block.type === "table" && block.page_action_id === "labels");
+  assert.equal(history.rows.length, 31);
+  assert.doesNotMatch(actions, /more labels/);  const relabeled = order({ labels: Array.from({ length: 60 }, (_, index) => label({ labelId: `old_${index}`, status: "cancelled", cancelledAt: "2026-10-19T22:30:00.000Z" })) });
+  const many = await host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: relabeled, settings } } }).page({ type: "block_action", action_id: "open", value: "order:abc" });
+  assert.equal(many.blocks.find(block => block.type === "table" && block.page_action_id === "labels").rows.length, ITEMS_SHOWN);
+  assert.match(text(many), /Plus 10 more labels\. Open in Ship lists every label\./);
+});
+
 test("missing item weights are incomplete, not zero; the warning keeps the label form through validation", async () => {
   for (const [lines, known] of [
     [[{ name: "Demo Tee", quantity: 2, weightOz: null }], 0],
