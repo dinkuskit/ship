@@ -10,8 +10,10 @@ All names and addresses are made up (example.test).
 - **Store admin Shipments order page** (EmDash 1.4.0 admin, Ship's built
   plugin handler against a fake hosted Ship): `before-admin-order-*.png` is
   this branch before the change, `after-admin-order-*.png` shows
-  "Wrong Turn Tee · Size: M" and "· Size: L" in the Item cell (a Block Kit table
-  cell holds one line of text, so the choice follows a dot).
+  "Size: M" and "Size: L" in an Options column beside the item (a Block Kit
+  table cell is plain text with no grey or smaller type, so the choice gets its
+  own column, as on Commerce's order page; the column only appears when an item
+  has options).
 - **Ship's own order page** (`orderPage` from `service/src/pages.ts`, rendered
   with a fixture and captured in Chromium): `before-hosted-order-*.png` is the
   same order without `options`, as Ship shows every order today;
@@ -21,7 +23,8 @@ All names and addresses are made up (example.test).
 Tests: `service/spec/intake.spec.ts` (kept, trimmed; a line break, over 200
 characters or a non-string is dropped and the order is still taken),
 `service/spec/pages.spec.ts` (grey line, escaped), `tests/admin.test.mjs`
-(Item cell text; `null` and missing `options` show the name alone).
+(Options column cells; `null` and missing `options` leave the cell empty; an
+order with no options has no Options column).
 
 ## Upgrade compatibility
 

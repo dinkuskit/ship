@@ -288,8 +288,9 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
     blocks.push(section("This order is Completed in Commerce, so Ship makes no label for it. Move it back to Processing in Commerce's Orders page first."));
   }
   blocks.push({ type: "table", page_action_id: "items", columns: [
-    { key: "item", label: "Item" }, { key: "quantity", label: "Qty" }, { key: "each", label: "Weight each" }, { key: "total", label: "Weight" },
-  ], rows: order.lines.slice(0, ROWS_SHOWN).map(line => ({ item: line.options ? `${line.name} · ${line.options}` : line.name, quantity: `× ${line.quantity}`,
+    { key: "item", label: "Item" }, ...(order.lines.some(line => line.options) ? [{ key: "options", label: "Options" }] : []),
+    { key: "quantity", label: "Qty" }, { key: "each", label: "Weight each" }, { key: "total", label: "Weight" },
+  ], rows: order.lines.slice(0, ROWS_SHOWN).map(line => ({ item: line.name, options: line.options ?? "", quantity: `× ${line.quantity}`,
     each: line.weightOz === null ? "Not set" : weight(line.weightOz), total: line.weightOz === null ? "Not set" : weight(line.weightOz * line.quantity) })) }, ...more(order.lines.length, "item", "items"));
   if (missing && !label && order.status === "processing") {
     blocks.push(banner("alert", "Item weights missing", "Some items have no weight in Commerce. Weigh the whole package and update Package weight before checking prices or buying a label."));

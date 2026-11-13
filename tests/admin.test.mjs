@@ -424,13 +424,21 @@ test("DinkusKit.com's refusals and bad passes stop the click with a plain reason
   assert.match(text(down), /DinkusKit.com could not be reached/);
 });
 
-test("each item shows the options the shopper chose beside its name, so two sizes never look alike (commerce#264)", async () => {
+test("each item shows the options the shopper chose in its own Options column, so two sizes never look alike (commerce#264)", async () => {
   const lines = [{ name: "Wrong Turn Tee", options: "Size: M", quantity: 1, weightOz: 6.5 }, { name: "Wrong Turn Tee", options: "Size: L", quantity: 1, weightOz: 6.5 },
     { name: "Demo Mug", options: null, quantity: 1, weightOz: 12 }, { name: "Older Ship Mug", quantity: 1, weightOz: 12 }];
   const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order({ lines, itemsWeightOz: 37 }), settings } } });
   const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
   const items = opened.blocks.find(block => block.type === "table" && block.page_action_id === "items");
-  assert.deepEqual(items.rows.map(row => row.item), ["Wrong Turn Tee · Size: M", "Wrong Turn Tee · Size: L", "Demo Mug", "Older Ship Mug"]);
+  assert.deepEqual(items.columns.map(column => column.label), ["Item", "Options", "Qty", "Weight each", "Weight"]);
+  assert.deepEqual(items.rows.map(row => [row.item, row.options]), [["Wrong Turn Tee", "Size: M"], ["Wrong Turn Tee", "Size: L"], ["Demo Mug", ""], ["Older Ship Mug", ""]]);
+});
+
+test("an order with no options has no empty Options column", async () => {
+  const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order({ lines: [{ name: "Demo Mug", options: null, quantity: 1, weightOz: 12 }], itemsWeightOz: 12 }), settings } } });
+  const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  const items = opened.blocks.find(block => block.type === "table" && block.page_action_id === "items");
+  assert.deepEqual(items.columns.map(column => column.label), ["Item", "Qty", "Weight each", "Weight"]);
 });
 
 const ITEMS_SHOWN = 50;
