@@ -19,6 +19,27 @@ No store, DinkusKit.com or Ship service was contacted.
 - `orders-connected-to.png`: the orders list with the line "Connected to Acme
   Goods on DinkusKit. DinkusKit plugins on this store: Commerce, Payments and Ship."
 
+## Authority chain against DinkusKit.com's own code
+
+`authority-chain.mjs` runs this plugin's installed entry points (the Shipments admin route, the
+`store-proof` route and the `plugin:uninstall` hook) against DinkusKit.com's built
+Worker from dinkuskit/dinkuskit#145, under that repository's merchant harness with
+local D1 and KV. Lookup, finish, token, store passes, the connected-to read, key
+cancel, Approve, Disconnect and Revoke are DinkusKit.com's real routes. Only three
+things stand in: the transport (https://dinkuskit.com mapped to the local Worker),
+the store address (DinkusKit.com's receipt read is answered by the real
+`store-proof` route of whichever installation owns that address), and
+hosted Ship's order list (a stand-in that answers only after verifying the ship:admin pass against DinkusKit.com's published keys).
+
+`authority-chain-trace.md` is the run's output, with keys and passes redacted. It
+shows: the allowed store joining with its own key; an installation claiming
+another store's address, a store no business connected, and another business's
+owner all refused before any key; a page load or Continue during Finish setup
+unable to take it over (Payments); uninstall cancelling only this plugin's key
+while Commerce's and other stores' keys keep working; Disconnect (and Revoke)
+needing the owner's Approve; and a store connected with the released plugin (main)
+keeping its key and settings after the upgrade.
+
 ## Checks
 
 `tests/admin.test.mjs` covers the following.
