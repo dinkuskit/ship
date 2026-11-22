@@ -19,14 +19,14 @@ Ship has two parts that work together:
 
 | Part | What it does |
 | --- | --- |
-| Ship plugin (`dinkus-ship`) | Adds a **Shipments** page, under **Dinkus Ship**, to the store admin for Editors and Administrators. It lists the paid orders Commerce sent to Ship, newest first and 50 at a time with **Load more**, shows USPS prices, and has **Buy label**, **Print label** and **Cancel label**. |
+| Ship plugin (`dinkus-ship`) | Adds a **Shipments** page, in the **Store** folder, to the store admin for Editors and Administrators. It lists the paid orders Commerce sent to Ship, newest first and 50 at a time with **Load more**, shows USPS prices, and has **Buy label**, **Print label** and **Cancel label**. |
 | Hosted Ship service | Takes Commerce's orders, buys, keeps and cancels labels, sends the shopper the shipped email, and serves the owner's own pages at ship.dinkuskit.com (sign in with DinkusKit.com): settings, the owner's Pitney Bowes postage account, and label history. |
 
 The plugin keeps no label data. Every click reads from, or buys through, the hosted service, so the two always agree. Ship's own pages are the full path, and the fallback when the plugin is not installed.
 
 ## Set up the plugin
 
-Install **DinkusKit Ship** from the plugin Registry. Connect [Commerce](/docs/reference/commerce) first, because Commerce's Connect makes the store at DinkusKit.com. Then an Administrator opens **Dinkus Ship > Shipments** in the store admin and presses **Connect**, and the business owner presses **Approve** at DinkusKit.com. Nothing is pasted: DinkusKit.com gives Ship its own store key, which the plugin keeps, with the Store ID, in its encrypted DinkusKit connection setting. Connect needs the store on its https web address with Ship installed from the Registry.
+Install **DinkusKit Ship** from the plugin Registry. Connect [Commerce](/docs/reference/commerce) first, because Commerce's Connect makes the store at DinkusKit.com. Then an Administrator opens **Store > Shipments** in the store admin and presses **Connect**, and the business owner presses **Approve** at DinkusKit.com. Nothing is pasted: DinkusKit.com gives Ship its own store key, which the plugin keeps, with the Store ID, in its encrypted DinkusKit connection setting. Connect needs the store on its https web address with Ship installed from the Registry.
 
 The plugin never sends the store key to Ship or to a store page. It trades the key at DinkusKit.com for a pass that lasts five minutes and reuses that pass for clicks in the next minute. A Disconnect at DinkusKit.com, or Ship switched off there, stops the Shipments page within a minute. If DinkusKit.com no longer knows the key, the page shows **Connect again**.
 
@@ -34,7 +34,7 @@ A store upgraded from `0.2.1` does not use its old pasted key. The Shipments pag
 
 ## Buy a label
 
-1. Open **Dinkus Ship > Shipments** in the store admin. Counts at the top show how many orders are **To ship**, need you to **Fix address**, and are **On the way**. Each row shows the order number (press it to open the order), who it goes to (name and city) and a status with a coloured dot: yellow **Needs label**; red **Fix address**, **Label cancelled** or **Delivery problem**; blue **Label bought**, **In transit** or **Out for delivery**; green **Delivered**; white **Completed** (finished in Commerce without a Ship label).
+1. Open **Store > Shipments** in the store admin. Counts at the top show how many orders are **To ship**, need you to **Fix address**, and are **On the way**. Each row shows the order number (press it to open the order), who it goes to (name and city) and a status with a coloured dot: yellow **Needs label**; red **Fix address**, **Label cancelled** or **Delivery problem**; blue **Label bought**, **In transit** or **Out for delivery**; green **Delivered**; white **Completed** (finished in Commerce without a Ship label).
 2. The order page shows **Ship to** on its address lines beside **Package** (the item count and what the items weigh), then the items with their weights. When any item has options, an **Options** column shows the shopper's choices, such as Size: M, so two sizes of one product show apart (Ship's own order page shows them in grey under the name). Weights read in pounds and ounces, such as 1 lb 4.5 oz. A very large order shows its first 50 items and its 50 newest labels, then says how many more there are; **Open in Ship** lists them all.
 3. Under **Buy a label**, check the box and the package weight in ounces (items plus box), then press **See prices**. Pick a USPS service from the list, which shows each service with its price: USPS Ground Advantage (the default), Priority Mail or Priority Mail Express.
 4. Press **Buy label**. Nothing is bought without this press.
