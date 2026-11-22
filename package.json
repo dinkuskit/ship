@@ -26,10 +26,10 @@
   "devDependencies": {
     "@changesets/changelog-github": "^1.0.1",
     "@changesets/cli": "^3.0.3",
-    "@emdash-cms/blocks": "1.4.0",
-    "@emdash-cms/plugin-cli": "0.13.5",
-    "@emdash-cms/plugin-types": "0.6.0",
-    "emdash": "1.4.0",
+    "@emdash-cms/blocks": "1.5.0",
+    "@emdash-cms/plugin-cli": "0.13.6",
+    "@emdash-cms/plugin-types": "0.6.1",
+    "emdash": "1.5.0",
     "jsonc-parser": "3.3.1",
     "typescript": "6.0.3"
   },
@@ -47,6 +47,6 @@
     "./sandbox": "./dist/plugin.mjs"
   },
   "peerDependencies": {
-    "emdash": "1.4.0"
+    "emdash": "1.5.0"
   }
 }
