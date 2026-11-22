@@ -1,0 +1,233 @@
+{
+  "blocks": [
+    {
+      "type": "header",
+      "text": "Shipping settings"
+    },
+    {
+      "type": "header",
+      "text": "Ship from"
+    },
+    {
+      "type": "context",
+      "text": "The return address printed on every label."
+    },
+    {
+      "type": "form",
+      "block_id": "ship-from",
+      "fields": [
+        {
+          "type": "text_input",
+          "action_id": "name",
+          "label": "Name"
+        },
+        {
+          "type": "text_input",
+          "action_id": "company",
+          "label": "Company (optional)"
+        },
+        {
+          "type": "text_input",
+          "action_id": "line1",
+          "label": "Address"
+        },
+        {
+          "type": "text_input",
+          "action_id": "line2",
+          "label": "Address line 2 (optional)"
+        },
+        {
+          "type": "text_input",
+          "action_id": "city",
+          "label": "City"
+        },
+        {
+          "type": "text_input",
+          "action_id": "region",
+          "label": "State",
+          "placeholder": "NY"
+        },
+        {
+          "type": "text_input",
+          "action_id": "postalCode",
+          "label": "ZIP code"
+        }
+      ],
+      "submit": {
+        "label": "Save ship-from address",
+        "action_id": "save:ship-from"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "header",
+      "text": "Pitney Bowes postage"
+    },
+    {
+      "type": "section",
+      "text": "To buy USPS labels for real orders, you need your own Pitney Bowes postage account. Pitney Bowes charges postage to the card you add there, not DinkusKit. TEST orders don't need one."
+    },
+    {
+      "type": "context",
+      "text": "Ship is on the Pitney Bowes sandbox, so this makes a test account and nothing is charged."
+    },
+    {
+      "type": "section",
+      "text": "1. Create your account on Pitney Bowes' site, with your ship-from address and email filled in. Add a card there; Pitney Bowes refills your postage balance automatically. Use this link: an account made elsewhere may not connect.",
+      "accessory": {
+        "type": "link",
+        "label": "Create your Pitney Bowes account",
+        "target": {
+          "kind": "external",
+          "url": "https://developer.sandbox.pitneybowes.com/create/accountInfo?developerID=dev&email=owner%40example.test"
+        },
+        "appearance": "secondary"
+      }
+    },
+    {
+      "type": "section",
+      "text": "2. Come back here and connect it. Ship sends your username and password to Pitney Bowes once to find your account, and never keeps your password."
+    },
+    {
+      "type": "form",
+      "block_id": "postage",
+      "fields": [
+        {
+          "type": "text_input",
+          "action_id": "username",
+          "label": "Pitney Bowes username"
+        },
+        {
+          "type": "secret_input",
+          "action_id": "password",
+          "label": "Pitney Bowes password"
+        }
+      ],
+      "submit": {
+        "label": "Connect Pitney Bowes",
+        "action_id": "save:postage"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "header",
+      "text": "Shipped email"
+    },
+    {
+      "type": "context",
+      "text": "Sent from orders@dinkuskit.com under the name Demo Shop (your store's Site title) when a label is bought. When a shopper replies, the reply goes to this address."
+    },
+    {
+      "type": "form",
+      "block_id": "reply-to",
+      "fields": [
+        {
+          "type": "text_input",
+          "action_id": "replyTo",
+          "label": "Reply-to email",
+          "placeholder": "you@example.com"
+        }
+      ],
+      "submit": {
+        "label": "Save reply-to email",
+        "action_id": "save:reply-to"
+      }
+    },
+    {
+      "type": "divider"
+    },
+    {
+      "type": "header",
+      "text": "Box sizes"
+    },
+    {
+      "type": "table",
+      "page_action_id": "boxes",
+      "empty_text": "No box sizes yet. Labels need at least one.",
+      "columns": [
+        {
+          "key": "name",
+          "label": "Name"
+        },
+        {
+          "key": "size",
+          "label": "Size"
+        },
+        {
+          "key": "empty",
+          "label": "Empty weight"
+        },
+        {
+          "key": "remove",
+          "label": "",
+          "format": "element"
+        }
+      ],
+      "rows": []
+    },
+    {
+      "type": "form",
+      "block_id": "boxes",
+      "fields": [
+        {
+          "type": "text_input",
+          "action_id": "name",
+          "label": "Box name",
+          "placeholder": "Small mailer"
+        },
+        {
+          "type": "text_input",
+          "action_id": "lengthIn",
+          "label": "Length (in)"
+        },
+        {
+          "type": "text_input",
+          "action_id": "widthIn",
+          "label": "Width (in)"
+        },
+        {
+          "type": "text_input",
+          "action_id": "heightIn",
+          "label": "Height (in)"
+        },
+        {
+          "type": "text_input",
+          "action_id": "weightOz",
+          "label": "Empty weight (oz)",
+          "initial_value": "0"
+        }
+      ],
+      "submit": {
+        "label": "Add box size",
+        "action_id": "save:boxes"
+      }
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "link",
+          "label": "Shipments",
+          "target": {
+            "kind": "plugin-page",
+            "path": "/shipping"
+          },
+          "appearance": "secondary"
+        },
+        {
+          "type": "link",
+          "label": "Ship's own Settings",
+          "target": {
+            "kind": "external",
+            "url": "https://ship.dinkuskit.com/stores/site_demo/settings"
+          },
+          "appearance": "secondary"
+        }
+      ]
+    }
+  ]
+}

@@ -1,6 +1,10 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
-import { connectPage, finishPage, listPage, pageStart, pendingPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, type OrderView, type Toast } from "./pages.js";
+import {
+  connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH,
+  type OrderView, type Toast,
+} from "./pages.js";
+import { settingsAdmin } from "./settings.js";
 import { cancelConnect, connectedTo, connectionState, finishSetup, startConnect, type ConnectView } from "./connect.js";
 import { adminPageFrom, adminUserFrom, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
 
@@ -9,17 +13,19 @@ const EDITOR = 40;
 /** Only an Administrator connects the plugin to DinkusKit.com (store-connect-flow-081). */
 const ADMIN = 50;
 
-interface Action { type: "block_action"; action_id: string; value?: unknown }
-interface Submit { type: "form_submit"; action_id: string; values: Record<string, unknown> }
-type Interaction = { type: "page_load" } | Action | Submit;
+/** `page` is the plugin page the press came from, as EmDash names it: "/shipping" or "/shipping-settings". */
+export interface Action { type: "block_action"; action_id: string; value?: unknown; page?: string }
+export interface Submit { type: "form_submit"; action_id: string; values: Record<string, unknown>; page?: string }
+export type Interaction = { type: "page_load"; page?: string } | Action | Submit;
 
 function interaction(input: unknown): Interaction | null {
   if (typeof input !== "object" || input === null) return null;
   const value = input as Record<string, unknown>;
-  if (value.type === "page_load") return { type: "page_load" };
-  if (value.type === "block_action" && typeof value.action_id === "string") return { type: "block_action", action_id: value.action_id, value: value.value };
+  const page = typeof value.page === "string" ? { page: value.page } : {};
+  if (value.type === "page_load") return { type: "page_load", ...page };
+  if (value.type === "block_action" && typeof value.action_id === "string") return { type: "block_action", action_id: value.action_id, value: value.value, ...page };
   if (value.type === "form_submit" && typeof value.action_id === "string" && typeof value.values === "object" && value.values !== null) {
-    return { type: "form_submit", action_id: value.action_id, values: value.values as Record<string, unknown> };
+    return { type: "form_submit", action_id: value.action_id, values: value.values as Record<string, unknown>, ...page };
   }
   return null;
 }
@@ -87,6 +93,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
   const input = interaction(route.input);
   if (!input) return { blocks: [] };
   const isAdmin = user.role >= ADMIN;
+  if (input.page === SETTINGS_PATH) return settingsAdmin(input, isAdmin, route, ctx);
   const connect = input.type === "block_action" && ["connect", "finish_setup", "check", "cancel_connect"].includes(input.action_id) ? input.action_id : null;
   let settings: ConnectView;
   try {
@@ -105,6 +112,16 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
   const by = typeof user.email === "string" && user.email ? user.email : user.id;
   try {
     if (input.type === "block_action" && input.action_id === "open" && typeof input.value === "string") return await openOrder(hosted, input.value);
+    if (input.type === "block_action" && input.action_id === "history") {
+      const before = historyCursor(input.value);
+      try {
+        return labelHistoryPage(hosted.siteId, await hosted.labels(before), before !== null);
+      } catch (error) {
+        // Until ship.dinkuskit.com has the label history route, Ship's own page lists them.
+        if (error instanceof ShipError && error.status === 404) return problemPage(hosted.siteId, "Label history is on Ship's page for now", "Ship has not been updated to list labels here yet. Open Ship to see every label.");
+        throw error;
+      }
+    }
     if (input.type === "block_action" && input.action_id.startsWith("cancel:") && typeof input.value === "string") {
       const orderId = decodeURIComponent(input.action_id.slice("cancel:".length));
       try {
@@ -158,3 +175,10 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
     return problemPage(hosted.siteId, "Something went wrong", "The Shipping page could not finish that. Try again, or open Ship's own page.");
   }
 }
+
+/** Load more on the label history sends the previous page's `next`; anything else starts at the newest. */
+function historyCursor(value: unknown): string | null {
+  const cursor = typeof value === "object" && value !== null ? (value as { cursor?: unknown }).cursor : undefined;
+  return typeof cursor === "string" && cursor.length > 0 && cursor.length <= 200 ? cursor : null;
+}
+

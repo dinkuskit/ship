@@ -710,7 +710,8 @@ test("the page says what to set up on Ship before a label can be bought", async 
   const list = text(await h.page(load));
   assert.match(list, /Set up Ship first/);
   assert.match(list, /No paid orders have reached Ship yet/);
-  assert.match(list, /https:\/\/ship.dinkuskit.com\/stores\/site_demo\/settings/);
+  assert.match(list, /Add them in Shipping settings/);
+  assert.match(list, /"label":"Shipping settings","target":\{"kind":"plugin-page","path":"\/shipping-settings"\}/);
   const real = text(await h.page({ type: "block_action", action_id: "open", value: "order:abc" }));
   assert.match(real, /Connect your Pitney Bowes account first/);
   assert.doesNotMatch(real, /"type":"form"/);
@@ -877,4 +878,39 @@ test("uninstalling Ship cancels only its own key at DinkusKit.com", async () => 
   const h = host();
   await plugin.hooks["plugin:uninstall"]({ deleteData: true }, h.ctx);
   assert.deepEqual(h.calls, [{ url: "https://dinkuskit.com/api/store-keys/cancel", method: "POST", authorization: `Bearer ${KEY}`, body: { site_id: SITE } }]);
+});
+
+test("Label history lists every label the store bought, newest first, 50 a page, and its order number opens the order", async () => {
+  const labels = Array.from({ length: 50 }, (_, index) => ({ ...label({ labelId: `label_${index}`, tracking: `9400${String(index).padStart(18, "0")}`, test: false, priceCents: 512 }), number: 1001 + index }));
+  const older = [{ ...label({ labelId: "label_old", status: "cancelled", cancelledAt: "2026-10-20T00:00:00.000Z", practice: true, priceCents: null }), number: null }];
+  const asked = [];
+  const h = host({ ship: {
+    "GET /v1/admin/orders": { orders: [row()], settings },
+    "GET /v1/admin/labels": () => Response.json(asked.at(-1) === "" ? { labels, next: "2026-10-19T22:00:00.000Z~label_49" } : { labels: older, next: null }),
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+  } });
+  h.ctx.http.fetch = (inner => async (url, init) => { if (url.includes("/v1/admin/labels")) asked.push(new URL(url).search); return inner(url, init); })(h.ctx.http.fetch);
+  assert.match(text(await h.page(load)), /"label":"Label history","action_id":"history"/);
+  const first = await h.page({ type: "block_action", action_id: "history" });
+  const table = first.blocks.find(block => block.type === "table");
+  assert.equal(table.rows.length, 50);
+  assert.equal(table.next_cursor, "2026-10-19T22:00:00.000Z~label_49");
+  assert.deepEqual(table.rows[0].order, { type: "button", label: "#1001", action_id: "open", value: "order:abc" });
+  assert.match(table.rows[0].service, /USPS Priority Mail, \$5\.12/);
+  assert.equal(table.rows[0].tracking, "9400 0000 0000 0000 0000 00");
+  assert.doesNotMatch(text(first), /Older labels/);
+  const next = await h.page({ type: "block_action", action_id: "history", value: { cursor: table.next_cursor } });
+  assert.deepEqual(asked, ["", "?before=2026-10-19T22%3A00%3A00.000Z~label_49"]);
+  const row0 = next.blocks.find(block => block.type === "table").rows[0];
+  assert.equal(row0.order.label, "order:abc (TEST)");
+  assert.match(row0.status, /Cancelled/);
+  assert.match(text(next), /Older labels. Refresh goes back to the newest./);
+  assert.match(text(await h.page({ type: "block_action", action_id: "open", value: "order:abc" })), /Order #1001/);
+});
+
+test("until ship.dinkuskit.com lists labels, Label history points to Ship's own page", async () => {
+  const h = host({ ship: { "GET /v1/admin/labels": () => Response.json({ error: { code: "NOT_FOUND", message: "not found" } }, { status: 404 }) } });
+  const page = text(await h.page({ type: "block_action", action_id: "history" }));
+  assert.match(page, /Label history is on Ship's page for now/);
+  assert.match(page, /https:\/\/ship.dinkuskit.com\/stores\/site_demo\/orders/);
 });

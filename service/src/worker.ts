@@ -2,7 +2,10 @@ import { assertRequestOrigin, assertTuple, requestTuple } from "./isolation.js";
 import { createAuthenticator, type ShipScope } from "./auth.js";
 import { ServiceError, toOutcome, type Outcome } from "./errors.js";
 import { handlePage, handlePrint } from "./owner.js";
-import { ADMIN_SCOPE, buyAdminLabel, cancelAdminLabel, listAdminOrders, printLink, quoteAdminLabel, showAdminOrder } from "./admin.js";
+import {
+  ADMIN_SCOPE, addAdminBox, adminLabelHistory, buyAdminLabel, cancelAdminLabel, connectAdminPostage, disconnectAdminPostage, listAdminOrders, printLink,
+  quoteAdminLabel, removeAdminBox, saveAdminReplyTo, saveAdminShipFrom, showAdminOrder, showAdminSettings,
+} from "./admin.js";
 import { checkDeliveries, handleTrackingWebhook, PB_TRACKING_PATH } from "./tracking.js";
 import type { StoreShipping } from "./store.js";
 
@@ -13,7 +16,7 @@ export const SERVICE_LINE = "DinkusKit Ship service";
 // Commerce's largest possible order (100 lines of long multi-byte names) is about 66 KiB.
 export const MAX_BODY_BYTES = 256 * 1024;
 
-interface Call { store: DurableObjectStub<StoreShipping>; body: unknown; admission: Record<string, unknown>; params: string[]; site: string; origin: string; env: Env; adminUser: string | null }
+interface Call { store: DurableObjectStub<StoreShipping>; body: unknown; admission: Record<string, unknown>; params: string[]; site: string; origin: string; env: Env; adminUser: string | null; query: URLSearchParams }
 type Handler = (call: Call) => Promise<Outcome>;
 interface Route { method: string; pattern: RegExp; scope: ShipScope; handle: Handler }
 /** Order ids and label ids as they appear in a path segment (URL-encoded by the caller). */
@@ -33,6 +36,15 @@ const ROUTES: Route[] = [
   route("POST", "/v1/admin/orders/:id/labels", ADMIN_SCOPE, ({ store, params, body }) => buyAdminLabel(store, params[0]!, body)),
   route("POST", "/v1/admin/labels/:id/cancel", ADMIN_SCOPE, ({ store, params }) => cancelAdminLabel(store, params[0]!)),
   route("POST", "/v1/admin/labels/:id/print-link", ADMIN_SCOPE, ({ store, params, env, origin, site }) => printLink(env, origin, store, site, params[0]!)),
+  // The plugin's Shipping settings page and label history (ship-settings-in-admin-129).
+  route("GET", "/v1/admin/labels", ADMIN_SCOPE, ({ store, query }) => adminLabelHistory(store, query.get("before"))),
+  route("GET", "/v1/admin/settings", ADMIN_SCOPE, ({ store, adminUser }) => showAdminSettings(store, adminUser)),
+  route("POST", "/v1/admin/settings/ship-from", ADMIN_SCOPE, ({ store, body, adminUser }) => saveAdminShipFrom(store, body, adminUser)),
+  route("POST", "/v1/admin/settings/reply-to", ADMIN_SCOPE, ({ store, body, adminUser }) => saveAdminReplyTo(store, body, adminUser)),
+  route("POST", "/v1/admin/settings/boxes", ADMIN_SCOPE, ({ store, body, adminUser }) => addAdminBox(store, body, adminUser)),
+  route("POST", "/v1/admin/settings/boxes/:id/remove", ADMIN_SCOPE, ({ store, params, adminUser }) => removeAdminBox(store, params[0]!, adminUser)),
+  route("POST", "/v1/admin/settings/postage", ADMIN_SCOPE, ({ store, body, adminUser }) => connectAdminPostage(store, body, adminUser)),
+  route("POST", "/v1/admin/settings/postage/disconnect", ADMIN_SCOPE, ({ store, adminUser }) => disconnectAdminPostage(store, adminUser)),
 ];
 
 function decode(segment: string): string {
@@ -162,7 +174,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
       adminUser = adminUserFrom(request);
       if (adminUser) await store.rememberAdminUser(adminUser);
     }
-    return respond(await route.handle({ store, body, admission, params, site: siteId, origin: url.origin, env, adminUser }));
+    return respond(await route.handle({ store, body, admission, params, site: siteId, origin: url.origin, env, adminUser, query: url.searchParams }));
   } catch (error) {
     return respond(toOutcome(error));
   }

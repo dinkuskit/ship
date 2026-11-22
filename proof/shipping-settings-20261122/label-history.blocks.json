@@ -1,0 +1,144 @@
+{
+  "blocks": [
+    {
+      "type": "header",
+      "text": "Shipments"
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "label": "Back to Shipments",
+          "action_id": "list"
+        }
+      ]
+    },
+    {
+      "type": "header",
+      "text": "Label history"
+    },
+    {
+      "type": "table",
+      "page_action_id": "history",
+      "empty_text": "No labels yet. Labels you buy, print or cancel show here.",
+      "columns": [
+        {
+          "key": "bought",
+          "label": "Bought"
+        },
+        {
+          "key": "order",
+          "label": "Order",
+          "format": "element"
+        },
+        {
+          "key": "service",
+          "label": "Service"
+        },
+        {
+          "key": "tracking",
+          "label": "Tracking number"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        }
+      ],
+      "next_cursor": "2026-11-17T15:00:00.000Z~label_5",
+      "rows": [
+        {
+          "bought": "Nov 22, 2026",
+          "order": {
+            "type": "button",
+            "label": "#1042",
+            "action_id": "open",
+            "value": "order_0"
+          },
+          "service": "USPS Ground Advantage, $5.12",
+          "tracking": "9400 1118 9922 3000 0000 00",
+          "status": "🔵 In transit"
+        },
+        {
+          "bought": "Nov 21, 2026",
+          "order": {
+            "type": "button",
+            "label": "#1041",
+            "action_id": "open",
+            "value": "order_1"
+          },
+          "service": "USPS Priority Mail, $6.52",
+          "tracking": "9400 1118 9922 3000 0000 01",
+          "status": "🟢 Delivered"
+        },
+        {
+          "bought": "Nov 20, 2026",
+          "order": {
+            "type": "button",
+            "label": "#1040",
+            "action_id": "open",
+            "value": "order_2"
+          },
+          "service": "USPS Ground Advantage, $7.92",
+          "tracking": "9400 1118 9922 3000 0000 02",
+          "status": "🔴 Cancelled, refund initiated"
+        },
+        {
+          "bought": "Nov 19, 2026",
+          "order": {
+            "type": "button",
+            "label": "#1039",
+            "action_id": "open",
+            "value": "order_3"
+          },
+          "service": "USPS Priority Mail Express, $9.32",
+          "tracking": "9400 1118 9922 3000 0000 03",
+          "status": "🔵 Bought"
+        },
+        {
+          "bought": "Nov 18, 2026",
+          "order": {
+            "type": "button",
+            "label": "#1038 (TEST)",
+            "action_id": "open",
+            "value": "order_4"
+          },
+          "service": "USPS Ground Advantage, $10.72 sandbox, not charged",
+          "tracking": "SANDBOX-4 (test, not trackable)",
+          "status": "🔵 Bought"
+        },
+        {
+          "bought": "Nov 17, 2026",
+          "order": {
+            "type": "button",
+            "label": "#1037 (TEST)",
+            "action_id": "open",
+            "value": "order_5"
+          },
+          "service": "USPS Priority Mail, free practice label",
+          "tracking": "SANDBOX-5 (test, not trackable)",
+          "status": "⚪ Practice"
+        }
+      ]
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "label": "Refresh",
+          "action_id": "history"
+        },
+        {
+          "type": "link",
+          "label": "Open Ship",
+          "target": {
+            "kind": "external",
+            "url": "https://ship.dinkuskit.com/stores/site_demo/orders"
+          },
+          "appearance": "secondary"
+        }
+      ]
+    }
+  ]
+}

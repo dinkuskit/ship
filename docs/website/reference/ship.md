@@ -19,10 +19,10 @@ Ship has two parts that work together:
 
 | Part | What it does |
 | --- | --- |
-| Ship plugin (`dinkus-ship`) | Adds a **Shipments** page, in the **Store** folder, to the store admin for Editors and Administrators. It lists the paid orders Commerce sent to Ship, newest first and 50 at a time with **Load more**, shows USPS prices, and has **Buy label**, **Print label** and **Cancel label**. |
-| Hosted Ship service | Takes Commerce's orders, buys, keeps and cancels labels, sends the shopper the shipped email, and serves the owner's own pages at ship.dinkuskit.com (sign in with DinkusKit.com): settings, the owner's Pitney Bowes postage account, and label history. |
+| Ship plugin (`dinkus-ship`) | Adds two pages to the **Store** folder of the store admin. **Shipments**, for Editors and Administrators, lists the paid orders Commerce sent to Ship, newest first and 50 at a time with **Load more**, shows USPS prices, has **Buy label**, **Print label** and **Cancel label**, and has **Label history**. **Shipping settings**, for Administrators, holds the ship-from address, the Pitney Bowes postage account, the shipped email's reply-to address and box sizes. |
+| Hosted Ship service | Takes Commerce's orders, buys, keeps and cancels labels, keeps the settings, sends the shopper the shipped email, and serves the owner's own pages at ship.dinkuskit.com (sign in with DinkusKit.com), which show the same settings, Pitney Bowes account and label history. |
 
-The plugin keeps no label data. Every click reads from, or buys through, the hosted service, so the two always agree. Ship's own pages are the full path, and the fallback when the plugin is not installed.
+The plugin keeps no label data and no settings. Every click reads from, saves to, or buys through the hosted service, so the plugin's pages and Ship's own pages always agree. Ship's own pages are the full path, and the fallback when the plugin is not installed.
 
 ## Set up the plugin
 
@@ -33,6 +33,21 @@ If the store is already connected to DinkusKit, for example through Commerce, th
 The plugin never sends the store key to Ship or to a store page. It trades the key at DinkusKit.com for a pass that lasts five minutes and reuses that pass for clicks in the next minute. A Disconnect at DinkusKit.com, which also turns Ship off, stops the Shipments page within a minute. A store connected before Ship turned on at Connect presses **Connect again** once. If DinkusKit.com no longer knows the key, the page shows **Connect again**.
 
 A store upgraded from `0.2.1` does not use its old pasted key. The Shipments page asks for Connect once, and Connect removes the old Store ID and store key settings.
+
+## Shipping settings
+
+An Administrator opens **Store > Shipping settings**. Editors see a note to ask an Administrator. Each part saves to Ship straight away, with a message when it is saved, or Ship's reason when it is not:
+
+- **Ship from**: the return address printed on every label.
+- **Pitney Bowes postage**: real orders' labels are paid from your own Pitney Bowes postage account, and Pitney Bowes charges the card you add there, not DinkusKit. Press **Create your Pitney Bowes account** to sign up on Pitney Bowes' site with your ship-from address and email filled in, then come back and enter that account's username and password and press **Connect Pitney Bowes**. Ship sends them to Pitney Bowes once to find your account and keeps neither. Once connected, the page names the account and has **Disconnect Pitney Bowes**. TEST orders do not need an account.
+- **Shipped email**: the reply-to address for the email Ship sends the shopper when a label is bought. It is sent from orders@dinkuskit.com under your store's Site title.
+- **Box sizes**: each box's name, size in inches and empty weight in ounces, with **Remove** and **Add box size**. Labels need at least one.
+
+Labels need the ship-from address and a box size; the Shipments page says so until both are set. Ship's own Settings page at ship.dinkuskit.com shows and changes the same settings.
+
+## Label history
+
+On **Store > Shipments**, **Label history** lists every label the store bought, newest first and 50 at a time with **Load more**: the day it was bought, the order (press the number to open it), the service and postage, the tracking number and where the parcel is, or that the label was cancelled.
 
 ## Buy a label
 
@@ -61,7 +76,7 @@ Ship runs on the Pitney Bowes sandbox. Live postage is not available yet. A sand
 | Pitney Bowes sandbox label | Available when the sandbox configuration is complete. Uses sandbox rates, shipment creation, PDF, and tracking; it charges no real postage. The page marks it TEST SANDBOX. |
 | Practice label | Made without calling Pitney Bowes when the owner presses **Make practice label instead**, or when sandbox labels are unavailable. The PDF says TEST - NOT POSTAGE and PRACTICE LABEL - DO NOT MAIL. |
 
-A TEST order stays TEST everywhere and never gets live postage. A real order needs the owner's own Pitney Bowes postage account connected on Ship's settings page; until one is connected, prices and labels for real orders are refused.
+A TEST order stays TEST everywhere and never gets live postage. A real order needs the owner's own Pitney Bowes postage account connected in **Shipping settings** (or Ship's own Settings page); until one is connected, prices and labels for real orders are refused.
 
 Tracking updates (In transit, Out for delivery, Delivered, Problem) come from Pitney Bowes for live labels only, so they do not appear while Ship is on the sandbox.
 
@@ -75,7 +90,7 @@ Commerce calls three routes on the hosted service with a DinkusKit store pass sc
 | `GET /v1/labels` | Read label events awaiting acknowledgement. |
 | `POST /v1/labels/ack` | Acknowledge a delivered label event. |
 
-The plugin's Shipments page calls routes under `/v1/admin/` with a pass scoped `ship:admin`. The store always comes from the signed pass, never from anything in the request. Ship accepts the current or a newer order version and never overwrites it with an older one. It keeps the US delivery address, line quantities and email; billing details and payment credentials stay out of Ship. None of these is a public, unauthenticated API.
+The plugin's Shipments and Shipping settings pages call routes under `/v1/admin/` with a pass scoped `ship:admin`. The store always comes from the signed pass, never from anything in the request. Ship accepts the current or a newer order version and never overwrites it with an older one. It keeps the US delivery address, line quantities and email; billing details and payment credentials stay out of Ship. None of these is a public, unauthenticated API.
 
 ## Sources and review scope
 

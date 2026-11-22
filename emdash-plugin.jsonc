@@ -42,7 +42,8 @@
       }
     },
     "pages": [
-      { "path": "/shipping", "label": "Shipments", "icon": "truck", "group": "Store" }
+      { "path": "/shipping", "label": "Shipments", "icon": "truck", "group": "Store" },
+      { "path": "/shipping-settings", "label": "Shipping settings", "icon": "gear", "group": "Store" }
     ]
   }
 }

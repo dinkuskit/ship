@@ -1,0 +1,37 @@
+{
+  "blocks": [
+    {
+      "type": "header",
+      "text": "Shipping settings"
+    },
+    {
+      "type": "banner",
+      "variant": "default",
+      "title": "Shipping settings are on Ship's page for now",
+      "description": "Ship has not been updated to show its settings here yet. Change them on Ship's own Settings page."
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "link",
+          "label": "Shipments",
+          "target": {
+            "kind": "plugin-page",
+            "path": "/shipping"
+          },
+          "appearance": "secondary"
+        },
+        {
+          "type": "link",
+          "label": "Ship's own Settings",
+          "target": {
+            "kind": "external",
+            "url": "https://ship.dinkuskit.com/stores/site_demo/settings"
+          },
+          "appearance": "secondary"
+        }
+      ]
+    }
+  ]
+}

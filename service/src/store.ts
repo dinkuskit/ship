@@ -106,6 +106,29 @@ function formNumber(fields: Fields, key: string, label: string, min: number, max
   return Math.round(value * 100) / 100;
 }
 
+const LABEL_FIELDS = "label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at, price_cents, refund, shipment_id, delivery_state, delivery_at, delivery_note";
+
+function labelFromRow(row: Record<string, string | number | null>): Label {
+  return {
+    labelId: row.label_id as string, orderId: row.order_id as string, version: row.version as number, test: row.test === 1,
+    service: row.service as ServiceCode, box: JSON.parse(row.box as string) as Box, weightOz: row.weight_oz as number,
+    carrier: row.carrier as string, tracking: row.tracking as string, status: row.status as Label["status"],
+    createdBy: row.created_by as string, createdAt: row.created_at as string, cancelledAt: row.cancelled_at as string | null,
+    practice: row.test === 1 && row.shipment_id === null, priceCents: row.price_cents as number | null, refund: row.refund as string | null,
+    delivery: row.delivery_state && row.delivery_at ? { state: row.delivery_state as Delivery["state"], at: row.delivery_at as string, note: row.delivery_note as string | null } : null,
+  };
+}
+
+/** A label-history page cursor: the last label's created_at and label id, joined by "~". */
+function historyCursor(value: string): { createdAt: string; labelId: string } {
+  const at = value.indexOf("~");
+  const createdAt = value.slice(0, at), labelId = value.slice(at + 1);
+  if (at < 1 || value.length > 200 || !/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/.test(createdAt) || !/^[A-Za-z0-9._:-]{1,120}$/.test(labelId)) {
+    refuse("INVALID_INPUT", "before must be the next value of the previous page.");
+  }
+  return { createdAt, labelId };
+}
+
 /** Columns labels gained with Pitney Bowes postage; a store made before then gets them added once. */
 const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT", delivery_state: "TEXT", delivery_at: "TEXT", delivery_note: "TEXT" } as const;
 
@@ -415,15 +438,40 @@ export class StoreShipping extends DurableObject<Env> {
 
   private labelsFor(orderId: string): Label[] {
     return this.sql.exec<Record<string, string | number | null>>(
-      "SELECT label_id, order_id, version, test, service, box, weight_oz, carrier, tracking, status, created_by, created_at, cancelled_at, price_cents, refund, shipment_id, delivery_state, delivery_at, delivery_note FROM labels WHERE order_id = ? ORDER BY created_at",
-      orderId).toArray().map(row => ({
-        labelId: row.label_id as string, orderId: row.order_id as string, version: row.version as number, test: row.test === 1,
-        service: row.service as ServiceCode, box: JSON.parse(row.box as string) as Box, weightOz: row.weight_oz as number,
-        carrier: row.carrier as string, tracking: row.tracking as string, status: row.status as Label["status"],
-        createdBy: row.created_by as string, createdAt: row.created_at as string, cancelledAt: row.cancelled_at as string | null,
-        practice: row.test === 1 && row.shipment_id === null, priceCents: row.price_cents as number | null, refund: row.refund as string | null,
-        delivery: row.delivery_state && row.delivery_at ? { state: row.delivery_state as Delivery["state"], at: row.delivery_at as string, note: row.delivery_note as string | null } : null,
-      }));
+      `SELECT ${LABEL_FIELDS} FROM labels WHERE order_id = ? ORDER BY created_at`, orderId).toArray().map(labelFromRow);
+  }
+
+  /**
+   * Every label the store has, newest first, a page at a time, with the order number
+   * each was bought for. `before` is the previous page's `next`. In the isolated test
+   * service only the one allowed order's labels are listed.
+   */
+  async labelHistory(before: string | null, limit: number): Promise<Outcome> {
+    try {
+      return ok(this.labelPage(before === null ? null : historyCursor(before), limit));
+    } catch (error) {
+      return toOutcome(error);
+    }
+  }
+
+  private labelPage(cursor: { createdAt: string; labelId: string } | null, limit: number): { labels: (Label & { number: number | null })[]; next: string | null } {
+    this.checkIsolation();
+    const rows = this.sql.exec<Record<string, string | number | null>>(
+      `SELECT ${LABEL_FIELDS.split(", ").map(name => `l.${name}`).join(", ")}, o.record AS order_record FROM labels l LEFT JOIN orders o ON o.order_id = l.order_id
+        WHERE ? IS NULL OR l.created_at < ? OR (l.created_at = ? AND l.label_id < ?)
+        ORDER BY l.created_at DESC, l.label_id DESC LIMIT ?`,
+      cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.createdAt ?? null, cursor?.labelId ?? null, limit + 1).toArray();
+    const labels: (Label & { number: number | null })[] = [];
+    for (const row of rows.slice(0, limit)) {
+      const order = typeof row.order_record === "string" ? JSON.parse(row.order_record) as ShipOrder : null;
+      if (isolation(this.env)) {
+        if (!order) continue;
+        try { this.admitStoredOrder(order); } catch { continue; }
+      }
+      labels.push({ ...labelFromRow(row), number: order?.number ?? null });
+    }
+    const last = rows.length > limit ? rows[limit - 1]! : null;
+    return { labels, next: last ? `${last.created_at as string}~${last.label_id as string}` : null };
   }
 
   /**
