@@ -1,7 +1,7 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
-import { connectPage, listPage, pageStart, pendingPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, type OrderView, type Toast } from "./pages.js";
-import { cancelConnect, connectionState, startConnect, type ConnectView } from "./connect.js";
+import { connectPage, finishPage, listPage, pageStart, pendingPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, type OrderView, type Toast } from "./pages.js";
+import { cancelConnect, connectedTo, connectionState, finishSetup, startConnect, type ConnectView } from "./connect.js";
 import { adminPageFrom, adminUserFrom, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
 
 /** EmDash's Editor role; Administrators are above it. Lower roles never see Shipping. */
@@ -87,10 +87,11 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
   const input = interaction(route.input);
   if (!input) return { blocks: [] };
   const isAdmin = user.role >= ADMIN;
-  const connect = input.type === "block_action" && ["connect", "check", "cancel_connect"].includes(input.action_id) ? input.action_id : null;
+  const connect = input.type === "block_action" && ["connect", "finish_setup", "check", "cancel_connect"].includes(input.action_id) ? input.action_id : null;
   let settings: ConnectView;
   try {
     settings = connect === "connect" && isAdmin ? await startConnect(ctx)
+      : connect === "finish_setup" && isAdmin ? await finishSetup(ctx)
       : connect === "cancel_connect" && isAdmin ? await cancelConnect(ctx)
       : await connectionState(ctx, connect === "check");
   } catch (error) {
@@ -99,6 +100,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
   }
   if (settings.state === "pending") return pendingPage(settings.verificationUri, settings.checked);
   if (settings.state === "disconnected") return connectPage(isAdmin, settings.failure);
+  if (settings.state === "finish_setup") return finishPage(isAdmin);
   const hosted = ship(ctx, settings.siteId, settings.key, adminPageFrom(route.request?.url), adminUserFrom(user.email));
   const by = typeof user.email === "string" && user.email ? user.email : user.id;
   try {
@@ -139,11 +141,12 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
         throw error;
       }
     }
-    const list = await hosted.orders();
+    // The connected-to line is read beside the list; if it fails the list shows without it.
+    const [list, shared] = await Promise.all([hosted.orders(), connectedTo(ctx, settings.siteId, settings.key)]);
     // Commerce's "Create shipping label" button went to Ship's own order page, which sent the owner here: open that order.
     if (list.open) return await openOrder(hosted, list.open);
     const from = input.type === "block_action" && input.action_id === "list" ? pageStart(input.value) : 0;
-    return listPage(hosted.siteId, list.orders, list.settings, undefined, from);
+    return listPage(hosted.siteId, list.orders, list.settings, undefined, from, shared);
   } catch (error) {
     if (error instanceof ShipError) {
       if (error.code === "RECONNECT") return connectPage(isAdmin, error.message);

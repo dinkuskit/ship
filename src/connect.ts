@@ -8,6 +8,14 @@ import { pluginResponse, type PluginContext, type PluginResponse } from "emdash/
  * owner never pastes either.
  */
 export const CONNECT_URL = "https://dinkuskit.com/api/store-connections";
+/** Finish setup (store-connect-approve-once-125): whether this store is already connected, and joining it without a second Approve. */
+export const LOOKUP_URL = `${CONNECT_URL}/lookup`;
+export const FINISH_URL = `${CONNECT_URL}/finish`;
+/** Which business and DinkusKit plugins share this store (connect-shows-siblings-133), read with a store:connection pass. */
+export const STORE_CONNECTION_URL = "https://dinkuskit.com/api/store-connection";
+/** Uninstall cancels only this plugin's key (connect-uninstall-cancels-key-134). */
+export const KEY_CANCEL_URL = "https://dinkuskit.com/api/store-keys/cancel";
+const PASSES_URL = "https://dinkuskit.com/api/store-passes";
 export const CLIENT_ID = "dinkus-ship-emdash";
 export const SERVICE = "ship";
 /** The Registry installations DinkusKit.com knows, by slug and by installed ID. */
@@ -30,7 +38,11 @@ export interface Receipt {
 export type ConnectView =
   | { state: "connected"; siteId: string; key: string }
   | { state: "pending"; verificationUri: string; checked?: true }
-  | { state: "disconnected"; failure?: string };
+  | { state: "disconnected"; failure?: string }
+  | { state: "finish_setup" };
+/** What DinkusKit.com says this store is connected to; shown on the page, never used to buy a label. */
+export interface ConnectedTo { business: string; plugins: ("commerce" | "payments" | "ship")[] }
+const PLUGINS = ["commerce", "payments", "ship"];
 
 const COMMERCE_FIRST = "Connect Commerce first. Press Connect in the Commerce plugin, then come back here and press Connect.";
 const RESTART = "Connect did not finish. Press Connect to start again.";
@@ -78,6 +90,8 @@ const connectedIn = (value: Saved): ConnectView | null =>
  * looked at; the old key, encrypted under a setting this version no longer declares, is never read.
  */
 async function notConnected(ctx: PluginContext): Promise<ConnectView> {
+  // DinkusKit.com already knows this store for the owner's business: Finish setup, no second Approve.
+  if (await joinable(ctx)) return { state: "finish_setup" };
   const pasted = await ctx.settings.get<unknown>("siteId").then(value => typeof value === "string" && value.length > 0, () => false);
   return pasted ? { state: "disconnected", failure: UPGRADED } : { state: "disconnected" };
 }
@@ -128,8 +142,64 @@ export async function connectionState(ctx: PluginContext, press = false): Promis
   return { state: "connected", siteId: next.siteId!, key: next.storeKey! };
 }
 
+/** Asks DinkusKit.com whether this store may use Finish setup. Any failure shows Connect, as before. */
+async function joinable(ctx: PluginContext): Promise<boolean> {
+  const origin = siteOrigin(ctx), id = installedId(ctx);
+  if (!origin || !id || !ctx.http) return false;
+  try {
+    const response = await ctx.http.fetch(LOOKUP_URL, { method: "POST", cache: "no-store", redirect: "error",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ protocol_version: 2, client_id: CLIENT_ID, service: SERVICE, site_origin: origin, callback_uri: callbackUri(origin, id) }) });
+    return response.ok && (await response.json() as { finish_setup?: unknown })?.finish_setup === true;
+  } catch {
+    return false;
+  }
+}
+
 /** Connect, or Connect again: asks DinkusKit.com for an approval link for this store. The current key keeps working until the new one arrives. */
 export async function startConnect(ctx: PluginContext): Promise<ConnectView> {
+  const begun = await begin(ctx);
+  return "state" in begun ? begun : { state: "pending", verificationUri: begun.verificationUri };
+}
+
+/**
+ * Finish setup (store-connect-approve-once-125, store-connect-ship-on-at-setup-126): starts a Connect, then asks
+ * DinkusKit.com to approve it for the business that already connected this store. DinkusKit.com reads the
+ * receipt from the store-proof route as for Approve, hands this plugin its own key and turns Ship on. When
+ * DinkusKit.com wants the owner's Approve after all, the page shows the usual Approve link.
+ */
+export async function finishSetup(ctx: PluginContext): Promise<ConnectView> {
+  const begun = await begin(ctx);
+  if ("state" in begun) return begun;
+  const { flowId, verifier, receipt } = begun;
+  let response: Response, body: Record<string, unknown>;
+  try {
+    response = await ctx.http!.fetch(FINISH_URL, { method: "POST", cache: "no-store", redirect: "error",
+      headers: { "content-type": "application/json", accept: "application/json" },
+      body: JSON.stringify({ client_id: CLIENT_ID, connection_id: receipt.connection_id, code_verifier: verifier }) });
+    body = await response.json() as Record<string, unknown>;
+  } catch {
+    // The answer is unknown: the waiting Connect stays, and Check finishes it if DinkusKit.com approved.
+    return { state: "pending", verificationUri: begun.verificationUri };
+  }
+  if (!response.ok && body?.error === "owner_approval_required") return { state: "pending", verificationUri: begun.verificationUri };
+  const { value, revision } = await saved(ctx);
+  if (value.flow?.id !== flowId) return connectedIn(value) ?? { state: "disconnected", failure: RESTART };
+  const stop = async (failure: string): Promise<ConnectView> => {
+    if ((await write(ctx, revision, withoutFlow(value))).applied) await ctx.kv.delete(controlKey(flowId));
+    return connectedIn(value) ?? { state: "disconnected", failure };
+  };
+  if (!response.ok) return stop(body?.error === "connect_commerce_first" ? COMMERCE_FIRST : RESTART);
+  if (body.site_id !== receipt.site_id || typeof body.store_key !== "string" || !STORE_KEY_RE.test(body.store_key)) return stop(RESTART);
+  const next: Saved = { siteId: receipt.site_id, storeKey: body.store_key };
+  if (!(await write(ctx, revision, next)).applied) return stop(RESTART);
+  await ctx.kv.delete(controlKey(flowId));
+  await Promise.all(LEGACY_SETTINGS.map(name => ctx.settings.delete(name).catch(() => false)));
+  return { state: "connected", siteId: next.siteId!, key: next.storeKey! };
+}
+
+/** Starts a Connect at DinkusKit.com and saves it as waiting, or says why it could not. */
+async function begin(ctx: PluginContext): Promise<ConnectView | { flowId: string; verifier: string; verificationUri: string; receipt: Receipt }> {
   const origin = siteOrigin(ctx), id = installedId(ctx);
   if (!origin || !id || !ctx.http) {
     return { state: "disconnected", failure: "Connect needs this store on its https web address, with Ship installed from the EmDash Registry." };
@@ -156,19 +226,61 @@ export async function startConnect(ctx: PluginContext): Promise<ConnectView> {
   }
   if (value.siteId && value.siteId !== siteId) return { state: "disconnected", failure: "DinkusKit.com named another store for this web address. Contact DinkusKit." };
   const flowId = base64url(crypto.getRandomValues(new Uint8Array(18)));
+  const receipt: Receipt = { version: 2, site_id: siteId, connection_id: connectionId, challenge: body.challenge, client_id: CLIENT_ID, service: SERVICE,
+    site_origin: origin, callback_uri: callback, code_challenge: challenge, expires_at: expiresAt as number };
   // The waiting record goes first, so the verifier is never saved without it; the store-proof route vouches for it only once the verifier is saved too.
   await ctx.kv.set(controlKey(flowId), {
     flowId, expiresAt: expiresAt as number, interval: interval as number, nextPollAt: Date.now() + (interval as number) * 1000,
-    verificationUri: body.verification_uri,
-    receipt: { version: 2, site_id: siteId, connection_id: connectionId, challenge: body.challenge, client_id: CLIENT_ID, service: SERVICE,
-      site_origin: origin, callback_uri: callback, code_challenge: challenge, expires_at: expiresAt as number },
+    verificationUri: body.verification_uri, receipt,
   } satisfies Control);
   if (!(await write(ctx, revision, { ...value, flow: { id: flowId, verifier } })).applied) {
     await ctx.kv.delete(controlKey(flowId));
     return { state: "disconnected", failure: RESTART };
   }
   if (value.flow) await ctx.kv.delete(controlKey(value.flow.id));
-  return { state: "pending", verificationUri: body.verification_uri };
+  return { flowId, verifier, verificationUri: body.verification_uri, receipt };
+}
+
+/**
+ * The business DinkusKit.com has this store under and the DinkusKit plugins that share it
+ * (connect-shows-siblings-133), read with a store:connection pass traded for this plugin's own key.
+ * Null when either call fails: the page then leaves the line off.
+ */
+export async function connectedTo(ctx: PluginContext, siteId: string, key: string): Promise<ConnectedTo | null> {
+  if (!ctx.http) return null;
+  try {
+    const traded = await ctx.http.fetch(PASSES_URL, { method: "POST", cache: "no-store", redirect: "error",
+      headers: { accept: "application/json", authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ site_id: siteId, scope: "store:connection", audience: "dinkuskit" }) });
+    const pass = traded.ok ? (await traded.json() as { access_token?: unknown })?.access_token : undefined;
+    if (!safe(pass, 16384)) return null;
+    const read = await ctx.http.fetch(STORE_CONNECTION_URL, { method: "GET", cache: "no-store", redirect: "error",
+      headers: { accept: "application/json", authorization: `Bearer ${pass}` } });
+    if (!read.ok) return null;
+    const body = await read.json() as { business?: unknown; plugins?: unknown };
+    if (!safe(body?.business, 200) || !Array.isArray(body.plugins) || body.plugins.some(name => !PLUGINS.includes(name))) return null;
+    return { business: body.business, plugins: body.plugins as ConnectedTo["plugins"] };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The plugin:uninstall hook (connect-uninstall-cancels-key-134): cancels only this plugin's key at
+ * DinkusKit.com. Commerce's and Payments' keys and the store stay; a failure leaves Disconnect under
+ * Your stores, which still works.
+ */
+export async function cancelKey(ctx: PluginContext): Promise<boolean> {
+  const connected = connectedIn((await saved(ctx)).value);
+  if (connected?.state !== "connected" || !ctx.http) return false;
+  try {
+    const response = await ctx.http.fetch(KEY_CANCEL_URL, { method: "POST", cache: "no-store", redirect: "error",
+      headers: { accept: "application/json", authorization: `Bearer ${connected.key}`, "content-type": "application/json" },
+      body: JSON.stringify({ site_id: connected.siteId }) });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 /** Cancel a waiting Connect; a key this store already had keeps working. */

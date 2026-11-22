@@ -1,0 +1,93 @@
+{
+  "blocks": [
+    {
+      "type": "header",
+      "text": "Shipments"
+    },
+    {
+      "type": "stats",
+      "items": [
+        {
+          "label": "To ship",
+          "value": 1
+        },
+        {
+          "label": "Fix address",
+          "value": 0
+        },
+        {
+          "label": "On the way",
+          "value": 0
+        }
+      ]
+    },
+    {
+      "type": "table",
+      "page_action_id": "list",
+      "empty_text": "No paid orders have reached Ship yet. Commerce sends each paid order with a US address here within a few minutes.",
+      "columns": [
+        {
+          "key": "order",
+          "label": "Order",
+          "format": "element"
+        },
+        {
+          "key": "to",
+          "label": "Ship to"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        }
+      ],
+      "rows": [
+        {
+          "order": {
+            "type": "button",
+            "label": "#1001 (TEST)",
+            "action_id": "open",
+            "value": "order:abc"
+          },
+          "to": "Demo Shopper · Testville, CA",
+          "status": "🟡 Needs label"
+        }
+      ]
+    },
+    {
+      "type": "context",
+      "text": "Connected to Acme Goods on DinkusKit. DinkusKit plugins on this store: Commerce, Payments and Ship. To disconnect one, open Your stores at DinkusKit.com."
+    },
+    {
+      "type": "context",
+      "text": "Refunds, label history, Settings and your Pitney Bowes account are on Ship's own page."
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "label": "Refresh",
+          "action_id": "list"
+        },
+        {
+          "type": "link",
+          "label": "Open Ship",
+          "target": {
+            "kind": "external",
+            "url": "https://ship.dinkuskit.com/stores/site_demo/orders"
+          },
+          "appearance": "secondary"
+        },
+        {
+          "type": "link",
+          "label": "Ship Settings",
+          "target": {
+            "kind": "external",
+            "url": "https://ship.dinkuskit.com/stores/site_demo/settings"
+          },
+          "appearance": "secondary"
+        }
+      ]
+    }
+  ]
+}
