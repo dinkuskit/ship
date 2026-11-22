@@ -1,6 +1,7 @@
 import { ServiceError, ok, type Outcome } from "./errors.js";
 import { NOT_ONE_LINE } from "./order.js";
 import { mintPrintLink } from "./session.js";
+import { signupUrl } from "./pitney.js";
 import type { Box, Label, OrderSummary, Settings, StoreShipping } from "./store.js";
 import type { Delivery } from "./delivery.js";
 
@@ -160,4 +161,86 @@ export async function printLink(env: Env, origin: string, store: Store, site: st
   const expiresAt = Math.floor(Date.now() / 1000) + PRINT_LINK_SECONDS;
   const token = await mintPrintLink(env, { site, labelId, exp: expiresAt });
   return ok({ url: `${origin}/print/${token}`, expiresAt: new Date(expiresAt * 1000).toISOString() });
+}
+
+/**
+ * Ship's settings as the plugin's Shipping settings page shows them (ship-settings-in-admin-129):
+ * everything Ship's own Settings page shows, except the Pitney Bowes Shipper ID and who connected it.
+ */
+export interface AdminSettingsPage {
+  shipFrom: Settings["shipFrom"]; boxes: Box[]; replyTo: string | null; storeName: string | null;
+  /** Whether Ship can buy labels from Pitney Bowes at all, and whether TEST orders use its sandbox. */
+  postageConnected: boolean; testSandbox: boolean;
+  /** The owner's own Pitney Bowes postage account, which pays for real orders' labels; null until connected. */
+  postageAccount: { company: string | null; email: string | null; accountEnding: string | null; connectedAt: string } | null;
+  /**
+   * Pitney Bowes' sign-up page with the ship-from address and the admin's email filled in, as Ship's own
+   * Settings links it; null while Ship cannot connect owners' accounts. The developer id itself stays here.
+   */
+  signupUrl: string | null;
+}
+
+function adminSettingsPage(settings: Settings, adminUser: string | null): AdminSettingsPage {
+  const account = settings.postageAccount, from = settings.shipFrom;
+  return {
+    shipFrom: settings.shipFrom, boxes: settings.boxes, replyTo: settings.replyTo, storeName: settings.storeName,
+    postageConnected: settings.postageConnected, testSandbox: settings.testSandbox,
+    postageAccount: account ? { company: account.company, email: account.email, accountEnding: account.accountEnding, connectedAt: account.connectedAt } : null,
+    signupUrl: settings.signupDeveloperId ? signupUrl(settings.signupDeveloperId, {
+      email: adminUser ?? undefined, name: from?.name, company: from?.company ?? settings.storeName ?? undefined,
+      line1: from?.line1, line2: from?.line2, city: from?.city, state: from?.region, postalCode: from?.postalCode,
+    }) : null,
+  };
+}
+
+/** A settings form's JSON, with only the named fields, each a string or a number. */
+function settingsFields(input: unknown, names: string[]): Fields {
+  const fields = body(input), out: Fields = {};
+  for (const key of Object.keys(fields)) if (!names.includes(key)) throw new ServiceError(400, "INVALID_INPUT", `${key} is not a field of this form`);
+  for (const name of names) {
+    const value = fields[name];
+    if (value === undefined || value === null) continue;
+    if (typeof value === "number" && Number.isFinite(value)) out[name] = String(value);
+    else if (typeof value === "string" && value.length <= 300) out[name] = value;
+    else throw new ServiceError(400, "INVALID_INPUT", `${name} must be a number or a short line of text`);
+  }
+  return out;
+}
+
+/** After a save, the whole page again, or Ship's refusal with the store's own words. */
+async function settingsAfter(store: Store, adminUser: string | null, pending: Promise<unknown>, status = 200): Promise<Outcome> {
+  const outcome = await outcomeOf(pending);
+  return outcome.ok ? ok({ settings: adminSettingsPage(await store.getSettings(), adminUser) }, status) : outcome;
+}
+
+export async function showAdminSettings(store: Store, adminUser: string | null): Promise<Outcome> {
+  return ok({ settings: adminSettingsPage(await store.getSettings(), adminUser) });
+}
+
+export const saveAdminShipFrom = (store: Store, input: unknown, adminUser: string | null) =>
+  settingsAfter(store, adminUser, store.saveShipFrom(settingsFields(input, ["name", "company", "line1", "line2", "city", "region", "postalCode"])));
+export const saveAdminReplyTo = (store: Store, input: unknown, adminUser: string | null) =>
+  settingsAfter(store, adminUser, store.saveReplyTo(settingsFields(input, ["replyTo"])));
+export const addAdminBox = (store: Store, input: unknown, adminUser: string | null) =>
+  settingsAfter(store, adminUser, store.addBox(settingsFields(input, ["name", "lengthIn", "widthIn", "heightIn", "weightOz"])), 201);
+export const removeAdminBox = (store: Store, boxId: string, adminUser: string | null) => settingsAfter(store, adminUser, store.removeBox(boxId));
+export const disconnectAdminPostage = (store: Store, adminUser: string | null) => settingsAfter(store, adminUser, store.disconnectPostage());
+
+/**
+ * Connects the owner's Pitney Bowes postage account from the store admin. The username and
+ * password go to Pitney Bowes once, as from Ship's own page, and Ship keeps neither.
+ * The admin who pressed it is recorded as who connected it.
+ */
+export async function connectAdminPostage(store: Store, input: unknown, adminUser: string | null): Promise<Outcome> {
+  if (!adminUser) throw new ServiceError(400, "INVALID_INPUT", "connecting Pitney Bowes needs the store admin's email in x-ship-admin-user");
+  return settingsAfter(store, adminUser, store.connectPostage(settingsFields(input, ["username", "password"]), `admin:${adminUser}`));
+}
+
+/** One row of the store's label history. */
+export interface AdminLabelRow extends Label { number: number | null }
+export const LABEL_HISTORY_PAGE = 50;
+
+/** Every label the store has bought or cancelled, newest first, 50 at a time; `before` is the previous answer's `next`. */
+export async function adminLabelHistory(store: Store, before: string | null): Promise<Outcome> {
+  return outcomeOf(store.labelHistory(before, LABEL_HISTORY_PAGE));
 }

@@ -1,0 +1,28 @@
+{
+  "blocks": [
+    {
+      "type": "header",
+      "text": "Shipping settings"
+    },
+    {
+      "type": "banner",
+      "variant": "default",
+      "title": "Shipping settings are for Administrators",
+      "description": "Ask an Administrator of this site to change the ship-from address, box sizes or Pitney Bowes account."
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "link",
+          "label": "Shipments",
+          "target": {
+            "kind": "plugin-page",
+            "path": "/shipping"
+          },
+          "appearance": "secondary"
+        }
+      ]
+    }
+  ]
+}

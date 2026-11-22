@@ -1,6 +1,6 @@
 import type { Block, BlockResponse, FormField, LinkElement } from "@emdash-cms/blocks/server";
 import type { ConnectedTo } from "./connect.js";
-import { type Delivery, shipPages, type Box, type Label, type Prices, type ServiceCode, type ShipOrder, type ShipOrderRow, type ShipSettings } from "./ship.js";
+import { type Delivery, shipPages, type Box, type HistoryLabel, type Label, type LabelHistory, type Prices, type ServiceCode, type ShipOrder, type ShipOrderRow, type ShipSettings } from "./ship.js";
 
 /** The Shipping pages, drawn fresh from hosted Ship's answers; nothing here is kept. */
 export const SERVICES: Record<ServiceCode, string> = { GA: "USPS Ground Advantage", PM: "USPS Priority Mail", EM: "USPS Priority Mail Express" };
@@ -24,18 +24,23 @@ export interface OrderView {
 
 export const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const orderName = (order: ShipOrder | ShipOrderRow) => (order.number === null ? order.orderId : `#${order.number}`) + (order.test ? " (TEST)" : "");
-const link = (label: string, url: string, appearance: LinkElement["appearance"] = "secondary"): LinkElement =>
+export const link = (label: string, url: string, appearance: LinkElement["appearance"] = "secondary"): LinkElement =>
   ({ type: "link", label, target: { kind: "external", url }, appearance });
-const header = (text: string): Block => ({ type: "header", text });
-const context = (text: string): Block => ({ type: "context", text });
-const banner = (variant: "default" | "alert" | "error", title: string, description: string): Block => ({ type: "banner", variant, title, description });
-const section = (text: string): Block => ({ type: "section", text });
+/** The plugin's two pages in the Store folder, linked to each other. */
+export const SHIPMENTS_PATH = "/shipping";
+export const SETTINGS_PATH = "/shipping-settings";
+export const pageLink = (label: string, path: string, appearance: LinkElement["appearance"] = "secondary"): LinkElement =>
+  ({ type: "link", label, target: { kind: "plugin-page", path }, appearance });
+export const header = (text: string): Block => ({ type: "header", text });
+export const context = (text: string): Block => ({ type: "context", text });
+export const banner = (variant: "default" | "alert" | "error", title: string, description: string): Block => ({ type: "banner", variant, title, description });
+export const section = (text: string): Block => ({ type: "section", text });
 /** An address as the lines on a parcel, one section each (a section cannot break lines). */
 const parcelLines = (to: ShipOrder["shipTo"]): Block[] =>
   [to.name, to.lines.join(", "), `${to.city}${to.region ? `, ${to.region}` : ""} ${to.postalCode}`].map(section);
 /** Times read in UTC, as on Commerce's order page, until stores record a time zone. */
 const when = (at: string) => `${new Date(at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "UTC" })} UTC`;
-const day = (at: string) => new Date(at).toLocaleDateString("en-US", { dateStyle: "medium", timeZone: "UTC" });
+export const day = (at: string) => new Date(at).toLocaleDateString("en-US", { dateStyle: "medium", timeZone: "UTC" });
 /** "12 oz", "2 lb" or "1 lb 4.5 oz", as Shopify and WooCommerce show weights. */
 export function weight(oz: number): string {
   const tenths = Math.round(oz * 10), pounds = Math.floor(tenths / 160), rest = (tenths - pounds * 160) / 10;
@@ -173,9 +178,9 @@ export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipS
   const next = start + ORDERS_PER_PAGE < orders.length ? String(start + ORDERS_PER_PAGE) : undefined;
   const blocks: Block[] = [header("Shipments")];
   if (!settings.shipFrom || settings.boxes.length === 0) {
-    blocks.push(banner("alert", "Set up Ship first", "Labels need your ship-from address and at least one box size. Add them in Ship Settings; they are kept there for every order."));
+    blocks.push(banner("alert", "Set up Ship first", "Labels need your ship-from address and at least one box size. Add them in Shipping settings; they are kept there for every order."));
   } else if (!settings.postageConnected) {
-    blocks.push(banner("alert", "Pitney Bowes is not connected", "Real orders need your own Pitney Bowes postage account, connected in Ship Settings. TEST orders get free sandbox or practice labels either way."));
+    blocks.push(banner("alert", "Pitney Bowes is not connected", "Real orders need your own Pitney Bowes postage account, connected in Shipping settings. TEST orders get free sandbox or practice labels either way."));
   }
   if (orders.length) {
     blocks.push({ type: "stats", items: [
@@ -196,9 +201,9 @@ export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipS
   });
   if (orders.length > ORDERS_PER_PAGE) blocks.push(context(`Orders ${start + 1} to ${start + shown.length} of ${orders.length}, newest first. Refresh goes back to the newest.`));
   if (shared && shared.plugins.length) blocks.push(context(connectedToLine(shared)));
-  blocks.push(context("Refunds, label history, Settings and your Pitney Bowes account are on Ship's own page."), { type: "actions", elements: [
-    { type: "button", label: "Refresh", action_id: "list" },
-    link("Open Ship", pages.orders), link("Ship Settings", pages.settings),
+  blocks.push({ type: "actions", elements: [
+    { type: "button", label: "Refresh", action_id: "list" }, { type: "button", label: "Label history", action_id: "history" },
+    pageLink("Shipping settings", SETTINGS_PATH), link("Open Ship", pages.orders),
   ] });
   return { blocks, ...(toast ? { toast } : {}) };
 }
@@ -322,14 +327,40 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
   }
   if (!label && order.status === "processing" && !order.addressProblem) {
     if (!settings.shipFrom || settings.boxes.length === 0) {
-      blocks.push(banner("alert", "Set up Ship first", "Labels need your ship-from address and at least one box size. Add them in Ship Settings, then open this order again."));
+      blocks.push(banner("alert", "Set up Ship first", "Labels need your ship-from address and at least one box size. Add them in Shipping settings, then open this order again."));
     } else if (!order.test && !settings.postageConnected) {
-      blocks.push(banner("alert", "Connect your Pitney Bowes account first", "Real orders' labels are paid from your own Pitney Bowes postage account. Connect it in Ship Settings, then open this order again."));
+      blocks.push(banner("alert", "Connect your Pitney Bowes account first", "Real orders' labels are paid from your own Pitney Bowes postage account. Connect it in Shipping settings, then open this order again."));
     } else {
       blocks.push(header(order.labels.length ? "Buy a new label" : "Buy a label"), ...labelForm(view));
     }
   }
   if (order.labels.length) blocks.push(header("Labels"), labelsTable(order.labels), ...more(order.labels.length, "label", "labels"));
-  blocks.push({ type: "actions", elements: [link("Open in Ship", pages.order(order.orderId)), link("Ship Settings", pages.settings)] });
+  blocks.push({ type: "actions", elements: [link("Open in Ship", pages.order(order.orderId)), pageLink("Shipping settings", SETTINGS_PATH)] });
   return { blocks, ...(toast ? { toast } : {}) };
 }
+
+/** "#1001", or the order id when Commerce sent no number, for a label history row. */
+const historyOrder = (label: HistoryLabel) => (label.number === null ? label.orderId : `#${label.number}`) + (label.test ? " (TEST)" : "");
+
+/**
+ * Every label the store bought, newest first, fifty at a time (ship-settings-in-admin-129), as
+ * Shopify's and WooCommerce Shipping's label lists: when, which order, the service and postage,
+ * tracking and where it is now. The order number opens the order.
+ */
+export function labelHistoryPage(siteId: string, history: LabelHistory, older: boolean): BlockResponse {
+  const blocks: Block[] = [header("Shipments"), { type: "actions", elements: [{ type: "button", label: "Back to Shipments", action_id: "list" }] },
+    header("Label history"), { type: "table", page_action_id: "history", empty_text: "No labels yet. Labels you buy, print or cancel show here.",
+      columns: [
+        { key: "bought", label: "Bought" }, { key: "order", label: "Order", format: "element" }, { key: "service", label: "Service" },
+        { key: "tracking", label: "Tracking number" }, { key: "status", label: "Status" },
+      ],
+      ...(history.next ? { next_cursor: history.next } : {}),
+      rows: history.labels.map(label => ({
+        bought: day(label.createdAt), order: { type: "button", label: historyOrder(label), action_id: "open", value: label.orderId },
+        service: `${SERVICES[label.service] ?? label.service}, ${postage(label)}`, tracking: grouped(label), status: dotted(labelStatus(label)),
+      })) }];
+  if (older) blocks.push(context("Older labels. Refresh goes back to the newest."));
+  blocks.push({ type: "actions", elements: [{ type: "button", label: "Refresh", action_id: "history" }, link("Open Ship", shipPages(siteId).orders)] });
+  return { blocks };
+}
+

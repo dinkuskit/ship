@@ -110,6 +110,17 @@ the forward below is for.
 | `POST /v1/admin/labels/{labelId}/cancel` | `200 { labelId, refund }`; `404 NOT_FOUND` for no live label; `503 POSTAGE_NOT_CONNECTED`. Cancelling never changes the Commerce order. |
 | `POST /v1/admin/labels/{labelId}/print-link` | `200 { url, expiresAt }`: `https://ship.dinkuskit.com/print/{token}` opens this one label's PDF for 5 minutes with no sign-in. `404 NOT_FOUND` for a label the store does not have. |
 | `GET /print/{token}` (no pass) | The PDF inline (`application/pdf`, `private, no-store`, `referrer-policy: no-referrer`); `410` for an expired, foreign or altered link; `503` while Pitney Bowes's copy cannot be fetched. |
+| `GET /v1/admin/labels?before=` | `200 { labels: HistoryLabel[], next: string \| null }`: every label the store bought or cancelled, newest first, 50 at a time (ship-settings-in-admin-129). `before` is the previous answer's `next`; anything else is `400 INVALID_INPUT`. `HistoryLabel` is a `Label` with the order's `number`. |
+| `GET /v1/admin/settings` | `200 { settings: SettingsPage }` (below). |
+| `POST /v1/admin/settings/ship-from` with `{ name, company?, line1, line2?, city, region, postalCode }` | `200 { settings: SettingsPage }`, or `400 INVALID_INPUT` with what is wrong, as on Ship's own Settings. |
+| `POST /v1/admin/settings/reply-to` with `{ replyTo }` | The same. |
+| `POST /v1/admin/settings/boxes` with `{ name, lengthIn, widthIn, heightIn, weightOz }` | `201 { settings: SettingsPage }`, or `400 INVALID_INPUT`. |
+| `POST /v1/admin/settings/boxes/{boxId}/remove` | `200 { settings: SettingsPage }`. |
+| `POST /v1/admin/settings/postage` with `{ username, password }` | `200 { settings: SettingsPage }` once Pitney Bowes finds the account (ship-pitney-connect-in-admin-138); `422` when it does not; `400 INVALID_INPUT` without `x-ship-admin-user`. The password goes to Pitney Bowes once and Ship keeps neither it nor the username; `connectedBy` is `admin:<email>`. |
+| `POST /v1/admin/settings/postage/disconnect` | `200 { settings: SettingsPage }`. |
+
+Every settings route refuses a field the form does not have (`400 INVALID_INPUT`)
+and takes each value as a string of at most 300 characters or a number.
 
 `Row`: `orderId`, `number`, `version`, `status`, `test`, `shipTo`, `addressProblem`,
 `items` (one short line, "2 × Demo Mug, 1 × Hat, +3 more") , `itemCount`, `labelStatus`
@@ -132,7 +143,12 @@ scan's time as UTC ISO and `note` the carrier's one line on it or null. The plug
 shows `state` as "In transit", "Out for delivery", "Delivered" or "Problem", with the
 note on the order's page.
 `Settings`: `shipFrom` (boolean), `boxes[]`, `postageConnected`, `testSandbox`.
-Nothing about the owner's Pitney Bowes account crosses to the plugin.
+`SettingsPage`: `shipFrom` (the address, or null), `boxes[]`, `replyTo`, `storeName`,
+`postageConnected`, `testSandbox`, `postageAccount` (`{ company, email, accountEnding,
+connectedAt }` or null) and `signupUrl` (Pitney Bowes' sign-up page with the ship-from
+address and the calling admin's email filled in, or null while Ship cannot connect
+owners' accounts). The Shipper ID, who connected the account and DinkusKit's developer
+id never cross to the plugin.
 
 The `ship:orders` routes (`/v1/orders`, `/v1/labels`, `/v1/labels/ack`) are
 unchanged and refuse a `ship:admin` pass, as the admin routes refuse a
@@ -188,7 +204,9 @@ for 60 days, to catch a missed update. Neither the plugin nor Commerce calls thi
 
 ## What stays on ship.dinkuskit.com
 
-Settings (ship-from address, boxes, reply-to), the owner's Pitney Bowes account
-(its sign-in never passes through the store admin), refunds questions and
-label history. The plugin links there from every page; it is the full path and
-the fallback when the plugin is not installed or the store admin is down.
+Ship's own pages keep everything the plugin shows, including Settings and the
+owner's Pitney Bowes account, as the full path and the fallback when the plugin is
+not installed or the store admin is down. Signing up for Pitney Bowes stays on
+Pitney Bowes' site, reached through Ship's prefilled link from either page. The
+plugin's Shipping settings page and Label history fall back to links to Ship's
+own pages while ship.dinkuskit.com answers `404` for the routes above.

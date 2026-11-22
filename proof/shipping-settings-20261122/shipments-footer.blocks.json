@@ -1,0 +1,62 @@
+{
+  "blocks": [
+    {
+      "type": "header",
+      "text": "Shipments"
+    },
+    {
+      "type": "table",
+      "page_action_id": "list",
+      "empty_text": "No paid orders have reached Ship yet. Commerce sends each paid order with a US address here within a few minutes.",
+      "columns": [
+        {
+          "key": "order",
+          "label": "Order",
+          "format": "element"
+        },
+        {
+          "key": "to",
+          "label": "Ship to"
+        },
+        {
+          "key": "status",
+          "label": "Status"
+        }
+      ],
+      "rows": []
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "label": "Refresh",
+          "action_id": "list"
+        },
+        {
+          "type": "button",
+          "label": "Label history",
+          "action_id": "history"
+        },
+        {
+          "type": "link",
+          "label": "Shipping settings",
+          "target": {
+            "kind": "plugin-page",
+            "path": "/shipping-settings"
+          },
+          "appearance": "secondary"
+        },
+        {
+          "type": "link",
+          "label": "Open Ship",
+          "target": {
+            "kind": "external",
+            "url": "https://ship.dinkuskit.com/stores/site_demo/orders"
+          },
+          "appearance": "secondary"
+        }
+      ]
+    }
+  ]
+}

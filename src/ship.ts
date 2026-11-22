@@ -62,6 +62,25 @@ export interface ShipOrderRow {
 }
 export interface ShipSettings { shipFrom: boolean; boxes: Box[]; postageConnected: boolean; testSandbox: boolean }
 export type Prices = Partial<Record<ServiceCode, number | null>>;
+/** The return address printed on every label. */
+export interface ShipFrom { name: string; company?: string; line1: string; line2?: string; city: string; region: string; postalCode: string }
+/**
+ * Ship's settings as the Shipping settings page shows them (ship-settings-in-admin-129): what Ship's own
+ * Settings page shows, less the Pitney Bowes Shipper ID and who connected it.
+ */
+export interface ShipSettingsPage {
+  shipFrom: ShipFrom | null; boxes: Box[]; replyTo: string | null; storeName: string | null;
+  postageConnected: boolean; testSandbox: boolean;
+  postageAccount: { company: string | null; email: string | null; accountEnding: string | null; connectedAt: string } | null;
+  /** Pitney Bowes' sign-up page with this store's details filled in; null while Ship cannot connect owners' accounts. */
+  signupUrl: string | null;
+}
+/** One form on the Shipping settings page and the hosted Ship route it saves to. */
+export type SettingsForm = "ship-from" | "reply-to" | "boxes" | "postage";
+/** A row of the store's label history: a label with its order's number. */
+export type HistoryLabel = Label & { number: number | null };
+/** Fifty labels, newest first; `next` asks for the fifty after them. */
+export interface LabelHistory { labels: HistoryLabel[]; next: string | null }
 export interface LabelRequest { version: number; boxId: string; weightOz: number; service?: ServiceCode; kind?: "practice"; buyAgain?: true; by?: string }
 
 /** A refusal with a message the page can show as it is. */
@@ -150,6 +169,11 @@ export interface Ship {
   buy(orderId: string, request: LabelRequest): Promise<Label>;
   cancel(labelId: string): Promise<{ labelId: string; refund: string | null }>;
   printLink(labelId: string): Promise<{ url: string; expiresAt: string }>;
+  settings(): Promise<ShipSettingsPage>;
+  saveSettings(form: SettingsForm, values: Record<string, string>): Promise<ShipSettingsPage>;
+  removeBox(boxId: string): Promise<ShipSettingsPage>;
+  disconnectPostage(): Promise<ShipSettingsPage>;
+  labels(before: string | null): Promise<LabelHistory>;
 }
 
 /** The Shipping page's rows, plus the order Ship's own page just forwarded here, consumed on read. */
@@ -251,6 +275,11 @@ export function ship(ctx: PluginContext, siteId: string, key: string, adminPage:
     buy: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels`, request)) as { label: Label }).label,
     cancel: id => call("POST", `/v1/admin/labels/${segment(id)}/cancel`) as Promise<{ labelId: string; refund: string | null }>,
     printLink: id => call("POST", `/v1/admin/labels/${segment(id)}/print-link`) as Promise<{ url: string; expiresAt: string }>,
+    settings: async () => ((await call("GET", "/v1/admin/settings")) as { settings: ShipSettingsPage }).settings,
+    saveSettings: async (form, values) => ((await call("POST", `/v1/admin/settings/${form}`, values)) as { settings: ShipSettingsPage }).settings,
+    removeBox: async id => ((await call("POST", `/v1/admin/settings/boxes/${segment(id)}/remove`)) as { settings: ShipSettingsPage }).settings,
+    disconnectPostage: async () => ((await call("POST", "/v1/admin/settings/postage/disconnect")) as { settings: ShipSettingsPage }).settings,
+    labels: before => call("GET", `/v1/admin/labels${before === null ? "" : `?before=${encodeURIComponent(before)}`}`) as Promise<LabelHistory>,
   };
 }
 
