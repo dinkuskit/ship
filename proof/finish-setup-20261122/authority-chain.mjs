@@ -229,10 +229,10 @@ try {
   assert.equal((await harness.request(runtime, owner, '/account/sites', await form(owner, { action: 'disconnect_plugin', site_id: commerce.siteId, plugin: 'ship' }))).status, 303);
   check('Disconnect ended the key and turned Ship off', await trade(secondKey, commerce.siteId, 'ship:admin', 'dinkus-ship') === 'invalid_store_key' &&
     await trade(commerce.key, commerce.siteId, 'ship:orders', 'dinkus-ship') === 'service_not_enabled');
-  // The plugin keeps a traded ship:admin pass for at most its 5 minutes; this stands in for that lapse.
+  // The plugin reuses a traded ship:admin pass for at most a minute (ship-pass-reuse-001); this stands in for that minute passing.
   await again.store.kv.delete(`cache:pass:${commerce.siteId}`);
   page = await again.page(load);
-  check('once its last pass lapses, the installed plugin says to connect again', page.buttons.includes('Connect again') && !onList(page), banner(page));
+  check('once its kept pass ages out, the installed plugin says to connect again', page.buttons.includes('Connect again') && !onList(page), banner(page));
   const back = install(ACME);
   page = await back.page(load);
   check('a fresh page shows Connect, not Finish setup', page.buttons.includes('Connect') && !page.buttons.includes('Finish setup'), page.buttons);

@@ -32,13 +32,13 @@ the store address (DinkusKit.com's receipt read is answered by the real
 hosted Ship's order list (a stand-in that answers only after verifying the ship:admin pass against DinkusKit.com's published keys).
 
 `authority-chain-trace.md` is the run's output, with keys and passes redacted. It
-shows: the allowed store joining with its own key; an installation claiming
-another store's address, a store no business connected, and another business's
-owner all refused before any key; a page load or Continue during Finish setup
-unable to take it over (Payments); uninstall cancelling only this plugin's key
-while Commerce's and other stores' keys keep working; Disconnect (and Revoke)
-needing the owner's Approve; and a store connected with the released plugin (main)
-keeping its key and settings after the upgrade.
+shows: an Editor refused and an Administrator joining with Ship's own key, which
+turns Ship on; an installation claiming another store's address, a store no
+business connected, and another business's owner all refused before any key;
+uninstall cancelling only Ship's key while Commerce's and other stores' keys keep
+working; the owner's Disconnect turning Ship off and needing the owner's Approve to
+bring it back; and a store connected with the released plugin (main) keeping its key
+and settings after the upgrade.
 
 ## Checks
 
