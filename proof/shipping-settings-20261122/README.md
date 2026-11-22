@@ -31,21 +31,37 @@ EmDash's toast. No store, DinkusKit.com or Ship service was contacted.
 - `label-history.png` and `-390.png`: every label, newest first, with
   **Load more**; the order number opens the order.
 
-## Authority
+## Authority chain, end to end
 
-The new hosted routes are proved against Ship's real Worker in
-`service/spec/admin-settings.spec.ts` (Cloudflare's Workers test pool, the
-real pass check against a published key set): a `ship:orders` pass is refused
-on every settings and history route, another store's pass sees only its own
-settings, a refused save changes nothing, a Pitney Bowes connect needs the
-admin's email and keeps no password, and the settings answer never carries the
-Shipper ID, who connected it or the developer id. The plugin's side, in
-`tests/settings.test.mjs`, shows the store key going only to DinkusKit.com, the
-pass only to Ship, nothing sent for an Editor or an unconnected store, and only
-each form's own fields sent.
+`authority-chain.spec.ts` runs the built plugin's `admin` route, for users of
+each role, against hosted Ship's own Worker and per-store Durable Objects in
+Cloudflare's Workers runtime (`vitest.config.mts` here reuses
+`service/wrangler.jsonc`), with Pitney Bowes's sandbox API and DinkusKit.com's
+store-passes stood in for. `authority-chain-trace.md` is its output and lists
+every stand-in. It shows:
+
+- an Administrator's Connect going plugin -> `POST /v1/admin/settings/postage`
+  -> Pitney Bowes's credentials check -> the store's Durable Object keeping the
+  Shipper ID with `connectedBy admin:<email>`, and the password in no table;
+- an Editor, and the same Administrator after being made an Editor, refused
+  before any effect: no Ship call, no Pitney Bowes call, storage unchanged, also
+  when the form is sent without a page or onto the Shipments page;
+- real orders' labels, bought from the Shipments page, paid by the account
+  connected at that moment: the first account, then its replacement only, then
+  none after Disconnect (Ship refuses and Pitney Bowes is not asked); DinkusKit's
+  own sandbox shipper never pays a real order;
+- another store's Connect changing only that store.
+
+Breaking either side (the plugin's Administrator check, or Ship's Disconnect)
+makes the run fail, as the trace records.
+
+The routes alone are also covered in `service/spec/admin-settings.spec.ts`
+(a `ship:orders` pass refused on every new route, stores isolated, a refused
+save changing nothing), and the plugin alone in `tests/settings.test.mjs`.
 
 ## Checks
 
 - `bin/verify-ship quick`: 86 pass. `bin/verify-ship full`: passed, service 98 pass.
+- Authority chain: 1 pass (see above).
 - `npm run typecheck`: clean.
 - Registry bundle: 41,442 bytes, against 32,527 on main (cap 131,072).
