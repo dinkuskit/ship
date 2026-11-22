@@ -1,0 +1,25 @@
+{
+  "blocks": [
+    {
+      "type": "header",
+      "text": "Shipments"
+    },
+    {
+      "type": "banner",
+      "variant": "default",
+      "title": "Almost ready: this store is already connected to DinkusKit",
+      "description": "Press Finish setup to connect Ship to the same business and turn Ship on for this store. The business owner gets an email saying Ship joined."
+    },
+    {
+      "type": "actions",
+      "elements": [
+        {
+          "type": "button",
+          "label": "Finish setup",
+          "action_id": "finish_setup",
+          "style": "primary"
+        }
+      ]
+    }
+  ]
+}

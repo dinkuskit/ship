@@ -32,8 +32,10 @@ const pass = (claims = {}) => `${b64({ alg: "ES256" })}.${b64({ iss: "https://di
 
 /** A host with the plugin's settings, a fake network, the plugin's KV (a Map, or null for a host without one), and an Editor at the Shipping page. */
 function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.json({ access_token: pass(), token_type: "Bearer", expires_in: 300 }), role = 40, requestUrl = "",
-  kv = new Map(), dinkus = {}, pluginId = "dinkus-ship", siteUrl = "https://shop.example.test", legacy = null } = {}) {
+  kv = new Map(), dinkus = {}, pluginId = "dinkus-ship", siteUrl = "https://shop.example.test", legacy = null, joinable = false, connection = null } = {}) {
   const calls = [];
+  // Finish setup's question and the connected-to read are kept apart from the calls the older tests count.
+  const lookups = [], shared = [];
   // The encrypted "connection" setting Connect fills, with a revision per write.
   const stored = new Map(siteId && key ? [["connection", { value: JSON.stringify({ siteId, storeKey: key }), revision: "1" }]] : []);
   // Ship 0.2.1's pasted settings: a plain Store ID and a key still encrypted under a secret this version no longer declares.
@@ -63,6 +65,22 @@ function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.jso
     http: { fetch: async (url, init) => {
       const body = init?.body ? JSON.parse(init.body) : undefined;
       const adminPage = init?.headers?.["x-ship-admin-page"], adminUser = init?.headers?.["x-ship-admin-user"];
+      if (url === "https://dinkuskit.com/api/store-connections/lookup") {
+        lookups.push(body);
+        return Response.json({ finish_setup: joinable });
+      }
+      if (url === "https://dinkuskit.com/api/store-passes" && body?.scope === "store:connection") {
+        shared.push({ url, authorization: init?.headers?.authorization, body });
+        return connection ? Response.json({ access_token: "connection-pass", token_type: "Bearer", expires_in: 300 }) : Response.json({ error: "scope_not_allowed" }, { status: 403 });
+      }
+      if (url === "https://dinkuskit.com/api/store-connection") {
+        shared.push({ url, authorization: init?.headers?.authorization });
+        return Response.json(connection);
+      }
+      if (url === "https://dinkuskit.com/api/store-keys/cancel") {
+        calls.push({ url, method: init?.method, authorization: init?.headers?.authorization, body });
+        return Response.json({ cancelled: true });
+      }
       calls.push({ url, method: init?.method ?? "GET", authorization: init?.headers?.authorization, ...(adminPage === undefined ? {} : { adminPage }), ...(adminUser === undefined ? {} : { adminUser }), body });
       if (url === "https://dinkuskit.com/api/store-passes") return passes({ url, init, body });
       if (url.startsWith("https://dinkuskit.com/api/store-connections")) {
@@ -85,7 +103,7 @@ function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.jso
     if (!checked.valid) throw new Error(`invalid Block Kit: ${JSON.stringify(checked.errors)}`);
     return response;
   };
-  return { ctx, calls, page, route, kv, stored, saved: () => JSON.parse(stored.get("connection")?.value ?? "{}") };
+  return { ctx, calls, lookups, shared, page, route, kv, stored, saved: () => JSON.parse(stored.get("connection")?.value ?? "{}") };
 }
 const text = response => JSON.stringify(response);
 const load = { type: "page_load", page: "/shipping" };
@@ -415,7 +433,9 @@ test("a host without KV still works, trading the key once per click", async () =
 
 test("DinkusKit.com's refusals and bad passes stop the click with a plain reason", async () => {
   const refused = await host({ passes: () => Response.json({ error: "service_not_enabled" }, { status: 403 }) }).page(load);
-  assert.match(text(refused), /Ship is turned off for this store/);
+  assert.match(text(refused), /Ship is off for this store at DinkusKit.com\. An Administrator presses Connect again on this page to turn it on\./);
+  const adminRefused = await host({ role: 50, passes: () => Response.json({ error: "service_not_enabled" }, { status: 403 }) }).page(load);
+  assert.match(text(adminRefused), /"label":"Connect again","action_id":"connect"/, "a store connected before Ship turned on at Connect presses Connect again");
   const wrongStore = await host({ passes: () => Response.json({ access_token: pass({ site_id: "other" }) }) }).page(load);
   assert.match(text(wrongStore), /pass Ship cannot use/);
   const wrongScope = await host({ passes: () => Response.json({ access_token: pass({ scope: "ship:orders" }) }) }).page(load);
@@ -782,4 +802,79 @@ test("a store with more orders than EmDash can draw at once gets them 50 at a ti
   assert.equal(table(all).rows.length, 50);
   assert.equal(table(all).next_cursor, undefined);
   assert.doesNotMatch(text(all), /Orders 1 to/);
+});
+
+// Step (b) of DinkusKit.com's store-connect-order-135.
+const ISSUED = "dk_store_" + "f".repeat(43);
+
+test("a store DinkusKit.com already knows shows Finish setup, and one press connects Ship with no second Approve", async () => {
+  const editor = host({ siteId: null, key: null, joinable: true });
+  const asked = text(await editor.page(load));
+  assert.match(asked, /Almost ready: this store is already connected to DinkusKit/);
+  assert.match(asked, /Ask an Administrator of this site to press Finish setup/);
+  assert.equal(text(await editor.page({ type: "block_action", action_id: "finish_setup" })).includes("finish_setup"), false, "an Editor's press starts nothing");
+  assert.equal(editor.calls.length, 0);
+
+  let receipt;
+  const h = host({ siteId: null, key: null, role: 50, joinable: true, dinkus: {
+    "/api/store-connections": started(),
+    "/api/store-connections/finish": async body => {
+      // DinkusKit.com reads the receipt on the store's own address before it approves.
+      receipt = await proofOf(h, { connection_id: CONNECTION });
+      assert.deepEqual(Object.keys(body).sort(), ["client_id", "code_verifier", "connection_id"]);
+      assert.equal(createHash("sha256").update(body.code_verifier).digest("base64url"), receipt.body.code_challenge);
+      return Response.json({ site_id: SITE, store_key: ISSUED });
+    },
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  const page = text(await h.page(load));
+  assert.match(page, /"label":"Finish setup","action_id":"finish_setup"/);
+  assert.doesNotMatch(page, /"action_id":"connect"/, "one button, not Connect beside it");
+  assert.deepEqual(h.lookups, [{ protocol_version: 2, client_id: "dinkus-ship-emdash", service: "ship", site_origin: "https://shop.example.test",
+    callback_uri: "https://shop.example.test/_emdash/admin/plugins/r_ehdlg5cxkb3ffqvr/shipping" }]);
+  assert.match(text(await h.page({ type: "block_action", action_id: "finish_setup" })), /#1001/, "straight to the orders");
+  assert.equal(receipt.status, 200);
+  assert.deepEqual(h.saved(), { siteId: SITE, storeKey: ISSUED });
+  assert.deepEqual([...h.kv.keys()].filter(name => name.startsWith("state:connect:")), [], "nothing is left waiting");
+  assert.equal(h.calls.some(call => call.url.endsWith("/token")), false, "no wait for an Approve");
+});
+
+test("Finish setup falls back to the owner's Approve, or to starting over, when DinkusKit.com says so", async () => {
+  const owner = host({ siteId: null, key: null, role: 50, joinable: true, dinkus: {
+    "/api/store-connections": started(), "/api/store-connections/finish": () => Response.json({ error: "owner_approval_required" }, { status: 409 }),
+    "/api/store-connections/token": { store_key: ISSUED, site_id: SITE },
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  const waiting = text(await owner.page({ type: "block_action", action_id: "finish_setup" }));
+  assert.match(waiting, /Approve at DinkusKit.com/);
+  assert.match(text(await owner.page({ type: "block_action", action_id: "check" })), /#1001/, "after the owner's Approve, Check finishes as usual");
+  assert.deepEqual(owner.saved(), { siteId: SITE, storeKey: ISSUED });
+
+  const refused = host({ siteId: null, key: null, role: 50, joinable: true, dinkus: {
+    "/api/store-connections": started(), "/api/store-connections/finish": () => Response.json({ error: "grant_revoked" }, { status: 409 }),
+  } });
+  assert.match(text(await refused.page({ type: "block_action", action_id: "finish_setup" })), /Connect did not finish/);
+  assert.deepEqual(refused.saved(), {}, "nothing is saved on a refusal");
+  assert.equal((await proofOf(refused, { connection_id: CONNECTION })).status, 404, "and the proof route vouches for nothing");
+});
+
+test("the orders list says which business the store is connected to, read with this plugin's own pass", async () => {
+  const quiet = host({ ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  assert.doesNotMatch(text(await quiet.page(load)), /Connected to/, "no answer, no line");
+  const h = host({ connection: { business: "Acme Goods", site_origin: "https://shop.example.test", plugins: ["commerce", "payments", "ship"] },
+    ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  assert.match(text(await h.page(load)), /Connected to Acme Goods on DinkusKit\. DinkusKit plugins on this store: Commerce, Payments and Ship\./);
+  assert.deepEqual(h.shared, [
+    { url: "https://dinkuskit.com/api/store-passes", authorization: `Bearer ${KEY}`, body: { site_id: SITE, scope: "store:connection", audience: "dinkuskit" } },
+    { url: "https://dinkuskit.com/api/store-connection", authorization: "Bearer connection-pass" },
+  ]);
+  const odd = host({ connection: { business: "Acme Goods", plugins: ["commerce", "elsewhere"] }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  assert.doesNotMatch(text(await odd.page(load)), /Connected to/, "an unknown plugin name hides the line");
+});
+
+test("uninstalling Ship cancels only its own key at DinkusKit.com", async () => {
+  const never = host({ siteId: null, key: null });
+  await plugin.hooks["plugin:uninstall"]({ deleteData: false }, never.ctx);
+  assert.deepEqual(never.calls, []);
+  const h = host();
+  await plugin.hooks["plugin:uninstall"]({ deleteData: true }, h.ctx);
+  assert.deepEqual(h.calls, [{ url: "https://dinkuskit.com/api/store-keys/cancel", method: "POST", authorization: `Bearer ${KEY}`, body: { site_id: SITE } }]);
 });

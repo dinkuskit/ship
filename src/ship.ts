@@ -113,7 +113,8 @@ export function admitPass(token: unknown, siteId: string, reuse = false): string
 const PASS_REFUSALS: Record<string, string> = {
   invalid_store_key: "DinkusKit.com no longer knows this plugin's store key. An Administrator presses Connect again.",
   site_mismatch: "This plugin's store key belongs to another store. An Administrator presses Connect again.",
-  service_not_enabled: "Ship is turned off for this store. Turn it on at DinkusKit.com, then try again.",
+  // Connecting turns Ship on (store-connect-ship-on-at-setup-126); a store connected before that presses Connect again once.
+  service_not_enabled: "Ship is off for this store at DinkusKit.com. An Administrator presses Connect again on this page to turn it on.",
   service_cut_off: "DinkusKit.com has cut Ship off for this store. Contact DinkusKit.",
   store_suspended: "This store is suspended at DinkusKit.com.",
   rate_limited: "DinkusKit.com is busy with this store's passes. Try again in a minute.",
@@ -136,7 +137,7 @@ export async function tradeStoreKey(ctx: PluginContext, siteId: string, key: str
   const error = typeof body === "object" && body !== null ? (body as { error?: unknown }).error : undefined;
   if (!response.ok) {
     const reason = typeof error === "string" ? PASS_REFUSALS[error] : undefined;
-    throw new ShipError(error === "invalid_store_key" || error === "site_mismatch" ? "RECONNECT" : "PASS", reason ?? `DinkusKit.com refused to sign a pass (${response.status}). Try again in a moment.`, response.status);
+    throw new ShipError(error === "invalid_store_key" || error === "site_mismatch" || error === "service_not_enabled" ? "RECONNECT" : "PASS", reason ?? `DinkusKit.com refused to sign a pass (${response.status}). Try again in a moment.`, response.status);
   }
   return admitPass((body as { access_token?: unknown }).access_token, siteId);
 }

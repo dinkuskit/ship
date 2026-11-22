@@ -20,8 +20,12 @@ through, Ship.
           └────────────── GET /print/{token}, no sign-in, this one label only ────────┘
 ```
 
-- The store key `dk_store_…` goes only to `https://dinkuskit.com/api/store-passes`,
-  never to Ship. The plugin trades it for a 5-minute pass with
+- The store key `dk_store_…` goes only to DinkusKit.com, never to Ship: to
+  `https://dinkuskit.com/api/store-passes` for passes, and once, from the
+  `plugin:uninstall` hook, to `https://dinkuskit.com/api/store-keys/cancel`
+  (connect-uninstall-cancels-key-134). The cancel sends `{ site_id }` with the key as
+  Bearer and deletes only Ship's own key; the store, the other plugins' keys and the
+  Ship grant stay, so installing Ship again shows Finish setup. The plugin trades it for a 5-minute pass with
   `scope: "ship:admin"`, `audience: "dinkus-ship"`, keeps the pass in its own
   plugin KV beside a SHA-256 fingerprint of the key, and reuses it for later
   clicks only while the pass is under a minute old (its `iat`), has at least
@@ -41,8 +45,27 @@ through, Ship.
   approves at DinkusKit.com; the answer is `{ store_key, site_id }`, saved in
   the encrypted `connection` setting in place of the verifier. DinkusKit.com
   refuses with `connect_commerce_first` until Commerce has connected the store.
-  A key DinkusKit.com no longer knows (`invalid_store_key`, `site_mismatch`)
-  shows **Connect again**.
+  A key DinkusKit.com no longer knows (`invalid_store_key`, `site_mismatch`), or a
+  store where Ship is off (`service_not_enabled`), shows **Connect again**.
+- Connecting turns Ship on for the store (store-connect-ship-on-at-setup-126); the
+  owner's **Disconnect Ship** under Your stores turns it off. There is no separate
+  Ship switch.
+- **Finish setup** (store-connect-approve-once-125): before Connect, the page asks
+  `POST /api/store-connections/lookup` (`{ protocol_version: 2, client_id, service,
+  site_origin, callback_uri }`). When it answers `{ finish_setup: true }` (the
+  business already connected this store and the owner has not disconnected Ship),
+  an Administrator sees **Finish setup** instead of Connect; Editors see no button.
+  The press starts the same protocol-2 Connect, then sends
+  `POST /api/store-connections/finish` with `{ client_id, connection_id,
+  code_verifier }`. DinkusKit.com reads the receipt on `store-proof` as for Approve
+  and answers `{ store_key, site_id }` with no second Approve, turns Ship on and
+  emails the owner. `owner_approval_required` falls back to the Approve link and
+  **Check**; any other refusal saves nothing.
+- **Connected-to line** (connect-shows-siblings-133): the orders list trades the key
+  for a pass with `scope: "store:connection"`, `audience: "dinkuskit"` and reads
+  `GET https://dinkuskit.com/api/store-connection` with it, which answers
+  `{ business, site_origin, plugins }`. The page names the business and the
+  plugins; on any failure the line is left off.
 - Upgrading from 0.2.1 (store-connect-no-paste-082): pasted keys retire, so the
   old `siteId` and `storeKey` settings are never used or sent. A store that
   still has the old Store ID shows why it must Connect once; the plugin reads only
@@ -55,7 +78,7 @@ through, Ship.
 
 `POST /api/store-passes` with body `{ site_id, scope: "ship:admin", audience: "dinkus-ship" }`
 must sign a pass exactly like the `ship:orders` one, under the store's existing
-**Ship** grant (the owner's Ship on/off switch): same issuer, audience, `site_id`,
+**Ship** grant (on once Ship connects, off after the owner's Disconnect): same issuer, audience, `site_id`,
 `site_origin`, 5-minute life. This is a `dinkuskit/dinkuskit` change
 (`STORE_PASS_SERVICES` in `src/account/config.ts`, plus the lookup in
 `src/account/store-passes.ts`, which today finds a service by scope and audience).

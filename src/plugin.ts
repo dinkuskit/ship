@@ -1,6 +1,6 @@
 import type { SandboxedPlugin } from "emdash/plugin";
 import { shippingAdmin } from "./admin.js";
-import { storeProof } from "./connect.js";
+import { cancelKey, storeProof } from "./connect.js";
 
 /**
  * DinkusKit Ship for the EmDash store admin (GrillTrack ship-registry-plugin-001):
@@ -8,6 +8,10 @@ import { storeProof } from "./connect.js";
  * Ship service at ship.dinkuskit.com. It keeps no label data of its own.
  */
 const plugin: SandboxedPlugin = {
+  hooks: {
+    // Uninstall cancels only this plugin's DinkusKit key (connect-uninstall-cancels-key-134); the store and the other plugins' keys stay.
+    "plugin:uninstall": async (_event, ctx) => { await cancelKey(ctx); },
+  },
   routes: {
     // Editors and Administrators; lower roles do not see Shipping.
     admin: { public: false, permission: "content:edit_any", methods: ["POST"], handler: shippingAdmin },

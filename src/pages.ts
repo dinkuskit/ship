@@ -1,4 +1,5 @@
 import type { Block, BlockResponse, FormField, LinkElement } from "@emdash-cms/blocks/server";
+import type { ConnectedTo } from "./connect.js";
 import { type Delivery, shipPages, type Box, type Label, type Prices, type ServiceCode, type ShipOrder, type ShipOrderRow, type ShipSettings } from "./ship.js";
 
 /** The Shipping pages, drawn fresh from hosted Ship's answers; nothing here is kept. */
@@ -93,11 +94,34 @@ export function connectPage(isAdmin: boolean, failure?: string): BlockResponse {
   return { blocks: [
     header("Shipments"),
     banner(failure ? "error" : "default", failure ? "Connect Ship again" : "Connect Ship", failure ??
-      "Connect this plugin to DinkusKit.com so it can buy labels through Ship. Commerce connects first; the business owner approves at DinkusKit.com."),
+      "Connect this plugin to DinkusKit.com so it can buy labels through Ship. Commerce connects first; the business owner approves at DinkusKit.com, and connecting turns Ship on for this store."),
     isAdmin
       ? { type: "actions", elements: [{ type: "button", label: failure ? "Connect again" : "Connect", action_id: "connect", style: "primary" }, link("DinkusKit.com", "https://dinkuskit.com/")] }
       : context("Ask an Administrator of this site to press Connect on this page."),
   ] };
+}
+
+/**
+ * The store is already connected to DinkusKit (store-connect-approve-once-125): one Finish setup press, no
+ * second Approve. It also turns Ship on for the store (store-connect-ship-on-at-setup-126).
+ */
+export function finishPage(isAdmin: boolean): BlockResponse {
+  return { blocks: [
+    header("Shipments"),
+    banner("default", "Almost ready: this store is already connected to DinkusKit",
+      "Press Finish setup to connect Ship to the same business and turn Ship on for this store. The business owner gets an email saying Ship joined."),
+    isAdmin
+      ? { type: "actions", elements: [{ type: "button", label: "Finish setup", action_id: "finish_setup", style: "primary" }] }
+      : context("Ask an Administrator of this site to press Finish setup on this page."),
+  ] };
+}
+
+const PLUGIN_LABELS: Record<ConnectedTo["plugins"][number], string> = { commerce: "Commerce", payments: "Payments", ship: "Ship" };
+/** connect-shows-siblings-133: the business and the DinkusKit plugins that share this store, in plain words. */
+export function connectedToLine(shared: ConnectedTo): string {
+  const names = shared.plugins.map(name => PLUGIN_LABELS[name]);
+  const list = names.length < 2 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`;
+  return `Connected to ${shared.business} on DinkusKit. DinkusKit plugins on this store: ${list}. To disconnect one, open Your stores at DinkusKit.com.`;
 }
 
 /** A Connect waits for the business owner's Approve at DinkusKit.com, which sends them back here. */
@@ -142,7 +166,7 @@ const toShip = (order: ShipOrderRow) => order.status === "processing" && order.l
  * The orders Ship has, laid out like Shopify's and WooCommerce's order lists: counts first, then one
  * short row per order with its status and the next step. Fifty a page, as hosted Ship sends up to 200.
  */
-export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipSettings, toast?: Toast, from = 0): BlockResponse {
+export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipSettings, toast?: Toast, from = 0, shared: ConnectedTo | null = null): BlockResponse {
   const pages = shipPages(siteId);
   const start = from < orders.length ? from : 0;
   const shown = orders.slice(start, start + ORDERS_PER_PAGE);
@@ -171,6 +195,7 @@ export function listPage(siteId: string, orders: ShipOrderRow[], settings: ShipS
     })),
   });
   if (orders.length > ORDERS_PER_PAGE) blocks.push(context(`Orders ${start + 1} to ${start + shown.length} of ${orders.length}, newest first. Refresh goes back to the newest.`));
+  if (shared && shared.plugins.length) blocks.push(context(connectedToLine(shared)));
   blocks.push(context("Refunds, label history, Settings and your Pitney Bowes account are on Ship's own page."), { type: "actions", elements: [
     { type: "button", label: "Refresh", action_id: "list" },
     link("Open Ship", pages.orders), link("Ship Settings", pages.settings),
