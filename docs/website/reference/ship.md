@@ -59,7 +59,7 @@ On **Store > Shipments**, **Label history** lists every label the store bought, 
 
 Once a label is bought, the order page shows the **Label** beside Ship to (service, tracking number, box and weight, and where the parcel is), then the date and price with **Print label** beside them, and **Track on USPS** and **Cancel label** below. The **Labels** table lists every label Ship made for the order, cancelled ones included.
 
-Within a few minutes Commerce picks the label up from Ship and marks the order Completed with USPS and the tracking number, the same as when the label is bought on Ship's own page. **Cancel label** cancels the label only; it does not cancel or refund the Commerce order. Payment refunds belong to the payment and order workflow.
+Within a few minutes Commerce picks the label up from Ship and marks the order Completed with USPS and the tracking number, the same as when the label is bought on Ship's own page. If you press **Cancel label** before Commerce picks the label up, Commerce never gets that tracking number: the order stays as it is until you buy a new label, and only the new label completes it. A label cancelled after Commerce picked it up leaves the order Completed with the old tracking number. **Cancel label** cancels the label only; it does not cancel or refund the Commerce order. Payment refunds belong to the payment and order workflow.
 
 If any item has no weight in Commerce, the plugin shows its weight as **Not set** and warns you to weigh the whole package. The prefilled package weight includes only known item weights and the empty box; update it before checking prices or buying a label.
 

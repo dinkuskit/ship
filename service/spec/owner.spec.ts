@@ -268,7 +268,9 @@ test("a TEST order goes from Commerce to a practice label, when the owner asks f
   expect(again.status).toBe(409);
   expect((await request("POST", `/stores/${site}/labels/${label.labelId}/cancel`, { cookie })).status).toBe(303);
   expect((await request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", kind: "practice" } })).status).toBe(303);
-  expect(await labels()).toHaveLength(2);
+  const replacement = await labels();
+  expect(replacement).toHaveLength(1);
+  expect(replacement[0]!.tracking).not.toBe(event.tracking);
   expect(pbCalls).toEqual([]);
 });
 
