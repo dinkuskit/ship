@@ -4,12 +4,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
 import { PRINT_LINK_SECONDS } from "../src/admin";
-import {
-  assertLabelStateTransition,
-  assertPurchaseStateTransition,
-  LABEL_STATE_TRANSITIONS,
-  PURCHASE_STATE_TRANSITIONS,
-} from "../src/store";
 
 // What the Ship Registry plugin does with a ship:admin store pass: list orders, see
 // prices, buy, print through a five-minute link, and cancel. Pitney Bowes's sandbox
@@ -383,12 +377,34 @@ test("cancelling a label before Commerce polls retires its unacknowledged label 
   expect(pending.json[0]).toMatchObject({ orderId: "order:abc", version: 1, tracking: second.json.label.tracking });
 });
 
-test("explicit label and purchase state transition tables reject illegal transitions", () => {
-  expect(LABEL_STATE_TRANSITIONS).toEqual({ bought: ["cancelled"], cancelled: [] });
-  expect(PURCHASE_STATE_TRANSITIONS).toEqual({ pending: ["unknown"], unknown: [] });
-  expect(() => assertLabelStateTransition("bought", "cancelled")).not.toThrow();
-  expect(() => assertLabelStateTransition("cancelled", "bought")).toThrow(/Cannot transition label/);
-  expect(() => assertLabelStateTransition("cancelled", "cancelled")).toThrow(/Cannot transition label/);
-  expect(() => assertPurchaseStateTransition("pending", "unknown")).not.toThrow();
-  expect(() => assertPurchaseStateTransition("unknown", "pending")).toThrow(/Cannot transition purchase/);
+test("label events stored before this change keep working: cancelling retires only the cancelled label's own pending event", async () => {
+  await sendOrder();
+  await sendOrder({ orderId: "order:def", number: 1002 });
+  const boxId = await setUp();
+  // Rows as an earlier Ship left them: one event Commerce already took, and one still waiting for another order.
+  const ackedAt = "2026-11-01T00:00:00.000Z";
+  await runInDurableObject(shipStore(), async (_, state) => {
+    const sql = state.storage.sql;
+    sql.exec("INSERT INTO label_events (event_id, order_id, version, carrier, tracking, created_at, acked_at) VALUES ('lbl_legacy-acked', 'order:abc', 1, 'USPS', 'OLD-ACKED', ?, ?)", ackedAt, ackedAt);
+    sql.exec("INSERT INTO label_events (event_id, order_id, version, carrier, tracking, created_at) VALUES ('lbl_legacy-waiting', 'order:def', 1, 'USPS', 'OTHER-WAITING', ?)", ackedAt);
+  });
+  expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json.map((label: { tracking: string }) => label.tracking)).toEqual(["OTHER-WAITING"]);
+
+  const form = { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" };
+  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: form });
+  expect(bought.status).toBe(201);
+  expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).status).toBe(200);
+
+  // The other order's waiting event is still delivered, and nothing else changed in the stored rows.
+  const pending = await call("GET", "/v1/labels", { scope: "ship:orders" });
+  expect(pending.json).toEqual([expect.objectContaining({ eventId: "lbl_legacy-waiting", orderId: "order:def", tracking: "OTHER-WAITING" })]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    const rows = state.storage.sql.exec<{ event_id: string; tracking: string; acked_at: string | null }>(
+      "SELECT event_id, tracking, acked_at FROM label_events ORDER BY seq").toArray();
+    expect(rows).toEqual([
+      { event_id: "lbl_legacy-acked", tracking: "OLD-ACKED", acked_at: ackedAt },
+      { event_id: "lbl_legacy-waiting", tracking: "OTHER-WAITING", acked_at: null },
+      { event_id: expect.stringMatching(/^lbl_/), tracking: "SANDBOX-TRACKING-A", acked_at: expect.any(String) },
+    ]);
+  });
 });
