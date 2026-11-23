@@ -58,7 +58,31 @@ export interface PostageAccount {
 }
 
 /** A Pitney Bowes purchase Ship sent and has not finished recording. */
-type Purchase = { transaction_id: string; order_id: string; version: number; test: number; service: string; box: string; weight_oz: number; state: string; created_by: string; created_at: number };
+export type PurchaseState = "pending" | "unknown";
+type Purchase = { transaction_id: string; order_id: string; version: number; test: number; service: string; box: string; weight_oz: number; state: PurchaseState; created_by: string; created_at: number };
+
+/** Explicit legal state transitions for labels and in-flight Pitney Bowes purchases. */
+export const LABEL_STATE_TRANSITIONS: Readonly<Record<Label["status"], readonly Label["status"][]>> = {
+  bought: ["cancelled"],
+  cancelled: [],
+};
+
+export const PURCHASE_STATE_TRANSITIONS: Readonly<Record<PurchaseState, readonly PurchaseState[]>> = {
+  pending: ["unknown"],
+  unknown: [],
+};
+
+export function assertLabelStateTransition(from: Label["status"], to: Label["status"]): void {
+  if (!LABEL_STATE_TRANSITIONS[from].includes(to)) {
+    refuse("INVALID_LABEL_TRANSITION", `Cannot transition label from ${from} to ${to}.`, 409);
+  }
+}
+
+export function assertPurchaseStateTransition(from: PurchaseState, to: PurchaseState): void {
+  if (!PURCHASE_STATE_TRANSITIONS[from].includes(to)) {
+    refuse("INVALID_PURCHASE_TRANSITION", `Cannot transition purchase from ${from} to ${to}.`, 409);
+  }
+}
 const NOT_CONNECTED = "Pitney Bowes is not connected to Ship yet, so only TEST orders can get labels: practice labels with no postage.";
 /** How long a purchase counts as still in flight before another page may check on it. */
 const IN_FLIGHT_MS = 60_000;
@@ -649,7 +673,8 @@ export class StoreShipping extends DurableObject<Env> {
       bought = await buy(config, request.shipment(request.service), purchase.transaction_id);
     } catch (error) {
       if (error instanceof PitneyError && error.kind === "unknown") {
-        this.sql.exec("UPDATE purchases SET state = 'unknown' WHERE transaction_id = ?", purchase.transaction_id);
+        assertPurchaseStateTransition(purchase.state, "unknown");
+        this.sql.exec("UPDATE purchases SET state = 'unknown' WHERE transaction_id = ? AND state = 'pending'", purchase.transaction_id);
         refuse("PITNEY_BOWES_NO_ANSWER", `Pitney Bowes did not confirm the label${error.detail ? ` (${error.detail})` : ""}, so Ship does not know yet whether it was bought. Press Buy label again: Ship checks with Pitney Bowes first and does not buy a second label without asking.`, 502);
       }
       this.sql.exec("DELETE FROM purchases WHERE transaction_id = ?", purchase.transaction_id);
@@ -735,17 +760,22 @@ export class StoreShipping extends DurableObject<Env> {
   async cancelLabel(labelId: string): Promise<Outcome> {
     try {
       await this.admitLabel(labelId);
-      const row = this.sql.exec<{ test: number; shipment_id: string | null; tracking: string }>(
-        "SELECT test, shipment_id, tracking FROM labels WHERE label_id = ? AND status = 'bought'", labelId).toArray()[0];
+      const row = this.sql.exec<{ order_id: string; version: number; test: number; shipment_id: string | null; tracking: string; status: Label["status"] }>(
+        "SELECT order_id, version, test, shipment_id, tracking, status FROM labels WHERE label_id = ? AND status = 'bought'", labelId).toArray()[0];
       if (!row) refuse("NOT_FOUND", "No label to cancel.", 404);
+      assertLabelStateTransition(row.status, "cancelled");
       let refund: string | null = null;
       if (row.shipment_id || !row.test) {
         const config = pitneyConfig(this.env);
         if (!config || !row.shipment_id) refuse("POSTAGE_NOT_CONNECTED", "Pitney Bowes is not connected to Ship right now, so the label cannot be cancelled yet.", 503);
         refund = await voidLabel(config, row.shipment_id);
       }
+      const now = new Date().toISOString();
       this.sql.exec("UPDATE labels SET status = 'cancelled', cancelled_at = ?, refund = ? WHERE label_id = ? AND status = 'bought'",
-        new Date().toISOString(), refund, labelId);
+        now, refund, labelId);
+      // Retire any unacknowledged label event for the voided label so Commerce never completes an order with a cancelled tracking number.
+      this.sql.exec("UPDATE label_events SET acked_at = ? WHERE order_id = ? AND version = ? AND tracking = ? AND acked_at IS NULL",
+        now, row.order_id, row.version, row.tracking);
       if (!row.test) await this.queueTracking(labelId, row.tracking, "remove");
       return ok({ labelId, refund });
     } catch (error) {

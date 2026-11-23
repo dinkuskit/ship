@@ -4,6 +4,12 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { exportJWK, generateKeyPair, SignJWT } from "jose";
 import worker from "../src/worker";
 import { PRINT_LINK_SECONDS } from "../src/admin";
+import {
+  assertLabelStateTransition,
+  assertPurchaseStateTransition,
+  LABEL_STATE_TRANSITIONS,
+  PURCHASE_STATE_TRANSITIONS,
+} from "../src/store";
 
 // What the Ship Registry plugin does with a ship:admin store pass: list orders, see
 // prices, buy, print through a five-minute link, and cancel. Pitney Bowes's sandbox
@@ -349,4 +355,40 @@ test("the order Ship forwarded the owner from opens once in the store admin, for
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("cancelling a label before Commerce polls retires its unacknowledged label event and re-buy delivers only the live tracking", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const form = { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" };
+
+  const first = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: form });
+  expect(first.status).toBe(201);
+  expect(first.json.label.tracking).toBe("SANDBOX-TRACKING-A");
+
+  // Cancel before Commerce polls GET /v1/labels: voided tracking must never be delivered.
+  const cancelled = await call("POST", `/v1/admin/labels/${first.json.label.labelId}/cancel`);
+  expect(cancelled.status).toBe(200);
+  expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
+  // Double-cancel is rejected.
+  expect((await call("POST", `/v1/admin/labels/${first.json.label.labelId}/cancel`)).json.error.code).toBe("NOT_FOUND");
+
+  // Re-buying on the same order version delivers only the live replacement label.
+  const second = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { ...form, kind: "practice" } });
+  expect(second.status).toBe(201);
+  expect(second.json.label.tracking).not.toBe("SANDBOX-TRACKING-A");
+  const pending = await call("GET", "/v1/labels", { scope: "ship:orders" });
+  expect(pending.status).toBe(200);
+  expect(pending.json).toHaveLength(1);
+  expect(pending.json[0]).toMatchObject({ orderId: "order:abc", version: 1, tracking: second.json.label.tracking });
+});
+
+test("explicit label and purchase state transition tables reject illegal transitions", () => {
+  expect(LABEL_STATE_TRANSITIONS).toEqual({ bought: ["cancelled"], cancelled: [] });
+  expect(PURCHASE_STATE_TRANSITIONS).toEqual({ pending: ["unknown"], unknown: [] });
+  expect(() => assertLabelStateTransition("bought", "cancelled")).not.toThrow();
+  expect(() => assertLabelStateTransition("cancelled", "bought")).toThrow(/Cannot transition label/);
+  expect(() => assertLabelStateTransition("cancelled", "cancelled")).toThrow(/Cannot transition label/);
+  expect(() => assertPurchaseStateTransition("pending", "unknown")).not.toThrow();
+  expect(() => assertPurchaseStateTransition("unknown", "pending")).toThrow(/Cannot transition purchase/);
 });
