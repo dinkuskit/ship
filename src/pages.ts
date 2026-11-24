@@ -110,11 +110,13 @@ export function connectPage(isAdmin: boolean, failure?: string): BlockResponse {
  * The store is already connected to DinkusKit (store-connect-approve-once-125): one Finish setup press, no
  * second Approve. It also turns Ship on for the store (store-connect-ship-on-at-setup-126).
  */
-export function finishPage(isAdmin: boolean): BlockResponse {
+export function finishPage(isAdmin: boolean, retry = false): BlockResponse {
   return { blocks: [
     header("Shipments"),
-    banner("default", "Almost ready: this store is already connected to DinkusKit",
-      "Press Finish setup to connect Ship to the same business and turn Ship on for this store. The business owner gets an email saying Ship joined."),
+    retry
+      ? banner("default", "Try Ship setup again", "Ship could not confirm the last attempt. Start a fresh attempt without asking the owner to approve again.")
+      : banner("default", "Almost ready: this store is already connected to DinkusKit",
+        "Press Finish setup to connect Ship to the same business and turn Ship on for this store. The business owner gets an email saying Ship joined."),
     isAdmin
       ? { type: "actions", elements: [{ type: "button", label: "Finish setup", action_id: "finish_setup", style: "primary" }] }
       : context("Ask an Administrator of this site to press Finish setup on this page."),
@@ -139,6 +141,19 @@ export function pendingPage(verificationUri: string, checked = false): BlockResp
       { type: "link", label: "Approve at DinkusKit.com", target: { kind: "external", url: verificationUri }, appearance: "primary" },
       { type: "button", label: "Check", action_id: "check" },
       { type: "button", label: "Cancel", action_id: "cancel_connect" },
+    ] },
+  ] };
+}
+
+/** A lost Finish setup reply is not an instruction to ask for owner approval. */
+export function unconfirmedPage(isAdmin: boolean, checked = false): BlockResponse {
+  return { blocks: [
+    header("Shipments"),
+    banner("default", "Ship setup not confirmed", checked ? "Ship is still waiting for confirmation." : "Ship did not get confirmation from DinkusKit.com."),
+    context(isAdmin ? "Check the status or cancel this attempt to start again." : "Check the status or ask an Administrator to start again."),
+    { type: "actions", elements: [
+      { type: "button", label: "Check setup", action_id: "check", style: "primary" },
+      ...(isAdmin ? [{ type: "button", label: "Cancel setup", action_id: "cancel_connect" } as const] : []),
     ] },
   ] };
 }

@@ -67,7 +67,7 @@ function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.jso
       const adminPage = init?.headers?.["x-ship-admin-page"], adminUser = init?.headers?.["x-ship-admin-user"];
       if (url === "https://dinkuskit.com/api/store-connections/lookup") {
         lookups.push(body);
-        return Response.json({ finish_setup: joinable });
+        return Response.json({ finish_setup: typeof joinable === "function" ? joinable() : joinable });
       }
       if (url === "https://dinkuskit.com/api/store-passes" && body?.scope === "store:connection") {
         shared.push({ url, authorization: init?.headers?.authorization, body });
@@ -846,6 +846,7 @@ test("Finish setup falls back to the owner's Approve, or to starting over, when 
   }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
   const waiting = text(await owner.page({ type: "block_action", action_id: "finish_setup" }));
   assert.match(waiting, /Approve at DinkusKit.com/);
+  assert.match(text(await owner.page(load)), /Approve at DinkusKit.com/, "explicit approval survives a reload");
   assert.match(text(await owner.page({ type: "block_action", action_id: "check" })), /#1001/, "after the owner's Approve, Check finishes as usual");
   assert.deepEqual(owner.saved(), { siteId: SITE, storeKey: ISSUED });
 
@@ -855,6 +856,63 @@ test("Finish setup falls back to the owner's Approve, or to starting over, when 
   assert.match(text(await refused.page({ type: "block_action", action_id: "finish_setup" })), /Connect did not finish/);
   assert.deepEqual(refused.saved(), {}, "nothing is saved on a refusal");
   assert.equal((await proofOf(refused, { connection_id: CONNECTION })).status, 404, "and the proof route vouches for nothing");
+});
+
+test("a lost Finish setup reply stays unconfirmed; a spent attempt offers fresh setup without a reload", async () => {
+  const finish = { type: "block_action", action_id: "finish_setup" };
+  const check = { type: "block_action", action_id: "check" };
+  let attempts = 0;
+  const ids = [];
+  const h = host({ siteId: null, key: null, role: 50, joinable: true, dinkus: {
+    "/api/store-connections": () => {
+      const id = `conn_${++attempts}`;
+      return Response.json(started({ connection_id: id, verification_uri: `https://dinkuskit.com/account/connect?connection_id=${id}` }));
+    },
+    "/api/store-connections/finish": ({ connection_id }) => {
+      ids.push(connection_id);
+      if (attempts === 1) throw new TypeError("reply lost");
+      return Response.json({ store_key: ISSUED, site_id: SITE });
+    },
+    "/api/store-connections/token": () => Response.json({ error: "already_redeemed" }, { status: 400 }),
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  for (const response of [await h.page(finish), await h.page(load)]) {
+    assert.match(text(response), /Ship setup not confirmed/);
+    assert.doesNotMatch(text(response), /Approve at DinkusKit.com|account\/connect/);
+  }
+  assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 200, "the unconfirmed attempt can still be checked");
+  const retry = text(await h.page(check));
+  assert.match(retry, /Try Ship setup again/);
+  assert.match(retry, /"label":"Finish setup","action_id":"finish_setup"/);
+  assert.doesNotMatch(retry, /"action_id":"connect"/);
+  assert.equal(h.lookups.length, 1, "eligibility is rechecked at recovery");
+  assert.equal(attempts, 1, "Check does not start another attempt");
+  assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 404, "retired proof is gone");
+  assert.match(text(await h.page(finish)), /#1001/);
+  assert.deepEqual(ids, [CONNECTION, "conn_2"], "retry uses a new connection; the old response is never replayed");
+  assert.deepEqual(h.saved(), { siteId: SITE, storeKey: ISSUED });
+});
+
+test("unconfirmed Finish setup can be checked or cancelled without guessing about approval", async () => {
+  for (const joinable of [false, true]) {
+    for (const end of ["cancel_connect", "check"]) {
+      let eligible = true, redeemed = false;
+      const h = host({ siteId: null, key: null, role: 50, joinable: () => eligible, dinkus: {
+        "/api/store-connections": started(),
+        "/api/store-connections/finish": () => Response.json({ error: "unavailable" }, { status: 503 }),
+        "/api/store-connections/token": () => Response.json({ error: redeemed ? "already_redeemed" : "authorization_pending" }, { status: 400 }),
+      } });
+      assert.match(text(await h.page({ type: "block_action", action_id: "finish_setup" })), /Ship setup not confirmed/);
+      const pending = text(await h.page({ type: "block_action", action_id: "check" }));
+      assert.match(pending, /still waiting for confirmation/);
+      assert.doesNotMatch(pending, /Approve at DinkusKit.com|Not approved yet/);
+      eligible = joinable;
+      redeemed = true;
+      const recovered = text(await h.page({ type: "block_action", action_id: end }));
+      assert.match(recovered, joinable ? /"action_id":"finish_setup"/ : /"action_id":"connect"/);
+      assert.doesNotMatch(recovered, /Approve at DinkusKit.com/);
+      assert.deepEqual(h.saved(), {});
+    }
+  }
 });
 
 test("the orders list says which business the store is connected to, read with this plugin's own pass", async () => {

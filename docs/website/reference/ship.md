@@ -30,6 +30,8 @@ Install **DinkusKit Ship** from the plugin Registry. Connect [Commerce](/docs/re
 
 If the store is already connected to DinkusKit, for example through Commerce, the Shipments page says "Almost ready: this store is already connected to DinkusKit" and shows one **Finish setup** button instead. An Administrator presses it: there is no second approval, Ship gets its own store key, Ship turns on, and the page opens the orders. DinkusKit.com emails the business owner that Dinkus Ship joined the store. If the owner pressed Disconnect for Ship under Your stores, the page asks for the owner's Approve again instead. The orders page says which business the store is connected to and which DinkusKit plugins share it. Uninstalling Ship cancels only Ship's own key at DinkusKit.com.
 
+If **Finish setup** says Ship could not confirm the attempt, press **Check setup**. If the attempt ended without a usable reply and the store is still eligible, **Finish setup** starts a fresh attempt without asking the owner to approve. If Ship is still waiting, you can press **Cancel setup** to end the attempt and see the setup option now available.
+
 The plugin never sends the store key to Ship or to a store page. It trades the key at DinkusKit.com for a pass that lasts five minutes and reuses that pass for clicks in the next minute. A Disconnect at DinkusKit.com, which also turns Ship off, stops the Shipments page within a minute. A store connected before Ship turned on at Connect presses **Connect again** once. If DinkusKit.com no longer knows the key, the page shows **Connect again**.
 
 A store upgraded from `0.2.1` does not use its old pasted key. The Shipments page asks for Connect once, and Connect removes the old Store ID and store key settings.
