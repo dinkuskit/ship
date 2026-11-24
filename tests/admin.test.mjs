@@ -895,7 +895,8 @@ test("Label history lists every label the store bought, newest first, 50 a page,
   const table = first.blocks.find(block => block.type === "table");
   assert.equal(table.rows.length, 50);
   assert.equal(table.next_cursor, "2026-10-19T22:00:00.000Z~label_49");
-  assert.deepEqual(table.rows[0].order, { type: "button", label: "#1001", action_id: "open", value: "order:abc" });
+  const firstOrder = table.rows[0].order;
+  assert.deepEqual(firstOrder, { type: "button", label: "#1001", action_id: "history-order::open", value: "order:abc" });
   assert.match(table.rows[0].service, /USPS Priority Mail, \$5\.12/);
   assert.equal(table.rows[0].tracking, "9400 0000 0000 0000 0000 00");
   assert.doesNotMatch(text(first), /Older labels/);
@@ -905,7 +906,49 @@ test("Label history lists every label the store bought, newest first, 50 a page,
   assert.equal(row0.order.label, "order:abc (TEST)");
   assert.match(row0.status, /Cancelled/);
   assert.match(text(next), /Older labels. Refresh goes back to the newest./);
-  assert.match(text(await h.page({ type: "block_action", action_id: "open", value: "order:abc" })), /Order #1001/);
+  const use = control => h.page({ type: "block_action", action_id: control.action_id, value: control.value });
+  const back = response => response.blocks[1].elements[0];
+  const orderFromHistory = await use(row0.order);
+  assert.match(text(orderFromHistory), /Order #1001/);
+  assert.deepEqual(back(orderFromHistory), { type: "button", label: "Back to Label history", action_id: "history", value: { cursor: table.next_cursor } });
+  assert.deepEqual(await use(back(orderFromHistory)), next);
+  assert.equal(asked.at(-1), asked[1], "the back action reuses the same hosted cursor");
+  assert.deepEqual(await use(back(await use(firstOrder))), first, "the newest page also has a way back");
+  const ordinary = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  assert.equal(back(ordinary).label, "Back to Shipments");
+});
+
+test("the label history return survives cancellation and a replacement label quote", async () => {
+  const bought = label();
+  const cancelled = label({ status: "cancelled", cancelledAt: "2026-10-20T00:00:00.000Z" });
+  let active = true;
+  const cursor = "2026-10-21T00:00:00.000Z~another_label";
+  const h = host({ ship: {
+    "GET /v1/admin/labels": () => Response.json({ labels: [{ ...(active ? bought : cancelled), number: 1001 }], next: null }),
+    "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order({ label: active ? bought : null, labels: [active ? bought : cancelled] }), settings }),
+    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/test-fixture", expiresAt: "2026-10-20T00:05:00.000Z" },
+    "POST /v1/admin/labels/label_1/cancel": () => { active = false; return Response.json({ labelId: "label_1", refund: null }); },
+    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: 510, PM: 935, EM: null } },
+  } });
+  const use = control => h.page({ type: "block_action", action_id: control.action_id, value: control.value });
+  const fromHistory = await use({ action_id: "history", value: { cursor } });
+  const details = await use(fromHistory.blocks.find(block => block.type === "table").rows[0].order);
+  const returnAction = response => response.blocks[1].elements[0];
+  const cancel = details.blocks.flatMap(block => block.type === "actions" ? block.elements : []).find(element => element.label === "Cancel label");
+  const afterCancel = await use(cancel);
+  assert.equal(afterCancel.toast.message, "Label cancelled.");
+  assert.deepEqual(returnAction(afterCancel), returnAction(details));
+  const form = afterCancel.blocks.find(block => block.type === "form");
+  const quote = values => h.page({ type: "form_submit", action_id: form.submit.action_id, values });
+  const refused = await quote({ boxId: "box_small", weightOz: "too heavy" });
+  assert.match(text(refused), /Enter the package weight/);
+  assert.deepEqual(returnAction(refused), returnAction(details));
+  const quoted = await quote({ boxId: "box_small", weightOz: 28 });
+  assert.match(text(quoted), /USPS Ground Advantage · \$5\.10/);
+  assert.deepEqual(returnAction(quoted), returnAction(details));
+  const back = await use(returnAction(quoted));
+  assert.match(back.blocks.find(block => block.type === "table").rows[0].status, /Cancelled/);
+  assert.equal(new URL(h.calls.at(-1).url).searchParams.get("before"), cursor);
 });
 
 test("until ship.dinkuskit.com lists labels, Label history points to Ship's own page", async () => {
