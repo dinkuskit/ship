@@ -152,7 +152,9 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
         if (!(error instanceof ShipError)) throw error;
         const rawWeight = input.values.weightOz;
         return await refused(hosted, found.orderId, error, typed, {
-          quote, weight: rawWeight === "" ? "" : text(rawWeight, 40),
+          // Text fields have no length cap in Block Kit. Reflect a bounded draft,
+          // or leave it blank rather than replacing an oversized paste with a weight.
+          quote, weight: typeof rawWeight === "string" ? text(rawWeight) ?? "" : undefined,
         });
       }
       try {

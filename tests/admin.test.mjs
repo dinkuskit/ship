@@ -668,6 +668,25 @@ test("a locally rejected weight keeps the label draft without advancing or reque
   assert.ok(h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com")).every(call => call.method === "GET"));
 });
 
+test("invalid pasted weights do not turn into a calculated weight or reuse a sandbox quote", async () => {
+  const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order(), settings } } });
+  const pasted = "weight copied from the packing slip: 29 ounces";
+  for (const [kind, raw, displayed, next] of [
+    ["practice", pasted, pasted, "Make practice label"],
+    ["practice", pasted.repeat(5), "", "Make practice label"],
+    ["sandbox", pasted, pasted, "See prices"],
+  ]) {
+    const view = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
+      boxId: "box_small", weightOz: raw, kind, service: "PM",
+    } });
+    const form = view.blocks.find(block => block.type === "form");
+    assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, displayed);
+    assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, kind);
+    assert.equal(form.submit.label, next);
+  }
+  assert.ok(h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com")).every(call => call.method === "GET"));
+});
+
 test("a practice label skips the prices step, since Pitney Bowes is not asked", async () => {
   const sent = [];
   const h = host({ ship: {
