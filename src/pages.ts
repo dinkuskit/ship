@@ -20,6 +20,13 @@ export interface OrderView {
   askBuyAgain?: boolean;
   /** The five-minute link that opens the live label's PDF in a new tab. */
   printUrl?: string;
+  /** undefined: opened from Shipments; null: opened from the newest Label history page. */
+  historyFrom?: string | null;
+}
+
+/** Carry the history page through order actions without keeping per-editor state. */
+function orderAction(actionId: string, historyFrom: string | null | undefined): string {
+  return historyFrom === undefined ? actionId : `history-order:${encodeURIComponent(historyFrom ?? "")}:${actionId}`;
 }
 
 export const money = (cents: number) => `$${(cents / 100).toFixed(2)}`;
@@ -267,12 +274,13 @@ function labelForm(view: OrderView): Block[] {
         { label: "Practice label (no Pitney Bowes, marked TEST - NOT POSTAGE)", value: "practice" }] });
   }
   if (buyAgain) form.push({ type: "toggle", action_id: "buyAgain", label: "Buy a new label", description: "Pitney Bowes has no record of the last one Ship bought for this order.", initial_value: typed.buyAgain === true });
+  const action = (id: string) => orderAction(id, view.historyFrom);
   const blocks: Block[] = [{ type: "form", block_id: `label-${order.orderId}-${quoted ? "buy" : "prices"}`, fields: form,
-    submit: quoted ? { label: practice ? "Make practice label" : "Buy label", action_id: `buy:${id}` } : { label: "See prices", action_id: `prices:${id}` } }];
+    submit: quoted ? { label: practice ? "Make practice label" : "Buy label", action_id: action(`buy:${id}`) } : { label: "See prices", action_id: action(`prices:${id}`) } }];
   if (prices !== undefined) blocks.push(context("Prices are for the box and weight above. Changed them? Press See prices again."));
   else if (practice && !practiceOnly) blocks.push(context("A practice label is free and asks Pitney Bowes nothing, so there are no prices to see. Want a sandbox label instead? Press See prices."));
   else if (buyAgain) blocks.push(context("Pitney Bowes has no record of the last label Ship bought for this order. Tick Buy a new label and press Buy label to buy one, with the service you chose."));
-  if (quoted && !practiceOnly) blocks.push({ type: "actions", elements: [{ type: "button", label: "See prices again", action_id: "open", value: order.orderId }] });
+  if (quoted && !practiceOnly) blocks.push({ type: "actions", elements: [{ type: "button", label: "See prices again", action_id: action("open"), value: order.orderId }] });
   return blocks;
 }
 
@@ -286,7 +294,10 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
   const quantity = order.lines.reduce((sum, line) => sum + line.quantity, 0);
   const missing = order.lines.filter(line => line.weightOz === null).length;
   const next = label ? status(order) : order.status === "completed" ? "Completed in Commerce" : order.addressProblem ? "Fix address" : "ready to ship · No label yet";
-  const blocks: Block[] = [header("Shipments"), { type: "actions", elements: [{ type: "button", label: "Back to Shipments", action_id: "list" }] },
+  const back = view.historyFrom === undefined
+    ? { type: "button" as const, label: "Back to Shipments", action_id: "list" }
+    : { type: "button" as const, label: "Back to Label history", action_id: "history", value: { cursor: view.historyFrom } };
+  const blocks: Block[] = [header("Shipments"), { type: "actions", elements: [back] },
     header(`Order ${orderName(order)}`), context(`${count(quantity)}${label || order.status === "completed" || order.addressProblem ? " · " : " "}${next}`)];
   if (order.test) blocks.push(banner("alert", "TEST order", "Nothing ships and nothing is charged. A TEST order gets a free Pitney Bowes sandbox label, or a practice label, never live postage."));
   if (view.failure) blocks.push(banner("error", label ? "Not done" : "No label bought", view.failure));
@@ -307,7 +318,7 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
     const bought: Block = { type: "section", text: `Label bought ${when(label.createdAt)} · ${price(label)}`, ...(view.printUrl ? { accessory: link("Print label", view.printUrl, "primary") } : {}) };
     const actions: Block & { type: "actions" } = { type: "actions", elements: [] };
     if (!label.test) actions.elements.push(link("Track on USPS", trackUrl(label)));
-    actions.elements.push({ type: "button", label: "Cancel label", action_id: `cancel:${encodeURIComponent(order.orderId)}`, value: label.labelId,
+    actions.elements.push({ type: "button", label: "Cancel label", action_id: orderAction(`cancel:${encodeURIComponent(order.orderId)}`, view.historyFrom), value: label.labelId,
       confirm: { title: "Cancel this label?", text: label.practice ? "The practice label is thrown away. The order stays as it is in Commerce." :
         label.test ? "The sandbox label is voided with Pitney Bowes. The order stays as it is in Commerce." :
         "The label is voided with Pitney Bowes and USPS refunds your postage account within about 14 days. The order stays as it is in Commerce.", confirm: "Cancel label", deny: "Keep label", style: "danger" } });
@@ -347,7 +358,7 @@ const historyOrder = (label: HistoryLabel) => (label.number === null ? label.ord
  * Shopify's and WooCommerce Shipping's label lists: when, which order, the service and postage,
  * tracking and where it is now. The order number opens the order.
  */
-export function labelHistoryPage(siteId: string, history: LabelHistory, older: boolean): BlockResponse {
+export function labelHistoryPage(siteId: string, history: LabelHistory, cursor: string | null): BlockResponse {
   const blocks: Block[] = [header("Shipments"), { type: "actions", elements: [{ type: "button", label: "Back to Shipments", action_id: "list" }] },
     header("Label history"), { type: "table", page_action_id: "history", empty_text: "No labels yet. Labels you buy, print or cancel show here.",
       columns: [
@@ -356,10 +367,10 @@ export function labelHistoryPage(siteId: string, history: LabelHistory, older: b
       ],
       ...(history.next ? { next_cursor: history.next } : {}),
       rows: history.labels.map(label => ({
-        bought: day(label.createdAt), order: { type: "button", label: historyOrder(label), action_id: "open", value: label.orderId },
+        bought: day(label.createdAt), order: { type: "button", label: historyOrder(label), action_id: orderAction("open", cursor), value: label.orderId },
         service: `${SERVICES[label.service] ?? label.service}, ${postage(label)}`, tracking: grouped(label), status: dotted(labelStatus(label)),
       })) }];
-  if (older) blocks.push(context("Older labels. Refresh goes back to the newest."));
+  if (cursor !== null) blocks.push(context("Older labels. Refresh goes back to the newest."));
   blocks.push({ type: "actions", elements: [{ type: "button", label: "Refresh", action_id: "history" }, link("Open Ship", shipPages(siteId).orders)] });
   return { blocks };
 }

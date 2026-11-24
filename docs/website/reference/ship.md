@@ -47,7 +47,7 @@ Labels need the ship-from address and a box size; the Shipments page says so unt
 
 ## Label history
 
-On **Store > Shipments**, **Label history** lists every label the store bought, newest first and 50 at a time with **Load more**: the day it was bought, the order (press the number to open it), the service and postage, the tracking number and where the parcel is, or that the label was cancelled.
+On **Store > Shipments**, **Label history** lists every label the store bought, newest first and 50 at a time with **Load more**: the day it was bought, the order, the service and postage, the tracking number and where the parcel is, or that the label was cancelled. Press an order number to open it, then use **Back to Label history** to return to the page you were viewing.
 
 ## Buy a label
 
