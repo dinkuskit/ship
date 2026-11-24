@@ -648,6 +648,26 @@ test("after \"tick Buy a new label\" the form stays on the buy step and the next
   assert.match(bought.toast.message, /Label bought, \$9\.35\. Tracking 9400100000000000000003/);
 });
 
+test("a locally rejected weight keeps the label draft without advancing or requesting a label", async () => {
+  const tall = { ...box, boxId: "box_tall", name: "Tall", heightIn: 8 };
+  const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order(), settings: { ...settings, boxes: [box, tall] } } } });
+  for (const [step, expected] of [["prices", "See prices"], ["buy", "Make practice label"]]) {
+    const view = await h.page({ type: "form_submit", action_id: `${step}:1:order%3Aabc`, values: {
+      boxId: "box_tall", weightOz: "29x", kind: "practice", ...(step === "buy" ? { service: "PM" } : {}),
+    } });
+    const index = view.blocks.findIndex(block => block.type === "form");
+    const form = view.blocks[index];
+    assert.equal(view.blocks[index - 1].title, "Check label details");
+    assert.match(text(view), /Enter the package weight in ounces/);
+    assert.equal(form.submit.label, expected);
+    assert.equal(form.fields.find(field => field.action_id === "boxId").initial_value, "box_tall");
+    assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, "29x");
+    assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, "practice");
+    assert.equal(form.fields.find(field => field.action_id === "service")?.initial_value, step === "buy" ? "PM" : undefined);
+  }
+  assert.ok(h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com")).every(call => call.method === "GET"));
+});
+
 test("a practice label skips the prices step, since Pitney Bowes is not asked", async () => {
   const sent = [];
   const h = host({ ship: {

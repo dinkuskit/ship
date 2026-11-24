@@ -45,18 +45,22 @@ function text(value: unknown, max = 200): string | undefined {
   return typeof value === "string" && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(value) ? value : undefined;
 }
 
-/** The label form as typed, checked here so an impossible value never reaches Ship. */
-function labelRequest(version: number, values: Record<string, unknown>, by: string): { request: LabelRequest; typed: OrderView["typed"] } {
-  const boxId = text(values.boxId);
+/** Keep the label draft separately so validation can fail without losing the merchant's choices. */
+function labelDraft(values: Record<string, unknown>): NonNullable<OrderView["typed"]> {
   const weight = typeof values.weightOz === "number" ? values.weightOz : typeof values.weightOz === "string" ? Number(values.weightOz.trim().replace(/\s*oz\.?$/i, "") || NaN) : NaN;
-  const weightOz = Number.isFinite(weight) ? Math.round(weight * 10) / 10 : NaN;
-  const service = text(values.service), kind = text(values.kind);
-  const typed = { boxId, weightOz: Number.isFinite(weightOz) ? weightOz : undefined, service, kind, buyAgain: values.buyAgain === true };
+  const weightOz = Math.round(weight * 10) / 10;
+  return { boxId: text(values.boxId), weightOz: Number.isFinite(weightOz) ? weightOz : undefined,
+    service: text(values.service), kind: text(values.kind), buyAgain: values.buyAgain === true };
+}
+
+/** Check the draft before asking Ship for prices or a label. */
+function labelRequest(version: number, typed: NonNullable<OrderView["typed"]>, by: string): LabelRequest {
+  const { boxId, weightOz, service, kind, buyAgain } = typed;
   if (!boxId) throw new ShipError("INPUT", "Pick a box.");
-  if (!(weightOz >= 0.1 && weightOz <= MAX_WEIGHT_OZ)) throw new ShipError("INPUT", `Enter the package weight in ounces, from 0.1 to ${MAX_WEIGHT_OZ} (70 lb).`);
+  if (weightOz === undefined || weightOz < 0.1 || weightOz > MAX_WEIGHT_OZ) throw new ShipError("INPUT", `Enter the package weight in ounces, from 0.1 to ${MAX_WEIGHT_OZ} (70 lb).`);
   if (service !== undefined && !(service in SERVICES)) throw new ShipError("INPUT", "Pick a USPS service.");
-  return { typed, request: { version, boxId, weightOz, by, ...(service ? { service: service as LabelRequest["service"] } : {}),
-    ...(kind === "practice" ? { kind: "practice" as const } : {}), ...(values.buyAgain === true ? { buyAgain: true as const } : {}) } };
+  return { version, boxId, weightOz, by, ...(service ? { service: service as LabelRequest["service"] } : {}),
+    ...(kind === "practice" ? { kind: "practice" as const } : {}), ...(buyAgain ? { buyAgain: true as const } : {}) };
 }
 
 /** The order as Ship has it right now, with a fresh five-minute print link when it has a live label. */
@@ -71,11 +75,11 @@ async function openOrder(hosted: Ship, orderId: string, extra: Partial<OrderView
 }
 
 /** A refusal while on an order's page keeps the page, with Ship's reason and what was typed. */
-async function refused(hosted: Ship, orderId: string, error: ShipError, typed: OrderView["typed"]): Promise<BlockResponse> {
+async function refused(hosted: Ship, orderId: string, error: ShipError, typed: OrderView["typed"], labelInputError?: OrderView["labelInputError"]): Promise<BlockResponse> {
   if (error.code === "RECONNECT") throw error;
   if (error.code === "NOT_FOUND") return problemPage(hosted.siteId, "Order not at Ship", error.message);
   try {
-    return await openOrder(hosted, orderId, { failure: error.message, typed, askBuyAgain: error.code === "CHECK_PITNEY_BOWES" });
+    return await openOrder(hosted, orderId, { failure: error.message, typed, labelInputError, askBuyAgain: error.code === "CHECK_PITNEY_BOWES" });
   } catch (again) {
     return problemPage(hosted.siteId, "Ship could not be used", again instanceof ShipError ? again.message : error.message);
   }
@@ -137,22 +141,30 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
     if (input.type === "form_submit") {
       const found = target(input.action_id);
       if (!found) return { blocks: [] };
-      let typed: OrderView["typed"];
+      const typed = labelDraft(input.values);
+      const quote = input.action_id.startsWith("prices:");
+      const buy = input.action_id.startsWith("buy:");
+      if (!quote && !buy) return { blocks: [] };
+      let request: LabelRequest;
       try {
-        const form = labelRequest(found.version, input.values, by);
-        typed = form.typed;
-        if (input.action_id.startsWith("prices:")) {
+        request = labelRequest(found.version, typed, by);
+      } catch (error) {
+        if (!(error instanceof ShipError)) throw error;
+        const rawWeight = input.values.weightOz;
+        return await refused(hosted, found.orderId, error, typed, {
+          quote, weight: rawWeight === "" ? "" : text(rawWeight, 40),
+        });
+      }
+      try {
+        if (quote) {
           // A practice label asks Pitney Bowes nothing, so there is nothing to quote: straight to the buy step.
-          if (form.request.kind === "practice") return await openOrder(hosted, found.orderId, { typed });
-          const prices = await hosted.prices(found.orderId, form.request);
+          if (request.kind === "practice") return await openOrder(hosted, found.orderId, { typed });
+          const prices = await hosted.prices(found.orderId, request);
           return await openOrder(hosted, found.orderId, { prices, typed });
         }
-        if (input.action_id.startsWith("buy:")) {
-          const label = await hosted.buy(found.orderId, form.request);
-          const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
-          return await openOrder(hosted, found.orderId, {}, { type: "success", message });
-        }
-        return { blocks: [] };
+        const label = await hosted.buy(found.orderId, request);
+        const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
+        return await openOrder(hosted, found.orderId, {}, { type: "success", message });
       } catch (error) {
         if (error instanceof ShipError) return await refused(hosted, found.orderId, error, typed);
         throw error;

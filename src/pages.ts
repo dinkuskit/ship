@@ -16,6 +16,8 @@ export interface OrderView {
   typed?: { boxId?: string; weightOz?: number; service?: string; kind?: string; buyAgain?: boolean };
   /** Why the last press was refused, shown as it came from Ship. */
   failure?: string;
+  /** A local validation error keeps the editable weight and cannot advance a quote. */
+  labelInputError?: { quote: boolean; weight?: string };
   /** Ship has no record of its last purchase for this order: offer to buy a new label. */
   askBuyAgain?: boolean;
   /** The five-minute link that opens the live label's PDF in a new tab. */
@@ -249,11 +251,11 @@ function labelForm(view: OrderView): Block[] {
   const practiceOnly = order.test && !settings.testSandbox;
   const practice = practiceOnly || (order.test && typed.kind === "practice");
   const buyAgain = view.askBuyAgain === true || typed.buyAgain === true;
-  const quoted = prices !== undefined || practice || buyAgain;
+  const quoted = !view.labelInputError?.quote && (prices !== undefined || practice || buyAgain);
   const form: FormField[] = [
     { type: "select", action_id: "boxId", label: "Box", options: settings.boxes.map(boxOption), initial_value: box.boxId },
     // A text field: the browser's number field rejects most tenths of an ounce as "not a valid value".
-    { type: "text_input", action_id: "weightOz", label: `Package weight in ounces, items plus box (16 oz = 1 lb)`, initial_value: String(Math.max(0.1, Math.min(MAX_WEIGHT_OZ, packed))), placeholder: "28.5" },
+    { type: "text_input", action_id: "weightOz", label: `Package weight in ounces, items plus box (16 oz = 1 lb)`, initial_value: view.labelInputError?.weight ?? String(Math.max(0.1, Math.min(MAX_WEIGHT_OZ, packed))), placeholder: "28.5" },
   ];
   if (quoted) {
     // Radio choices, as Shopify and WooCommerce Shipping list rates: every service and its price in view.
@@ -263,15 +265,17 @@ function labelForm(view: OrderView): Block[] {
   }
   if (order.test) {
     form.push({ type: "select", action_id: "kind", label: "Label kind", initial_value: practiceOnly || typed.kind === "practice" ? "practice" : "sandbox",
-      options: [...(practiceOnly ? [] : [{ label: "Free Pitney Bowes sandbox label (real sandbox price, nothing charged)", value: "sandbox" }]),
-        { label: "Practice label (no Pitney Bowes, marked TEST - NOT POSTAGE)", value: "practice" }] });
+      options: [...(practiceOnly ? [] : [{ label: "Pitney Bowes sandbox (no charge)", value: "sandbox" }]),
+        { label: "Practice label (no postage)", value: "practice" }] });
   }
-  if (buyAgain) form.push({ type: "toggle", action_id: "buyAgain", label: "Buy a new label", description: "Pitney Bowes has no record of the last one Ship bought for this order.", initial_value: typed.buyAgain === true });
-  const blocks: Block[] = [{ type: "form", block_id: `label-${order.orderId}-${quoted ? "buy" : "prices"}`, fields: form,
+  if (quoted && buyAgain) form.push({ type: "toggle", action_id: "buyAgain", label: "Buy a new label", description: "Pitney Bowes has no record of the last one Ship bought for this order.", initial_value: typed.buyAgain === true });
+  const blocks: Block[] = [
+    ...(view.labelInputError && view.failure ? [banner("error", "Check label details", view.failure)] : []),
+    { type: "form", block_id: `label-${order.orderId}-${quoted ? "buy" : "prices"}`, fields: form,
     submit: quoted ? { label: practice ? "Make practice label" : "Buy label", action_id: `buy:${id}` } : { label: "See prices", action_id: `prices:${id}` } }];
   if (prices !== undefined) blocks.push(context("Prices are for the box and weight above. Changed them? Press See prices again."));
-  else if (practice && !practiceOnly) blocks.push(context("A practice label is free and asks Pitney Bowes nothing, so there are no prices to see. Want a sandbox label instead? Press See prices."));
-  else if (buyAgain) blocks.push(context("Pitney Bowes has no record of the last label Ship bought for this order. Tick Buy a new label and press Buy label to buy one, with the service you chose."));
+  else if (quoted && practice && !practiceOnly) blocks.push(context("A practice label is free and asks Pitney Bowes nothing, so there are no prices to see. Want a sandbox label instead? Press See prices."));
+  else if (quoted && buyAgain) blocks.push(context("Pitney Bowes has no record of the last label Ship bought for this order. Tick Buy a new label and press Buy label to buy one, with the service you chose."));
   if (quoted && !practiceOnly) blocks.push({ type: "actions", elements: [{ type: "button", label: "See prices again", action_id: "open", value: order.orderId }] });
   return blocks;
 }
@@ -289,7 +293,9 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
   const blocks: Block[] = [header("Shipments"), { type: "actions", elements: [{ type: "button", label: "Back to Shipments", action_id: "list" }] },
     header(`Order ${orderName(order)}`), context(`${count(quantity)}${label || order.status === "completed" || order.addressProblem ? " · " : " "}${next}`)];
   if (order.test) blocks.push(banner("alert", "TEST order", "Nothing ships and nothing is charged. A TEST order gets a free Pitney Bowes sandbox label, or a practice label, never live postage."));
-  if (view.failure) blocks.push(banner("error", label ? "Not done" : "No label bought", view.failure));
+  const canEnterLabel = !label && order.status === "processing" && !order.addressProblem && settings.shipFrom
+    && settings.boxes.length > 0 && (order.test || settings.postageConnected);
+  if (view.failure && !(view.labelInputError && canEnterLabel)) blocks.push(banner("error", label ? "Not done" : "No label bought", view.failure));
   if (order.addressProblem && !label) {
     blocks.push(banner("error", "This address cannot take a label yet", `${order.addressProblem} Correct it on the order in Commerce; Commerce sends Ship the corrected address.`));
   }
