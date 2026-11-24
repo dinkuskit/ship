@@ -648,6 +648,44 @@ test("after \"tick Buy a new label\" the form stays on the buy step and the next
   assert.match(bought.toast.message, /Label bought, \$9\.35\. Tracking 9400100000000000000003/);
 });
 
+test("an invalid replacement label weight returns to prices without carrying purchase approval", async () => {
+  for (const isTest of [true, false]) {
+    const sent = [];
+    const h = host({ ship: {
+      "GET /v1/admin/orders/order%3Aabc": { order: order({ test: isTest }), settings },
+      "POST /v1/admin/orders/order%3Aabc/labels": body => {
+        sent.push({ route: "labels", body });
+        return Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes has no record of the last label." } }, { status: 409 });
+      },
+      "POST /v1/admin/orders/order%3Aabc/prices": body => {
+        sent.push({ route: "prices", body });
+        return Response.json({ prices: { GA: 420, PM: 950, EM: null } });
+      },
+    } });
+    const replacement = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
+      boxId: "box_small", weightOz: 31, service: "PM",
+    } });
+    assert.equal(replacement.blocks.find(block => block.type === "form").fields.find(field => field.action_id === "buyAgain").initial_value, false);
+    const refused = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
+      boxId: "box_small", weightOz: "31x", service: "PM", buyAgain: true,
+    } });
+    const retry = refused.blocks.find(block => block.type === "form");
+    assert.equal(retry.submit.label, "See prices");
+    assert.equal(retry.fields.find(field => field.action_id === "weightOz").initial_value, "31x");
+    assert.equal(retry.fields.some(field => field.action_id === "buyAgain"), false);
+    assert.deepEqual(sent.map(call => call.route), ["labels"]);
+
+    const quoted = await h.page({ type: "form_submit", action_id: retry.submit.action_id, values: { boxId: "box_small", weightOz: "32" } });
+    assert.deepEqual(sent.map(call => call.route), ["labels", "prices"]);
+    assert.equal(sent[1].body.weightOz, 32);
+    assert.equal(sent[1].body.buyAgain, undefined);
+    const next = quoted.blocks.find(block => block.type === "form");
+    assert.equal(next.submit.label, "Buy label");
+    assert.match(text(quoted), /USPS Priority Mail · \$9\.50/);
+    assert.equal(next.fields.some(field => field.action_id === "buyAgain"), false);
+  }
+});
+
 test("a locally rejected weight keeps the label draft without advancing or requesting a label", async () => {
   const tall = { ...box, boxId: "box_tall", name: "Tall", heightIn: 8 };
   const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order(), settings: { ...settings, boxes: [box, tall] } } } });

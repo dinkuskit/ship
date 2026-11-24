@@ -240,7 +240,7 @@ function labelsTable(labels: Label[]): Block {
  * The label form: box and weight, then once Ship has quoted them, the USPS services with their
  * prices to pick from and "Buy label". A practice label needs no quote (Pitney Bowes is not asked),
  * so picking it goes straight to the buy step; so does Ship's "tick Buy a new label" refusal,
- * which must be answered on the buy step, with the service kept and no new quote.
+ * which stays on the buy step unless the owner submits an invalid package or service.
  */
 function labelForm(view: OrderView): Block[] {
   const { order, settings, typed = {}, prices } = view;
@@ -250,7 +250,8 @@ function labelForm(view: OrderView): Block[] {
   const boxOption = (candidate: Box) => ({ label: `${candidate.name}: ${candidate.lengthIn} × ${candidate.widthIn} × ${candidate.heightIn} in, ${weight(candidate.weightOz)} empty`, value: candidate.boxId });
   const practiceOnly = order.test && !settings.testSandbox;
   const practice = practiceOnly || (order.test && typed.kind === "practice");
-  const buyAgain = view.askBuyAgain === true || typed.buyAgain === true;
+  // A local refusal ends replacement confirmation. A corrected sandbox or live package needs new prices.
+  const buyAgain = !view.labelInputError && (view.askBuyAgain === true || typed.buyAgain === true);
   const quoted = !view.labelInputError?.quote && (prices !== undefined || practice || buyAgain);
   const form: FormField[] = [
     { type: "select", action_id: "boxId", label: "Box", options: settings.boxes.map(boxOption), initial_value: box.boxId },
