@@ -10,8 +10,8 @@ export function esc(value: unknown): string {
 }
 
 const STYLE = `
-:root{color-scheme:light dark;--bg:#fff;--fg:#1d1d1f;--muted:#6b6b70;--line:#d9d9de;--accent:#0b5cad;--warn:#8a4b00;--warnbg:#fff4e0;--bad:#a1121a}
-@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#ececf0;--muted:#a0a0a8;--line:#34343a;--accent:#6aa7ff;--warn:#ffcf8a;--warnbg:#3a2a10;--bad:#ff8a8f}}
+:root{color-scheme:light dark;--bg:#fff;--fg:#1d1d1f;--muted:#6b6b70;--line:#d9d9de;--accent:#0b5cad;--button-text:#fff;--warn:#8a4b00;--warnbg:#fff4e0;--bad:#a1121a}
+@media (prefers-color-scheme:dark){:root{--bg:#141416;--fg:#ececf0;--muted:#a0a0a8;--line:#34343a;--accent:#6aa7ff;--button-text:var(--bg);--warn:#ffcf8a;--warnbg:#3a2a10;--bad:#ff8a8f}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.5 system-ui,-apple-system,Segoe UI,sans-serif}
 header{display:flex;gap:16px;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
 header nav{display:flex;gap:16px;align-items:center;flex-wrap:wrap;overflow-wrap:anywhere}main{max-width:880px;margin:0 auto;padding:16px}
@@ -34,7 +34,7 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 6px;
 .error{color:var(--bad);font-weight:600}form.inline{display:inline}label{display:block;margin:8px 0 2px;font-weight:600}
 input,select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);width:100%;max-width:420px}
 .row{display:flex;gap:8px;flex-wrap:wrap}.row>div{flex:1;min-width:90px}
-button{font:inherit;padding:7px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:#fff;cursor:pointer;margin-top:12px}
+button{font:inherit;min-height:44px;padding:7px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--button-text);cursor:pointer;margin-top:12px}
 button.secondary{background:transparent;color:var(--accent)}button:disabled{opacity:.5;cursor:not-allowed}
 `;
 
