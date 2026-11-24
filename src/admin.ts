@@ -1,7 +1,7 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
 import {
-  connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH,
+  connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, unconfirmedPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH,
   type OrderView, type Toast,
 } from "./pages.js";
 import { settingsAdmin } from "./settings.js";
@@ -114,8 +114,9 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
     return connectPage(isAdmin, "Connect could not finish. Try again in a moment.");
   }
   if (settings.state === "pending") return pendingPage(settings.verificationUri, settings.checked);
+  if (settings.state === "finish_unconfirmed") return unconfirmedPage(isAdmin, settings.checked);
   if (settings.state === "disconnected") return connectPage(isAdmin, settings.failure);
-  if (settings.state === "finish_setup") return finishPage(isAdmin);
+  if (settings.state === "finish_setup") return finishPage(isAdmin, settings.retry);
   const hosted = ship(ctx, settings.siteId, settings.key, adminPageFrom(route.request?.url), adminUserFrom(user.email));
   const by = typeof user.email === "string" && user.email ? user.email : user.id;
   try {

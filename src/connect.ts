@@ -28,7 +28,7 @@ const SITE_ID_RE = /^[A-Za-z0-9_-]{1,200}$/;
 const MAX_CONNECT_MS = 600_000;
 
 /** What the encrypted setting holds: this store's key once connected, and a Connect's verifier while one waits. */
-interface Saved { siteId?: string; storeKey?: string; flow?: { id: string; verifier: string } }
+interface Saved { siteId?: string; storeKey?: string; flow?: { id: string; verifier: string; finishing?: true } }
 /** A waiting Connect, in the plugin's KV. Nothing here is secret: DinkusKit.com reads the receipt from the store-proof route. */
 interface Control { flowId: string; expiresAt: number; nextPollAt: number; interval: number; verificationUri: string; receipt: Receipt }
 export interface Receipt {
@@ -38,14 +38,16 @@ export interface Receipt {
 export type ConnectView =
   | { state: "connected"; siteId: string; key: string }
   | { state: "pending"; verificationUri: string; checked?: true }
+  | { state: "finish_unconfirmed"; checked?: true }
   | { state: "disconnected"; failure?: string }
-  | { state: "finish_setup" };
+  | { state: "finish_setup"; retry?: true };
 /** What DinkusKit.com says this store is connected to; shown on the page, never used to buy a label. */
 export interface ConnectedTo { business: string; plugins: ("commerce" | "payments" | "ship")[] }
 const PLUGINS = ["commerce", "payments", "ship"];
 
 const COMMERCE_FIRST = "Connect Commerce first. Press Connect in the Commerce plugin, then come back here and press Connect.";
 const RESTART = "Connect did not finish. Press Connect to start again.";
+const UNCONFIRMED = "Ship setup could not be confirmed. Start a new connection to try again.";
 /**
  * Ship 0.2.1's pasted Store ID and store key. Pasted keys retire (store-connect-no-paste-082): an
  * upgraded store never uses or sends one, asks for Connect once, and forgets it when Connect finishes.
@@ -89,9 +91,10 @@ const connectedIn = (value: Saved): ConnectView | null =>
  * Not connected: a store upgraded from 0.2.1 is told why it must Connect. Only the plain Store ID is
  * looked at; the old key, encrypted under a setting this version no longer declares, is never read.
  */
-async function notConnected(ctx: PluginContext): Promise<ConnectView> {
+async function notConnected(ctx: PluginContext, retry = false): Promise<ConnectView> {
   // DinkusKit.com already knows this store for the owner's business: Finish setup, no second Approve.
-  if (await joinable(ctx)) return { state: "finish_setup" };
+  if (await joinable(ctx)) return { state: "finish_setup", ...(retry ? { retry: true as const } : {}) };
+  if (retry) return { state: "disconnected", failure: UNCONFIRMED };
   const pasted = await ctx.settings.get<unknown>("siteId").then(value => typeof value === "string" && value.length > 0, () => false);
   return pasted ? { state: "disconnected", failure: UPGRADED } : { state: "disconnected" };
 }
@@ -108,12 +111,21 @@ export async function connectionState(ctx: PluginContext, press = false): Promis
   if (!value.flow) return connectedIn(value) ?? await notConnected(ctx);
   const flowId = value.flow.id;
   const control = await ctx.kv.get<Control>(controlKey(flowId));
-  const restart = async (failure = RESTART): Promise<ConnectView> => {
-    if ((await write(ctx, revision, withoutFlow(value))).applied) await ctx.kv.delete(controlKey(flowId));
-    return connectedIn(value) ?? { state: "disconnected", failure };
+  const restart = async (failure = RESTART, retry = false): Promise<ConnectView> => {
+    if ((await write(ctx, revision, withoutFlow(value))).applied) {
+      await ctx.kv.delete(controlKey(flowId));
+      return connectedIn(value) ?? (retry ? await notConnected(ctx, true) : { state: "disconnected", failure });
+    }
+    return connectedIn((await saved(ctx)).value) ?? { state: "disconnected", failure };
   };
-  if (!control || control.flowId !== flowId || control.expiresAt <= Date.now()) return restart();
-  if (!press && Date.now() < control.nextPollAt) return { state: "pending", verificationUri: control.verificationUri };
+  if (!control || control.flowId !== flowId || control.expiresAt <= Date.now()) return restart(RESTART, value.flow.finishing === true);
+  const waiting = (checked = false): ConnectView => {
+    const detail = checked ? { checked: true as const } : {};
+    return value.flow?.finishing
+      ? { state: "finish_unconfirmed", ...detail }
+      : { state: "pending", verificationUri: control.verificationUri, ...detail };
+  };
+  if (!press && Date.now() < control.nextPollAt) return waiting();
   let response: Response, body: Record<string, unknown>;
   try {
     response = await ctx.http!.fetch(`${CONNECT_URL}/token`, { method: "POST", cache: "no-store", redirect: "error",
@@ -121,17 +133,18 @@ export async function connectionState(ctx: PluginContext, press = false): Promis
       body: JSON.stringify({ client_id: CLIENT_ID, connection_id: control.receipt.connection_id, code_verifier: value.flow.verifier }) });
     body = await response.json() as Record<string, unknown>;
   } catch {
-    return { state: "pending", verificationUri: control.verificationUri };
+    return waiting(press && value.flow.finishing === true);
   }
   if (!response.ok) {
     if (body?.error === "authorization_pending") {
       await ctx.kv.set(controlKey(flowId), { ...control, nextPollAt: Date.now() + control.interval * 1000 } satisfies Control);
       // Cancelled or replaced while DinkusKit.com answered: leave nothing behind for it.
       if ((await saved(ctx)).value.flow?.id !== flowId) await ctx.kv.delete(controlKey(flowId));
-      return { state: "pending", verificationUri: control.verificationUri, ...(press ? { checked: true as const } : {}) };
+      return waiting(press);
     }
     if (body?.error === "access_denied") return restart("The business owner did not approve Ship at DinkusKit.com. Press Connect to ask again.");
-    return restart();
+    if (value.flow.finishing && response.status >= 500) return waiting(press);
+    return restart(RESTART, value.flow.finishing === true && body?.error === "already_redeemed");
   }
   if (body.site_id !== control.receipt.site_id || typeof body.store_key !== "string" || !STORE_KEY_RE.test(body.store_key)) return restart();
   const next: Saved = { siteId: control.receipt.site_id, storeKey: body.store_key };
@@ -169,7 +182,7 @@ export async function startConnect(ctx: PluginContext): Promise<ConnectView> {
  * DinkusKit.com wants the owner's Approve after all, the page shows the usual Approve link.
  */
 export async function finishSetup(ctx: PluginContext): Promise<ConnectView> {
-  const begun = await begin(ctx);
+  const begun = await begin(ctx, true);
   if ("state" in begun) return begun;
   const { flowId, verifier, receipt } = begun;
   let response: Response, body: Record<string, unknown>;
@@ -179,12 +192,18 @@ export async function finishSetup(ctx: PluginContext): Promise<ConnectView> {
       body: JSON.stringify({ client_id: CLIENT_ID, connection_id: receipt.connection_id, code_verifier: verifier }) });
     body = await response.json() as Record<string, unknown>;
   } catch {
-    // The answer is unknown: the waiting Connect stays, and Check finishes it if DinkusKit.com approved.
-    return { state: "pending", verificationUri: begun.verificationUri };
+    // Keep the waiting attempt: a lost reply says nothing about whether the owner needs to approve.
+    return { state: "finish_unconfirmed" };
   }
-  if (!response.ok && body?.error === "owner_approval_required") return { state: "pending", verificationUri: begun.verificationUri };
+  if (response.status >= 500) return { state: "finish_unconfirmed" };
   const { value, revision } = await saved(ctx);
   if (value.flow?.id !== flowId) return connectedIn(value) ?? { state: "disconnected", failure: RESTART };
+  if (!response.ok && body?.error === "owner_approval_required") {
+    if ((await write(ctx, revision, { ...value, flow: { id: flowId, verifier } })).applied) {
+      return { state: "pending", verificationUri: begun.verificationUri };
+    }
+    return connectedIn((await saved(ctx)).value) ?? { state: "disconnected", failure: RESTART };
+  }
   const stop = async (failure: string): Promise<ConnectView> => {
     if ((await write(ctx, revision, withoutFlow(value))).applied) await ctx.kv.delete(controlKey(flowId));
     return connectedIn(value) ?? { state: "disconnected", failure };
@@ -199,7 +218,7 @@ export async function finishSetup(ctx: PluginContext): Promise<ConnectView> {
 }
 
 /** Starts a Connect at DinkusKit.com and saves it as waiting, or says why it could not. */
-async function begin(ctx: PluginContext): Promise<ConnectView | { flowId: string; verifier: string; verificationUri: string; receipt: Receipt }> {
+async function begin(ctx: PluginContext, finishing = false): Promise<ConnectView | { flowId: string; verifier: string; verificationUri: string; receipt: Receipt }> {
   const origin = siteOrigin(ctx), id = installedId(ctx);
   if (!origin || !id || !ctx.http) {
     return { state: "disconnected", failure: "Connect needs this store on its https web address, with Ship installed from the EmDash Registry." };
@@ -233,7 +252,8 @@ async function begin(ctx: PluginContext): Promise<ConnectView | { flowId: string
     flowId, expiresAt: expiresAt as number, interval: interval as number, nextPollAt: Date.now() + (interval as number) * 1000,
     verificationUri: body.verification_uri, receipt,
   } satisfies Control);
-  if (!(await write(ctx, revision, { ...value, flow: { id: flowId, verifier } })).applied) {
+  const flow = { id: flowId, verifier, ...(finishing ? { finishing: true as const } : {}) };
+  if (!(await write(ctx, revision, { ...value, flow })).applied) {
     await ctx.kv.delete(controlKey(flowId));
     return { state: "disconnected", failure: RESTART };
   }
@@ -286,7 +306,10 @@ export async function cancelKey(ctx: PluginContext): Promise<boolean> {
 /** Cancel a waiting Connect; a key this store already had keeps working. */
 export async function cancelConnect(ctx: PluginContext): Promise<ConnectView> {
   const { value, revision } = await saved(ctx);
-  if (value.flow && (await write(ctx, revision, withoutFlow(value))).applied) await ctx.kv.delete(controlKey(value.flow.id));
+  if (value.flow && (await write(ctx, revision, withoutFlow(value))).applied) {
+    await ctx.kv.delete(controlKey(value.flow.id));
+    if (value.flow.finishing) return connectedIn(value) ?? await notConnected(ctx, true);
+  }
   return connectedIn(value) ?? { state: "disconnected" };
 }
 
