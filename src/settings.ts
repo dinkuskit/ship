@@ -10,8 +10,8 @@ import { adminPageFrom, adminUserFrom, ship, ShipError, shipPages, type Settings
  * ship-from address, Pitney Bowes postage account, shipped email and box sizes, read and saved on hosted
  * Ship through the plugin's ship:admin pass. Ship keeps them for every order; nothing is kept here.
  */
-/** What the Shipping settings page shows besides Ship's settings: a refusal to show, and the box form as typed. */
-export interface SettingsView { failure?: string; typed?: Partial<Record<string, string>> }
+/** The refused save and, for a box, the fields as typed. */
+export interface SettingsView { failure?: { form: SettingsForm; message: string }; typed?: Partial<Record<string, string>> }
 
 const field = (action_id: string, label: string, initial_value?: string | null, placeholder?: string): FormField =>
   ({ type: "text_input", action_id, label, ...(initial_value ? { initial_value } : {}), ...(placeholder ? { placeholder } : {}) });
@@ -27,17 +27,17 @@ function accountLine(account: NonNullable<ShipSettingsPage["postageAccount"]>): 
  * Pitney Bowes' site, like Stripe's; connecting the account it made happens here, and the password goes
  * to Pitney Bowes once through Ship, which keeps neither it nor the username.
  */
-function postageBlocks(settings: ShipSettingsPage): Block[] {
+function postageBlocks(settings: ShipSettingsPage, failure: Block[]): Block[] {
   const blocks: Block[] = [header("Pitney Bowes postage")];
   if (!settings.postageConnected) blocks.push(context("Ship cannot reach Pitney Bowes right now, so only TEST orders get labels."));
   if (settings.postageAccount) {
     return [...blocks, section(accountLine(settings.postageAccount)),
       context("Labels for real orders are paid from this account. Pitney Bowes charges your card there, not DinkusKit."),
       { type: "actions", elements: [{ type: "button", label: "Disconnect Pitney Bowes", action_id: "disconnect_postage", style: "danger",
-        confirm: { title: "Disconnect Pitney Bowes?", text: "Ship stops buying labels for real orders until you connect a Pitney Bowes account again. Labels already bought stay as they are.", confirm: "Disconnect", deny: "Keep connected", style: "danger" } }] }];
+        confirm: { title: "Disconnect Pitney Bowes?", text: "Ship stops buying labels for real orders until you connect a Pitney Bowes account again. Labels already bought stay as they are.", confirm: "Disconnect", deny: "Keep connected", style: "danger" } }] }, ...failure];
   }
   blocks.push(section("To buy USPS labels for real orders, you need your own Pitney Bowes postage account. Pitney Bowes charges postage to the card you add there, not DinkusKit. TEST orders don't need one."));
-  if (!settings.signupUrl) return [...blocks, context("Connecting a Pitney Bowes account isn't available in Ship yet.")];
+  if (!settings.signupUrl) return [...blocks, context("Connecting a Pitney Bowes account isn't available in Ship yet."), ...failure];
   if (settings.testSandbox) blocks.push(context("Ship is on the Pitney Bowes sandbox, so this makes a test account and nothing is charged."));
   return [...blocks,
     { type: "section", text: "1. Create your account on Pitney Bowes' site, with your ship-from address and email filled in. Add a card there; Pitney Bowes refills your postage balance automatically. Use this link: an account made elsewhere may not connect.",
@@ -46,7 +46,7 @@ function postageBlocks(settings: ShipSettingsPage): Block[] {
     { type: "form", block_id: "postage", fields: [
       field("username", "Pitney Bowes username"),
       { type: "secret_input", action_id: "password", label: "Pitney Bowes password" },
-    ], submit: { label: "Connect Pitney Bowes", action_id: "save:postage" } }];
+    ], submit: { label: "Connect Pitney Bowes", action_id: "save:postage" } }, ...failure];
 }
 
 /**
@@ -57,17 +57,20 @@ function postageBlocks(settings: ShipSettingsPage): Block[] {
 export function settingsPage(siteId: string, settings: ShipSettingsPage, view: SettingsView = {}, toast?: Toast): BlockResponse {
   const from = settings.shipFrom, typed = view.typed ?? {};
   const blocks: Block[] = [header("Shipping settings")];
-  if (view.failure) blocks.push(banner("error", "Not saved", view.failure));
+  // Keep the reason beside the submitted form, including on a long mobile page.
+  const failureFor = (form: SettingsForm): Block[] => view.failure?.form === form
+    ? [{ ...banner("error", "Not saved", view.failure.message), block_id: `error:${form}` }]
+    : [];
   blocks.push(header("Ship from"), context("The return address printed on every label."), { type: "form", block_id: "ship-from", fields: [
     field("name", "Name", from?.name), field("company", "Company (optional)", from?.company),
     field("line1", "Address", from?.line1), field("line2", "Address line 2 (optional)", from?.line2),
     field("city", "City", from?.city), field("region", "State", from?.region, "NY"), field("postalCode", "ZIP code", from?.postalCode),
-  ], submit: { label: "Save ship-from address", action_id: "save:ship-from" } }, { type: "divider" });
-  blocks.push(...postageBlocks(settings), { type: "divider" });
+  ], submit: { label: "Save ship-from address", action_id: "save:ship-from" } }, ...failureFor("ship-from"), { type: "divider" });
+  blocks.push(...postageBlocks(settings, failureFor("postage")), { type: "divider" });
   const sender = settings.storeName ? `the name ${settings.storeName} (your store's Site title)` : "your store's Site title";
   blocks.push(header("Shipped email"), context(`Sent from orders@dinkuskit.com under ${sender} when a label is bought. When a shopper replies, the reply goes to this address.`),
     { type: "form", block_id: "reply-to", fields: [field("replyTo", "Reply-to email", settings.replyTo, "you@example.com")],
-      submit: { label: "Save reply-to email", action_id: "save:reply-to" } }, { type: "divider" });
+      submit: { label: "Save reply-to email", action_id: "save:reply-to" } }, ...failureFor("reply-to"), { type: "divider" });
   blocks.push(header("Box sizes"), { type: "table", page_action_id: "boxes", empty_text: "No box sizes yet. Labels need at least one.",
     columns: [{ key: "name", label: "Name" }, { key: "size", label: "Size" }, { key: "empty", label: "Empty weight" }, { key: "remove", label: "", format: "element" }],
     rows: settings.boxes.map(box => ({ name: box.name, size: `${box.lengthIn} × ${box.widthIn} × ${box.heightIn} in`, empty: weight(box.weightOz),
@@ -76,7 +79,7 @@ export function settingsPage(siteId: string, settings: ShipSettingsPage, view: S
     { type: "form", block_id: "boxes", fields: [
       field("name", "Box name", typed.name, "Small mailer"), field("lengthIn", "Length (in)", typed.lengthIn), field("widthIn", "Width (in)", typed.widthIn),
       field("heightIn", "Height (in)", typed.heightIn), field("weightOz", "Empty weight (oz)", typed.weightOz ?? "0"),
-    ], submit: { label: "Add box size", action_id: "save:boxes" } });
+    ], submit: { label: "Add box size", action_id: "save:boxes" } }, ...failureFor("boxes"));
   blocks.push({ type: "actions", elements: [pageLink("Shipments", SHIPMENTS_PATH), link("Ship's own Settings", shipPages(siteId).settings)] });
   return { blocks, ...(toast ? { toast } : {}) };
 }
@@ -137,7 +140,7 @@ export async function settingsAdmin(input: Interaction, isAdmin: boolean, route:
       } catch (error) {
         if (!(error instanceof ShipError) || error.code === "RECONNECT" || error.status === 404 || error.status === 0 || error.status >= 500) throw error;
         // Ship said what is wrong; the page keeps the box being added, never the password.
-        const view: SettingsView = { failure: error.message, ...(form === "boxes" ? { typed: values } : {}) };
+        const view: SettingsView = { failure: { form, message: error.message }, ...(form === "boxes" ? { typed: values } : {}) };
         return settingsPage(hosted.siteId, await hosted.settings(), view);
       }
     }

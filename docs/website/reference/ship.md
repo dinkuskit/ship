@@ -36,7 +36,7 @@ A store upgraded from `0.2.1` does not use its old pasted key. The Shipments pag
 
 ## Shipping settings
 
-An Administrator opens **Store > Shipping settings**. Editors see a note to ask an Administrator. Each part saves to Ship straight away, with a message when it is saved, or Ship's reason when it is not:
+An Administrator opens **Store > Shipping settings**. Editors see a note to ask an Administrator. Each part saves to Ship straight away. If Ship rejects a save, look below the form you submitted for the reason:
 
 - **Ship from**: the return address printed on every label.
 - **Pitney Bowes postage**: real orders' labels are paid from your own Pitney Bowes postage account, and Pitney Bowes charges the card you add there, not DinkusKit. Press **Create your Pitney Bowes account** to sign up on Pitney Bowes' site with your ship-from address and email filled in, then come back and enter that account's username and password and press **Connect Pitney Bowes**. Ship sends them to Pitney Bowes once to find your account and keeps neither. Once connected, the page names the account and has **Disconnect Pitney Bowes**. TEST orders do not need an account.
