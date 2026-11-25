@@ -554,14 +554,55 @@ test("opening an order shows the form with the items plus box weight, then price
   assert.equal(buy.submit.action_id, "buy:1:order%3Aabc");
   assert.equal(buy.fields[1].initial_value, "30");
   const service = buy.fields.find(field => field.action_id === "service");
-  assert.deepEqual(service.options.map(option => option.label), ["USPS Ground Advantage · $5.10", "USPS Priority Mail · $9.35", "USPS Priority Mail Express · not available for this package"]);
-  assert.equal(service.type, "radio", "every service and its price stay in view, as Shopify and WooCommerce Shipping list rates");
+  assert.deepEqual(service.options.map(option => option.label), ["USPS Ground Advantage · $5.10", "USPS Priority Mail · $9.35"]);
+  assert.equal(service.type, "radio");
+  assert.equal(service.initial_value, "GA");
 
   const bought = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, service: "PM", kind: "sandbox" } });
   assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", by: "staff@example.test" });
   assert.equal(bought.toast.message, "Label bought, $9.35 sandbox. Tracking SANDBOX-TRACKING-A.");
   // The page after buying is read from Ship again; the stand-in still has no label, so the form shows again.
   assert.ok(bought.blocks.some(block => block.type === "form"));
+});
+
+test("Shipments falls back to a quoted service when Ground Advantage is unavailable", async () => {
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: null, PM: 0 } },
+  } });
+  const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: {
+    boxId: "box_small", weightOz: "30", kind: "sandbox", service: "GA",
+  } });
+  const form = priced.blocks.find(block => block.type === "form");
+  const service = form.fields.find(field => field.action_id === "service");
+  assert.equal(form.submit.action_id, "buy:1:order%3Aabc");
+  assert.equal(service.initial_value, "PM");
+  assert.deepEqual(service.options, [{ value: "PM", label: "USPS Priority Mail · $0.00" }]);
+});
+
+test("no USPS rates keeps the package editable without offering to buy, then a retry can find a rate", async () => {
+  const tall = { ...box, boxId: "box_tall", name: "Tall", heightIn: 8 };
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings: { ...settings, boxes: [box, tall] } },
+    "POST /v1/admin/orders/order%3Aabc/prices": body => Response.json({
+      prices: { GA: null, PM: null, EM: body.weightOz === 31 ? 1200 : null },
+    }),
+  } });
+  const values = { boxId: "box_tall", weightOz: "30", kind: "sandbox" };
+  const unavailable = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values });
+  const form = unavailable.blocks.find(block => block.type === "form");
+  assert.match(text(unavailable), /No USPS rates are available for this package/);
+  assert.doesNotMatch(text(unavailable), /Buy label|"action_id":"buy:/);
+  assert.equal(form.submit.label, "See prices");
+  assert.deepEqual(Object.fromEntries(form.fields.map(field => [field.action_id, field.initial_value])), values);
+
+  const retry = await h.page({ type: "form_submit", action_id: form.submit.action_id, values: { ...values, weightOz: "31" } });
+  const buy = retry.blocks.find(block => block.type === "form");
+  assert.doesNotMatch(text(retry), /No USPS rates are available/);
+  assert.equal(buy.submit.label, "Buy label");
+  assert.equal(buy.fields.find(field => field.action_id === "service").initial_value, "EM");
+  assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 2);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
 });
 
 test("a labelled order shows the label with a five-minute print link and a guarded Cancel", async () => {
