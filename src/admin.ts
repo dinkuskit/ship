@@ -49,8 +49,11 @@ function text(value: unknown, max = 200): string | undefined {
 function labelDraft(values: Record<string, unknown>): NonNullable<OrderView["typed"]> {
   const weight = typeof values.weightOz === "number" ? values.weightOz : typeof values.weightOz === "string" ? Number(values.weightOz.trim().replace(/\s*oz\.?$/i, "") || NaN) : NaN;
   const weightOz = Math.round(weight * 10) / 10;
+  const kind = text(values.kind);
+  // Block Kit sends values for hidden fields too. Read the picker for the active label kind only.
+  const service = kind === "practice" ? values.practiceService ?? values.service : values.service;
   return { boxId: text(values.boxId), weightOz: Number.isFinite(weightOz) ? weightOz : undefined,
-    service: text(values.service), kind: text(values.kind), buyAgain: values.buyAgain === true };
+    service: text(service), kind, buyAgain: values.buyAgain === true };
 }
 
 /** Check the draft before asking Ship for prices or a label. */
