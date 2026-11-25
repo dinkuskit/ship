@@ -1088,6 +1088,32 @@ function checkGithubReleaseExists(tag, root = repositoryRoot, ghExec = defaultGh
   }
 }
 
+// Write access is read from GitHub again right before every push and GitHub write, never carried
+// over from the button press or the merge: someone whose access is removed while the run is going
+// stops it at the next effect. GitHub reports maintain as write and triage as read.
+const WRITE_PERMISSIONS = new Set(["admin", "write"]);
+
+export function verifyWriteAuthority({ actor, repository, effect, root = repositoryRoot, ghExec = defaultGh }) {
+  if (!actor) {
+    throw new Error(`Refusing to ${effect}: there is no actor to check write access for (GITHUB_TRIGGERING_ACTOR).`);
+  }
+  let permission = "";
+  try {
+    permission = ghExec(
+      ["api", `repos/${repository}/collaborators/${encodeURIComponent(actor)}/permission`, "--jq", ".permission"],
+      root,
+    ).trim();
+  } catch (error) {
+    throw new Error(
+      `Refusing to ${effect}: could not read ${actor}'s access to ${repository} (${error instanceof Error ? error.message.split("\n")[0] : String(error)}).`,
+    );
+  }
+  if (!WRITE_PERMISSIONS.has(permission)) {
+    throw new Error(`Refusing to ${effect}: ${actor} no longer has write access to ${repository} (${permission || "none"}).`);
+  }
+  return permission;
+}
+
 export async function runReleaseFlowCli(argv, deps = {}) {
   const [command, ...rest] = argv;
   const flags = parseCliFlags(rest);
@@ -1099,6 +1125,10 @@ export async function runReleaseFlowCli(argv, deps = {}) {
     deps.npmExec ||
     ((args, cwd) => execFileSync("npm", args, { cwd, stdio: "inherit" }));
   const log = deps.log || ((line) => console.log(line));
+  // The person who pressed the button (or re-ran it), or who merged the ci: release PR.
+  const actor = String(deps.actor ?? process.env.GITHUB_TRIGGERING_ACTOR ?? process.env.GITHUB_ACTOR ?? "").trim();
+  const repository = deps.repository || process.env.GITHUB_REPOSITORY || "dinkuskit/ship";
+  const requireWriteAuthority = (effect) => verifyWriteAuthority({ actor, repository, effect, root, ghExec });
 
   if (command === "validate-emdash-dispatch") {
     const eventName = flags["event-name"] ?? process.env.EVENT_NAME ?? process.env.GITHUB_EVENT_NAME ?? "";
@@ -1218,6 +1248,7 @@ export async function runReleaseFlowCli(argv, deps = {}) {
         // be pressed again. Each lease refuses if a branch changed since this run read it.
         const leases = replaced.map((entry) => `--force-with-lease=refs/heads/${entry.branch}:${entry.sha}`);
         const drops = replaced.filter((entry) => entry.branch !== releaseBranch).map((entry) => `:refs/heads/${entry.branch}`);
+        requireWriteAuthority(`push ${releaseBranch} and ${tag}`);
         gitExec(
           ["push", "--atomic", ...leases, "origin", `${headSha}:refs/heads/${releaseBranch}`, ...drops, `refs/tags/${tag}`],
           root,
@@ -1321,6 +1352,7 @@ export async function runReleaseFlowCli(argv, deps = {}) {
     const tag = next.tag;
     gitExec(["tag", tag, headSha], root);
     if (flags["no-push"] !== "true") {
+      requireWriteAuthority(`push ${releaseBranch} and ${tag}`);
       gitExec(["push", "--atomic", "origin", `${headSha}:refs/heads/${releaseBranch}`, `refs/tags/${tag}`], root);
     }
 
@@ -1420,6 +1452,7 @@ export async function runReleaseFlowCli(argv, deps = {}) {
     gitExec(["commit", "-m", commitBody], root);
 
     if (flags["no-push"] !== "true") {
+      requireWriteAuthority(`push ${RELEASE_PR_BRANCH}`);
       gitExec(["push", "--force-with-lease", "origin", `HEAD:refs/heads/${RELEASE_PR_BRANCH}`], root);
       const prBody = [
         `## Release \`${PACKAGE_NAME}@${targetVersion}\``,
@@ -1452,6 +1485,7 @@ export async function runReleaseFlowCli(argv, deps = {}) {
         root,
       );
 
+      requireWriteAuthority(`${existingPr ? "update" : "open"} the ${prTitle} pull request`);
       if (existingPr) {
         ghExec(["pr", "edit", existingPr, "--title", prTitle, "--body", prBody], root);
       } else {
@@ -1591,6 +1625,7 @@ export async function runReleaseFlowCli(argv, deps = {}) {
 
     gitExec(["tag", tag, releaseSha], root);
     if (flags["no-push"] !== "true") {
+      requireWriteAuthority(`push ${releaseBranch} and ${tag}`);
       gitExec(["push", "--atomic", "origin", `${releaseSha}:refs/heads/${releaseBranch}`, `refs/tags/${tag}`], root);
     }
 
@@ -1667,6 +1702,10 @@ export async function runReleaseFlowCli(argv, deps = {}) {
         const notes =
           extractChangelogSection(gitExec(["show", `${tagSha}:CHANGELOG.md`], root), version) ||
           `Release ${PACKAGE_NAME} ${version}`;
+        // The release App's own tag push starts this run, and GitHub has no collaborator access to
+        // read for an App; the merger was checked right before that push. A retry-publish press is
+        // a person's, checked again here.
+        if (!/\[bot\]$/.test(actor)) requireWriteAuthority(`create the ${tag} GitHub Release`);
         ghExec(["release", "create", tag, "--title", tag, "--notes", notes, "--verify-tag"], root);
         result.githubReleaseCreated = true;
       }

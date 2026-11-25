@@ -299,6 +299,10 @@ function createStubEnvironment({
   };
 
   const ghExec = (args) => {
+    if (args[0] === "api" && /^repos\/[^/]+\/[^/]+\/collaborators\/[^/]+\/permission$/.test(args[1])) {
+      events.push(`gh:api:permission:${decodeURIComponent(args[1].split("/")[4])}`);
+      return "write";
+    }
     if (args[0] === "release" && args[1] === "view") {
       const tag = args[2];
       events.push(`gh:release:view:${tag}`);
@@ -400,6 +404,8 @@ function cliDeps(root, gitExec, env, logs = []) {
     ghExec: env.ghExec,
     fetchImpl: env.fetchImpl,
     npmExec: env.npmExec,
+    actor: "release-presser",
+    repository: "dinkuskit/ship",
     log: (line) => logs.push(line),
   };
 }
