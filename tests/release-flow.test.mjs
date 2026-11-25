@@ -697,6 +697,7 @@ test(`verify-release-tag accepts a stable tag on its release branch and ${releas
         if (args[0] === "release" && args[1] === "view" && !released) throw new Error("release not found");
         return "";
       },
+      actor: "dinkus-release[bot]",
       log: () => {},
     });
 
@@ -713,6 +714,198 @@ test(`verify-release-tag accepts a stable tag on its release branch and ${releas
   }
 });
 }
+
+// Guard authority-revocation-at-final-effect: the real release client runs against a real
+// repository. Each push it makes is recorded and applied to origin's refs (and the checkout's
+// refs/remotes/origin/*, as in a workflow checkout), so those refs and the GitHub write log are the
+// effect record. The presser's write access is removed partway through each run, after the press
+// and before the effect, and nothing reaches origin or GitHub.
+test("test_revoked_between_enqueue_and_publish_yields_zero_effects", async () => {
+  const PRESSER = "release-presser";
+  const base = await mkdtemp(join(tmpdir(), "ship-authority-revocation-"));
+  const root = join(base, "work");
+  const git = (args, cwd = root) =>
+    execFileSync("git", args, { cwd, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim();
+  try {
+    await mkdir(join(root, ".changeset"), { recursive: true });
+    await writePublisherManifest(root);
+    await writeFile(join(root, "package.json"), `${JSON.stringify({ name: PACKAGE_NAME, version: "0.1.0", type: "module" }, null, 2)}\n`);
+    await writeFile(
+      join(root, "package-lock.json"),
+      `${JSON.stringify({ name: PACKAGE_NAME, version: "0.1.0", lockfileVersion: 3, packages: { "": { name: PACKAGE_NAME, version: "0.1.0" } } }, null, 2)}\n`,
+    );
+    await writeFile(join(root, "CHANGELOG.md"), "# @dinkuskit/ship\n\n## 0.1.0\n\n- Baseline.\n");
+    await writeFile(join(root, ".changeset/README.md"), "# Changesets\n");
+    await writeFile(join(root, ".changeset/bump.md"), `---\n"${PACKAGE_NAME}": patch\n---\n\nFix the label status copy.\n`);
+    git(["init", "-q", "-b", "main"]);
+    git(["config", "user.name", "Test"]);
+    git(["config", "user.email", "test@example.invalid"]);
+    git(["add", "-A"]);
+    git(["commit", "-q", "-m", "feat: baseline with a pending changeset"]);
+    git(["tag", "v0.1.0"]);
+    const origin = new Map([
+      ["refs/heads/main", git(["rev-parse", "main"])],
+      ["refs/tags/v0.1.0", git(["rev-parse", "v0.1.0"])],
+    ]);
+    const originRefs = () => [...origin].map(([ref, sha]) => `${ref} ${sha}`).sort().join("\n");
+    const recordPush = (args, cwd) => {
+      for (const refspec of args.slice(args.indexOf("origin") + 1)) {
+        const [src, dst = src] = refspec.split(":");
+        const branch = dst.startsWith("refs/heads/") ? dst.slice("refs/heads/".length) : "";
+        if (!src) {
+          origin.delete(dst);
+          if (branch) git(["update-ref", "-d", `refs/remotes/origin/${branch}`], cwd);
+          continue;
+        }
+        const sha = git(["rev-parse", `${src}^{commit}`], cwd);
+        origin.set(dst, sha);
+        if (branch) git(["update-ref", `refs/remotes/origin/${branch}`, sha], cwd);
+      }
+      return "";
+    };
+
+    // GitHub as the release client sees it: the presser's access, read fresh on every lookup, and
+    // every write the client makes.
+    const access = new Map([[PRESSER, "write"]]);
+    const accessChecks = [];
+    const githubWrites = [];
+    const ghExec = (args) => {
+      if (args[0] === "api" && /^repos\/dinkuskit\/ship\/collaborators\/[^/]+\/permission$/.test(args[1])) {
+        const actor = decodeURIComponent(args[1].split("/")[4]);
+        accessChecks.push(actor);
+        return access.get(actor) ?? "none";
+      }
+      if (args[0] === "pr" && args[1] === "list") return "";
+      if (args[0] === "release" && args[1] === "view") throw new Error("release not found");
+      githubWrites.push(args.slice(0, 3).join(" "));
+      return "";
+    };
+    let revokeWhen = null;
+    const touch = (event) => {
+      if (revokeWhen?.(event)) access.set(PRESSER, "read");
+    };
+    const gitExec = (args, cwd = root) => {
+      touch({ git: args });
+      const out = args[0] === "push" ? recordPush(args, cwd) : git(args, cwd);
+      touch({ gitDone: args });
+      return out;
+    };
+    const betaRecords = [];
+    const pdsFetch = mockPdsFetch(() => jsonResponse({ records: betaRecords.map((version) => releaseRecord(version)) }));
+    const fetchImpl = async (url) => {
+      touch({ fetch: String(url) });
+      return pdsFetch(url);
+    };
+    const npmExec = async (args, cwd) => {
+      assert.deepEqual(args, ["run", "release:version"]);
+      for (const file of ["package.json", "package-lock.json"]) {
+        const value = JSON.parse(await readFile(join(cwd, file), "utf8"));
+        value.version = "0.1.1";
+        if (value.packages?.[""]) value.packages[""].version = "0.1.1";
+        await writeFile(join(cwd, file), `${JSON.stringify(value, null, 2)}\n`);
+      }
+      const changelog = await readFile(join(cwd, "CHANGELOG.md"), "utf8");
+      await writeFile(join(cwd, "CHANGELOG.md"), changelog.replace("## 0.1.0", "## 0.1.1\n\n- Fix the label status copy.\n\n## 0.1.0"));
+      await rm(join(cwd, ".changeset/bump.md"), { force: true });
+    };
+    const deps = { root, gitExec, ghExec, fetchImpl, npmExec, actor: PRESSER, repository: "dinkuskit/ship", log: () => {} };
+
+    // Each release button, revoked mid-run, then pressed again with access back to show the same
+    // run does reach origin.
+    const revokedRun = async (argv, when, pattern) => {
+      access.set(PRESSER, "write");
+      revokeWhen = when;
+      const refsBefore = originRefs();
+      const writesBefore = githubWrites.length;
+      const checksBefore = accessChecks.length;
+      await assert.rejects(() => runReleaseFlowCli(argv, deps), pattern, argv[0]);
+      assert.equal(originRefs(), refsBefore, `${argv[0]} reached origin after the revocation`);
+      assert.deepEqual(githubWrites.slice(writesBefore), [], `${argv[0]} wrote to GitHub after the revocation`);
+      assert.ok(accessChecks.length > checksBefore, `${argv[0]} never re-read the presser's access`);
+      // The next press is a fresh checkout, with only origin's tags.
+      for (const tag of git(["tag", "--list"]).split("\n").filter(Boolean)) {
+        if (!origin.has(`refs/tags/${tag}`)) git(["tag", "-d", tag]);
+      }
+      revokeWhen = null;
+      access.set(PRESSER, "write");
+    };
+    const duringInventory = (event) => Boolean(event.fetch);
+
+    // Cut beta: revoked while the run reads the Registry inventory.
+    await revokedRun(["cut-beta"], duringInventory, /release-presser no longer has write access to dinkuskit\/ship \(read\)/);
+    const cut = await runReleaseFlowCli(["cut-beta"], deps);
+    assert.equal(cut.betaTag, "v0.1.1-beta.1");
+    assert.match(originRefs(), /^refs\/heads\/release\/0\.1\.1 /m);
+    assert.match(originRefs(), /^refs\/tags\/v0\.1\.1-beta\.1 /m);
+    betaRecords.push("0.1.1-beta.1");
+
+    // Add fix to beta: a reviewed fix on main, revoked while the run reads the Registry inventory.
+    await writeFile(join(root, "fix.txt"), "fixed\n");
+    git(["checkout", "-q", "-f", "main"]);
+    git(["add", "fix.txt"]);
+    git(["commit", "-q", "-m", "fix: keep the label status"]);
+    const fixSha = git(["rev-parse", "HEAD"]);
+    origin.set("refs/heads/main", fixSha);
+    await revokedRun(
+      ["add-fix", "--release-version", "0.1.1", "--commit", fixSha],
+      duringInventory,
+      /no longer has write access/,
+    );
+    git(["checkout", "-q", "-f", "main"]);
+
+    // Promote: revoked while the run reads the Registry, so neither the push nor the pull request
+    // happens.
+    const proofRef = "https://github.com/dinkuskit/live-journeys/actions/runs/1 (0.1.1-beta.1 @running pass)";
+    const promoteArgv = ["promote", "--beta-version", "0.1.1-beta.1", "--proof-ref", proofRef];
+    await revokedRun(promoteArgv, duringInventory, /Refusing to push changeset-release\/main/);
+    // The pull request is checked on its own, not on the push's earlier pass: access removed once
+    // the branch lands stops the pull request.
+    access.set(PRESSER, "write");
+    revokeWhen = (event) => event.gitDone?.[0] === "push";
+    await assert.rejects(
+      () => runReleaseFlowCli(promoteArgv, deps),
+      /Refusing to open the ci: release v0\.1\.1 pull request: release-presser no longer has write access/,
+    );
+    assert.match(originRefs(), /^refs\/heads\/changeset-release\/main /m);
+    assert.deepEqual(githubWrites, []);
+    revokeWhen = null;
+    access.set(PRESSER, "write");
+    await runReleaseFlowCli(promoteArgv, deps);
+    assert.deepEqual(githubWrites, ["pr create --base"]);
+
+    // The merge: revoked while the run commits the release onto release/0.1.1, before its tag.
+    const releaseMessage = git(["log", "-1", "--format=%B", "changeset-release/main"]);
+    git(["checkout", "-q", "-f", "main"]);
+    git(["merge", "-q", "--squash", "changeset-release/main"]);
+    git(["commit", "-q", "-m", releaseMessage]);
+    await revokedRun(["publish-merged-release"], (event) => event.git?.[0] === "commit", /Refusing to push release\/0\.1\.1 and v0\.1\.1/);
+    git(["checkout", "-q", "-f", "main"]);
+    const finished = await runReleaseFlowCli(["publish-merged-release"], deps);
+    assert.equal(finished.tagPushed, true);
+    assert.match(originRefs(), /^refs\/tags\/v0\.1\.1 /m);
+
+    // Retry the publish, pressed by a person on the tag: revoked while the run reads the release
+    // notes, so no GitHub Release is created.
+    await revokedRun(
+      ["verify-release-tag", "--ref", "refs/tags/v0.1.1"],
+      (event) => event.git?.[0] === "show",
+      /Refusing to create the v0\.1\.1 GitHub Release/,
+    );
+    const tagRun = await runReleaseFlowCli(["verify-release-tag", "--ref", "refs/tags/v0.1.1"], deps);
+    assert.equal(tagRun.githubReleaseCreated, true);
+    assert.deepEqual(githubWrites, ["pr create --base", "release create v0.1.1"]);
+
+    // No actor, or an access lookup that fails, is never write access.
+    for (const brokenDeps of [{ ...deps, actor: "" }, { ...deps, ghExec: () => { throw new Error("HTTP 404"); } }]) {
+      await assert.rejects(
+        () => runReleaseFlowCli(["verify-release-tag", "--ref", "refs/tags/v0.1.1"], brokenDeps),
+        /Refusing to create the v0\.1\.1 GitHub Release: (there is no actor|could not read)/,
+      );
+    }
+  } finally {
+    await rm(base, { recursive: true, force: true });
+  }
+});
 
 test("the Registry job verifies an already-listed version instead of skipping the check", async () => {
   const workflow = await readFile(join(repositoryRoot, ".github/workflows/emdash-release.yml"), "utf8");
