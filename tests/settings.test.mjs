@@ -172,13 +172,25 @@ test("saving the ship-from address, reply-to email and a box size goes to Ship a
   assert.equal(h.hosted.state.replyTo, "help@example.test");
 });
 
-test("Ship's refusal keeps the page with its reason, and the box being added stays typed", async () => {
+test("Ship's refusal appears next to the submitted form, and the box being added stays typed", async () => {
   const h = host();
-  const refused = text(await h.page(submit("boxes", { name: "Flat", lengthIn: "10", widthIn: "", heightIn: "1", weightOz: "2" })));
-  assert.match(refused, /Not saved/);
-  assert.match(refused, /A box needs a name and a length, width and height in inches/);
-  assert.match(refused, /"action_id":"name","label":"Box name","initial_value":"Flat"/);
-  assert.match(text(await h.page(submit("reply-to", { replyTo: "not an email" }))), /Reply-to must be an email address/);
+  const refusals = [
+    ["boxes", { name: "Flat", lengthIn: "10", widthIn: "", heightIn: "1", weightOz: "2" }, /A box needs a name and a length, width and height in inches/],
+    ["reply-to", { replyTo: "not an email" }, /Reply-to must be an email address/],
+    ["ship-from", { ...SHIP_FROM, postalCode: "" }, /Ship-from needs a name, address, city, state and ZIP code/],
+    ["postage", { username: "sample", password: "wrong-password" }, /Pitney Bowes did not accept/],
+  ];
+  for (const [form, values, reason] of refusals) {
+    const { blocks } = await h.page(submit(form, values));
+    const index = blocks.findIndex(block => block.type === "form" && block.submit.action_id === `save:${form}`);
+    assert.ok(index >= 0, form);
+    const error = blocks[index + 1];
+    assert.equal(error.type, "banner", form);
+    assert.equal(error.title, "Not saved");
+    assert.match(error.description, reason);
+    assert.equal(blocks.filter(block => block.type === "banner" && block.title === "Not saved").length, 1);
+    if (form === "boxes") assert.equal(blocks[index].fields.find(field => field.action_id === "name").initial_value, "Flat");
+  }
   assert.equal(h.hosted.state.replyTo, null);
 });
 

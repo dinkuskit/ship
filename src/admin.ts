@@ -1,7 +1,7 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
 import {
-  connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH,
+  connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, unconfirmedPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH,
   type OrderView, type Toast,
 } from "./pages.js";
 import { settingsAdmin } from "./settings.js";
@@ -75,11 +75,11 @@ async function openOrder(hosted: Ship, orderId: string, extra: Partial<OrderView
 }
 
 /** A refusal while on an order's page keeps the page, with Ship's reason and what was typed. */
-async function refused(hosted: Ship, orderId: string, error: ShipError, typed: OrderView["typed"], labelInputError?: OrderView["labelInputError"]): Promise<BlockResponse> {
+async function refused(hosted: Ship, orderId: string, error: ShipError, typed: OrderView["typed"], historyFrom: OrderView["historyFrom"], labelInputError?: OrderView["labelInputError"]): Promise<BlockResponse> {
   if (error.code === "RECONNECT") throw error;
   if (error.code === "NOT_FOUND") return problemPage(hosted.siteId, "Order not at Ship", error.message);
   try {
-    return await openOrder(hosted, orderId, { failure: error.message, typed, labelInputError, askBuyAgain: error.code === "CHECK_PITNEY_BOWES" });
+    return await openOrder(hosted, orderId, { failure: error.message, typed, labelInputError, askBuyAgain: error.code === "CHECK_PITNEY_BOWES", historyFrom });
   } catch (again) {
     return problemPage(hosted.siteId, "Ship could not be used", again instanceof ShipError ? again.message : error.message);
   }
@@ -94,10 +94,18 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
   if (route.ui?.surface !== "admin-page" || typeof user?.role !== "number" || user.role < EDITOR) {
     return { blocks: [{ type: "banner", variant: "error", title: "Shipping is for Editors and Administrators", description: "Ask an Administrator of this site to buy or print labels." }] };
   }
-  const input = interaction(route.input);
-  if (!input) return { blocks: [] };
+  const parsed = interaction(route.input);
+  if (!parsed) return { blocks: [] };
   const isAdmin = user.role >= ADMIN;
-  if (input.page === SETTINGS_PATH) return settingsAdmin(input, isAdmin, route, ctx);
+  if (parsed.page === SETTINGS_PATH) return settingsAdmin(parsed, isAdmin, route, ctx);
+  let input = parsed, historyFrom: OrderView["historyFrom"];
+  if (parsed.type !== "page_load" && parsed.action_id.startsWith("history-order:")) {
+    const wrapped = /^history-order:([^:]*):(open|(?:prices|buy|cancel):.+)$/.exec(parsed.action_id);
+    if (!wrapped) return { blocks: [] };
+    try { historyFrom = decodeURIComponent(wrapped[1]!) || null; } catch { return { blocks: [] }; }
+    if (historyFrom !== null && historyCursor({ cursor: historyFrom }) === null) return { blocks: [] };
+    input = { ...parsed, action_id: wrapped[2]! };
+  }
   const connect = input.type === "block_action" && ["connect", "finish_setup", "check", "cancel_connect"].includes(input.action_id) ? input.action_id : null;
   let settings: ConnectView;
   try {
@@ -110,16 +118,17 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
     return connectPage(isAdmin, "Connect could not finish. Try again in a moment.");
   }
   if (settings.state === "pending") return pendingPage(settings.verificationUri, settings.checked);
+  if (settings.state === "finish_unconfirmed") return unconfirmedPage(isAdmin, settings.checked);
   if (settings.state === "disconnected") return connectPage(isAdmin, settings.failure);
-  if (settings.state === "finish_setup") return finishPage(isAdmin);
+  if (settings.state === "finish_setup") return finishPage(isAdmin, settings.retry);
   const hosted = ship(ctx, settings.siteId, settings.key, adminPageFrom(route.request?.url), adminUserFrom(user.email));
   const by = typeof user.email === "string" && user.email ? user.email : user.id;
   try {
-    if (input.type === "block_action" && input.action_id === "open" && typeof input.value === "string") return await openOrder(hosted, input.value);
+    if (input.type === "block_action" && input.action_id === "open" && typeof input.value === "string") return await openOrder(hosted, input.value, { historyFrom });
     if (input.type === "block_action" && input.action_id === "history") {
       const before = historyCursor(input.value);
       try {
-        return labelHistoryPage(hosted.siteId, await hosted.labels(before), before !== null);
+        return labelHistoryPage(hosted.siteId, await hosted.labels(before), before);
       } catch (error) {
         // Until ship.dinkuskit.com has the label history route, Ship's own page lists them.
         if (error instanceof ShipError && error.status === 404) return problemPage(hosted.siteId, "Label history is on Ship's page for now", "Ship has not been updated to list labels here yet. Open Ship to see every label.");
@@ -132,9 +141,9 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
         const cancelled = await hosted.cancel(input.value);
         // Ship records a refund for sandbox labels too; only a live label's postage comes back.
         const live = (order: ShipOrder) => cancelled.refund !== null && order.labels.some(label => label.labelId === cancelled.labelId && !label.test);
-        return await openOrder(hosted, orderId, {}, order => ({ type: "success", message: live(order) ? "Label cancelled. USPS refunds the postage account within about 14 days." : "Label cancelled." }));
+        return await openOrder(hosted, orderId, { historyFrom }, order => ({ type: "success", message: live(order) ? "Label cancelled. USPS refunds the postage account within about 14 days." : "Label cancelled." }));
       } catch (error) {
-        if (error instanceof ShipError) return await refused(hosted, orderId, error, undefined);
+        if (error instanceof ShipError) return await refused(hosted, orderId, error, undefined, historyFrom);
         throw error;
       }
     }
@@ -151,7 +160,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       } catch (error) {
         if (!(error instanceof ShipError)) throw error;
         const rawWeight = input.values.weightOz;
-        return await refused(hosted, found.orderId, error, typed, {
+        return await refused(hosted, found.orderId, error, typed, historyFrom, {
           // Text fields have no length cap in Block Kit. Reflect a bounded draft,
           // or leave it blank rather than replacing an oversized paste with a weight.
           quote, weight: typeof rawWeight === "string" ? text(rawWeight) ?? "" : undefined,
@@ -160,15 +169,15 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       try {
         if (quote) {
           // A practice label asks Pitney Bowes nothing, so there is nothing to quote: straight to the buy step.
-          if (request.kind === "practice") return await openOrder(hosted, found.orderId, { typed });
+          if (request.kind === "practice") return await openOrder(hosted, found.orderId, { typed, historyFrom });
           const prices = await hosted.prices(found.orderId, request);
-          return await openOrder(hosted, found.orderId, { prices, typed });
+          return await openOrder(hosted, found.orderId, { prices, typed, historyFrom });
         }
         const label = await hosted.buy(found.orderId, request);
         const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
-        return await openOrder(hosted, found.orderId, {}, { type: "success", message });
+        return await openOrder(hosted, found.orderId, { historyFrom }, { type: "success", message });
       } catch (error) {
-        if (error instanceof ShipError) return await refused(hosted, found.orderId, error, typed);
+        if (error instanceof ShipError) return await refused(hosted, found.orderId, error, typed, historyFrom);
         throw error;
       }
     }

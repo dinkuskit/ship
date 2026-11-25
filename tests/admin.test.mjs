@@ -67,7 +67,7 @@ function host({ siteId = SITE, key = KEY, ship = {}, passes = () => Response.jso
       const adminPage = init?.headers?.["x-ship-admin-page"], adminUser = init?.headers?.["x-ship-admin-user"];
       if (url === "https://dinkuskit.com/api/store-connections/lookup") {
         lookups.push(body);
-        return Response.json({ finish_setup: joinable });
+        return Response.json({ finish_setup: typeof joinable === "function" ? joinable() : joinable });
       }
       if (url === "https://dinkuskit.com/api/store-passes" && body?.scope === "store:connection") {
         shared.push({ url, authorization: init?.headers?.authorization, body });
@@ -923,6 +923,7 @@ test("Finish setup falls back to the owner's Approve, or to starting over, when 
   }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
   const waiting = text(await owner.page({ type: "block_action", action_id: "finish_setup" }));
   assert.match(waiting, /Approve at DinkusKit.com/);
+  assert.match(text(await owner.page(load)), /Approve at DinkusKit.com/, "explicit approval survives a reload");
   assert.match(text(await owner.page({ type: "block_action", action_id: "check" })), /#1001/, "after the owner's Approve, Check finishes as usual");
   assert.deepEqual(owner.saved(), { siteId: SITE, storeKey: ISSUED });
 
@@ -932,6 +933,63 @@ test("Finish setup falls back to the owner's Approve, or to starting over, when 
   assert.match(text(await refused.page({ type: "block_action", action_id: "finish_setup" })), /Connect did not finish/);
   assert.deepEqual(refused.saved(), {}, "nothing is saved on a refusal");
   assert.equal((await proofOf(refused, { connection_id: CONNECTION })).status, 404, "and the proof route vouches for nothing");
+});
+
+test("a lost Finish setup reply stays unconfirmed; a spent attempt offers fresh setup without a reload", async () => {
+  const finish = { type: "block_action", action_id: "finish_setup" };
+  const check = { type: "block_action", action_id: "check" };
+  let attempts = 0;
+  const ids = [];
+  const h = host({ siteId: null, key: null, role: 50, joinable: true, dinkus: {
+    "/api/store-connections": () => {
+      const id = `conn_${++attempts}`;
+      return Response.json(started({ connection_id: id, verification_uri: `https://dinkuskit.com/account/connect?connection_id=${id}` }));
+    },
+    "/api/store-connections/finish": ({ connection_id }) => {
+      ids.push(connection_id);
+      if (attempts === 1) throw new TypeError("reply lost");
+      return Response.json({ store_key: ISSUED, site_id: SITE });
+    },
+    "/api/store-connections/token": () => Response.json({ error: "already_redeemed" }, { status: 400 }),
+  }, ship: { "GET /v1/admin/orders": { orders: [row()], settings } } });
+  for (const response of [await h.page(finish), await h.page(load)]) {
+    assert.match(text(response), /Ship setup not confirmed/);
+    assert.doesNotMatch(text(response), /Approve at DinkusKit.com|account\/connect/);
+  }
+  assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 200, "the unconfirmed attempt can still be checked");
+  const retry = text(await h.page(check));
+  assert.match(retry, /Try Ship setup again/);
+  assert.match(retry, /"label":"Finish setup","action_id":"finish_setup"/);
+  assert.doesNotMatch(retry, /"action_id":"connect"/);
+  assert.equal(h.lookups.length, 1, "eligibility is rechecked at recovery");
+  assert.equal(attempts, 1, "Check does not start another attempt");
+  assert.equal((await proofOf(h, { connection_id: CONNECTION })).status, 404, "retired proof is gone");
+  assert.match(text(await h.page(finish)), /#1001/);
+  assert.deepEqual(ids, [CONNECTION, "conn_2"], "retry uses a new connection; the old response is never replayed");
+  assert.deepEqual(h.saved(), { siteId: SITE, storeKey: ISSUED });
+});
+
+test("unconfirmed Finish setup can be checked or cancelled without guessing about approval", async () => {
+  for (const joinable of [false, true]) {
+    for (const end of ["cancel_connect", "check"]) {
+      let eligible = true, redeemed = false;
+      const h = host({ siteId: null, key: null, role: 50, joinable: () => eligible, dinkus: {
+        "/api/store-connections": started(),
+        "/api/store-connections/finish": () => Response.json({ error: "unavailable" }, { status: 503 }),
+        "/api/store-connections/token": () => Response.json({ error: redeemed ? "already_redeemed" : "authorization_pending" }, { status: 400 }),
+      } });
+      assert.match(text(await h.page({ type: "block_action", action_id: "finish_setup" })), /Ship setup not confirmed/);
+      const pending = text(await h.page({ type: "block_action", action_id: "check" }));
+      assert.match(pending, /still waiting for confirmation/);
+      assert.doesNotMatch(pending, /Approve at DinkusKit.com|Not approved yet/);
+      eligible = joinable;
+      redeemed = true;
+      const recovered = text(await h.page({ type: "block_action", action_id: end }));
+      assert.match(recovered, joinable ? /"action_id":"finish_setup"/ : /"action_id":"connect"/);
+      assert.doesNotMatch(recovered, /Approve at DinkusKit.com/);
+      assert.deepEqual(h.saved(), {});
+    }
+  }
 });
 
 test("the orders list says which business the store is connected to, read with this plugin's own pass", async () => {
@@ -972,7 +1030,8 @@ test("Label history lists every label the store bought, newest first, 50 a page,
   const table = first.blocks.find(block => block.type === "table");
   assert.equal(table.rows.length, 50);
   assert.equal(table.next_cursor, "2026-10-19T22:00:00.000Z~label_49");
-  assert.deepEqual(table.rows[0].order, { type: "button", label: "#1001", action_id: "open", value: "order:abc" });
+  const firstOrder = table.rows[0].order;
+  assert.deepEqual(firstOrder, { type: "button", label: "#1001", action_id: "history-order::open", value: "order:abc" });
   assert.match(table.rows[0].service, /USPS Priority Mail, \$5\.12/);
   assert.equal(table.rows[0].tracking, "9400 0000 0000 0000 0000 00");
   assert.doesNotMatch(text(first), /Older labels/);
@@ -982,7 +1041,54 @@ test("Label history lists every label the store bought, newest first, 50 a page,
   assert.equal(row0.order.label, "order:abc (TEST)");
   assert.match(row0.status, /Cancelled/);
   assert.match(text(next), /Older labels. Refresh goes back to the newest./);
-  assert.match(text(await h.page({ type: "block_action", action_id: "open", value: "order:abc" })), /Order #1001/);
+  const use = control => h.page({ type: "block_action", action_id: control.action_id, value: control.value });
+  const back = response => response.blocks[1].elements[0];
+  const orderFromHistory = await use(row0.order);
+  assert.match(text(orderFromHistory), /Order #1001/);
+  assert.deepEqual(back(orderFromHistory), { type: "button", label: "Back to Label history", action_id: "history", value: { cursor: table.next_cursor } });
+  assert.deepEqual(await use(back(orderFromHistory)), next);
+  assert.equal(asked.at(-1), asked[1], "the back action reuses the same hosted cursor");
+  assert.deepEqual(await use(back(await use(firstOrder))), first, "the newest page also has a way back");
+  const ordinary = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+  assert.equal(back(ordinary).label, "Back to Shipments");
+});
+
+test("the label history return survives cancellation and a replacement label quote", async () => {
+  const bought = label();
+  const cancelled = label({ status: "cancelled", cancelledAt: "2026-10-20T00:00:00.000Z" });
+  let active = true;
+  const cursor = "2026-10-21T00:00:00.000Z~another_label";
+  const h = host({ ship: {
+    "GET /v1/admin/labels": () => Response.json({ labels: [{ ...(active ? bought : cancelled), number: 1001 }], next: null }),
+    "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order({ label: active ? bought : null, labels: [active ? bought : cancelled] }), settings }),
+    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/test-fixture", expiresAt: "2026-10-20T00:05:00.000Z" },
+    "POST /v1/admin/labels/label_1/cancel": () => { active = false; return Response.json({ labelId: "label_1", refund: null }); },
+    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: 510, PM: 935, EM: null } },
+  } });
+  const use = control => h.page({ type: "block_action", action_id: control.action_id, value: control.value });
+  const fromHistory = await use({ action_id: "history", value: { cursor } });
+  const details = await use(fromHistory.blocks.find(block => block.type === "table").rows[0].order);
+  const returnAction = response => response.blocks[1].elements[0];
+  const cancel = details.blocks.flatMap(block => block.type === "actions" ? block.elements : []).find(element => element.label === "Cancel label");
+  const afterCancel = await use(cancel);
+  assert.equal(afterCancel.toast.message, "Label cancelled.");
+  assert.deepEqual(returnAction(afterCancel), returnAction(details));
+  const form = afterCancel.blocks.find(block => block.type === "form");
+  const quote = values => h.page({ type: "form_submit", action_id: form.submit.action_id, values });
+  const beforeRefusal = h.calls.length;
+  const refused = await quote({ boxId: "box_small", weightOz: "too heavy" });
+  assert.match(text(refused), /Enter the package weight/);
+  assert.deepEqual(returnAction(refused), returnAction(details));
+  const retry = refused.blocks.find(block => block.type === "form");
+  assert.equal(retry.submit.action_id, form.submit.action_id);
+  assert.equal(retry.fields.find(field => field.action_id === "weightOz").initial_value, "too heavy");
+  assert.ok(h.calls.slice(beforeRefusal).every(call => !/\/(prices|label)$/.test(new URL(call.url).pathname)));
+  const quoted = await h.page({ type: "form_submit", action_id: retry.submit.action_id, values: { boxId: "box_small", weightOz: 28 } });
+  assert.match(text(quoted), /USPS Ground Advantage · \$5\.10/);
+  assert.deepEqual(returnAction(quoted), returnAction(details));
+  const back = await use(returnAction(quoted));
+  assert.match(back.blocks.find(block => block.type === "table").rows[0].status, /Cancelled/);
+  assert.equal(new URL(h.calls.at(-1).url).searchParams.get("before"), cursor);
 });
 
 test("until ship.dinkuskit.com lists labels, Label history points to Ship's own page", async () => {

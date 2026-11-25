@@ -30,13 +30,15 @@ Install **DinkusKit Ship** from the plugin Registry. Connect [Commerce](/docs/re
 
 If the store is already connected to DinkusKit, for example through Commerce, the Shipments page says "Almost ready: this store is already connected to DinkusKit" and shows one **Finish setup** button instead. An Administrator presses it: there is no second approval, Ship gets its own store key, Ship turns on, and the page opens the orders. DinkusKit.com emails the business owner that Dinkus Ship joined the store. If the owner pressed Disconnect for Ship under Your stores, the page asks for the owner's Approve again instead. The orders page says which business the store is connected to and which DinkusKit plugins share it. Uninstalling Ship cancels only Ship's own key at DinkusKit.com.
 
+If **Finish setup** says Ship could not confirm the attempt, press **Check setup**. If the attempt ended without a usable reply and the store is still eligible, **Finish setup** starts a fresh attempt without asking the owner to approve. If Ship is still waiting, you can press **Cancel setup** to end the attempt and see the setup option now available.
+
 The plugin never sends the store key to Ship or to a store page. It trades the key at DinkusKit.com for a pass that lasts five minutes and reuses that pass for clicks in the next minute. A Disconnect at DinkusKit.com, which also turns Ship off, stops the Shipments page within a minute. A store connected before Ship turned on at Connect presses **Connect again** once. If DinkusKit.com no longer knows the key, the page shows **Connect again**.
 
 A store upgraded from `0.2.1` does not use its old pasted key. The Shipments page asks for Connect once, and Connect removes the old Store ID and store key settings.
 
 ## Shipping settings
 
-An Administrator opens **Store > Shipping settings**. Editors see a note to ask an Administrator. Each part saves to Ship straight away, with a message when it is saved, or Ship's reason when it is not:
+An Administrator opens **Store > Shipping settings**. Editors see a note to ask an Administrator. Each part saves to Ship straight away. If Ship rejects a save, look below the form you submitted for the reason:
 
 - **Ship from**: the return address printed on every label.
 - **Pitney Bowes postage**: real orders' labels are paid from your own Pitney Bowes postage account, and Pitney Bowes charges the card you add there, not DinkusKit. Press **Create your Pitney Bowes account** to sign up on Pitney Bowes' site with your ship-from address and email filled in, then come back and enter that account's username and password and press **Connect Pitney Bowes**. Ship sends them to Pitney Bowes once to find your account and keeps neither. Once connected, the page names the account and has **Disconnect Pitney Bowes**. TEST orders do not need an account.
@@ -47,7 +49,7 @@ Labels need the ship-from address and a box size; the Shipments page says so unt
 
 ## Label history
 
-On **Store > Shipments**, **Label history** lists every label the store bought, newest first and 50 at a time with **Load more**: the day it was bought, the order (press the number to open it), the service and postage, the tracking number and where the parcel is, or that the label was cancelled.
+On **Store > Shipments**, **Label history** lists every label the store bought, newest first and 50 at a time with **Load more**: the day it was bought, the order, the service and postage, the tracking number and where the parcel is, or that the label was cancelled. Press an order number to open it, then use **Back to Label history** to return to the page you were viewing.
 
 ## Buy a label
 
