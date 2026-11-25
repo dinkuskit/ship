@@ -648,6 +648,83 @@ test("after \"tick Buy a new label\" the form stays on the buy step and the next
   assert.match(bought.toast.message, /Label bought, \$9\.35\. Tracking 9400100000000000000003/);
 });
 
+test("an invalid replacement label weight returns to prices without carrying purchase approval", async () => {
+  for (const isTest of [true, false]) {
+    const sent = [];
+    const h = host({ ship: {
+      "GET /v1/admin/orders/order%3Aabc": { order: order({ test: isTest }), settings },
+      "POST /v1/admin/orders/order%3Aabc/labels": body => {
+        sent.push({ route: "labels", body });
+        return Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes has no record of the last label." } }, { status: 409 });
+      },
+      "POST /v1/admin/orders/order%3Aabc/prices": body => {
+        sent.push({ route: "prices", body });
+        return Response.json({ prices: { GA: 420, PM: 950, EM: null } });
+      },
+    } });
+    const replacement = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
+      boxId: "box_small", weightOz: 31, service: "PM",
+    } });
+    assert.equal(replacement.blocks.find(block => block.type === "form").fields.find(field => field.action_id === "buyAgain").initial_value, false);
+    const refused = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
+      boxId: "box_small", weightOz: "31x", service: "PM", buyAgain: true,
+    } });
+    const retry = refused.blocks.find(block => block.type === "form");
+    assert.equal(retry.submit.label, "See prices");
+    assert.equal(retry.fields.find(field => field.action_id === "weightOz").initial_value, "31x");
+    assert.equal(retry.fields.some(field => field.action_id === "buyAgain"), false);
+    assert.deepEqual(sent.map(call => call.route), ["labels"]);
+
+    const quoted = await h.page({ type: "form_submit", action_id: retry.submit.action_id, values: { boxId: "box_small", weightOz: "32" } });
+    assert.deepEqual(sent.map(call => call.route), ["labels", "prices"]);
+    assert.equal(sent[1].body.weightOz, 32);
+    assert.equal(sent[1].body.buyAgain, undefined);
+    const next = quoted.blocks.find(block => block.type === "form");
+    assert.equal(next.submit.label, "Buy label");
+    assert.match(text(quoted), /USPS Priority Mail · \$9\.50/);
+    assert.equal(next.fields.some(field => field.action_id === "buyAgain"), false);
+  }
+});
+
+test("a locally rejected weight keeps the label draft without advancing or requesting a label", async () => {
+  const tall = { ...box, boxId: "box_tall", name: "Tall", heightIn: 8 };
+  const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order(), settings: { ...settings, boxes: [box, tall] } } } });
+  for (const [step, expected] of [["prices", "See prices"], ["buy", "Make practice label"]]) {
+    const view = await h.page({ type: "form_submit", action_id: `${step}:1:order%3Aabc`, values: {
+      boxId: "box_tall", weightOz: "29x", kind: "practice", ...(step === "buy" ? { service: "PM" } : {}),
+    } });
+    const index = view.blocks.findIndex(block => block.type === "form");
+    const form = view.blocks[index];
+    assert.equal(view.blocks[index - 1].title, "Check label details");
+    assert.match(text(view), /Enter the package weight in ounces/);
+    assert.equal(form.submit.label, expected);
+    assert.equal(form.fields.find(field => field.action_id === "boxId").initial_value, "box_tall");
+    assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, "29x");
+    assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, "practice");
+    assert.equal(form.fields.find(field => field.action_id === "service")?.initial_value, step === "buy" ? "PM" : undefined);
+  }
+  assert.ok(h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com")).every(call => call.method === "GET"));
+});
+
+test("invalid pasted weights do not turn into a calculated weight or reuse a sandbox quote", async () => {
+  const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order(), settings } } });
+  const pasted = "weight copied from the packing slip: 29 ounces";
+  for (const [kind, raw, displayed, next] of [
+    ["practice", pasted, pasted, "Make practice label"],
+    ["practice", pasted.repeat(5), "", "Make practice label"],
+    ["sandbox", pasted, pasted, "See prices"],
+  ]) {
+    const view = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
+      boxId: "box_small", weightOz: raw, kind, service: "PM",
+    } });
+    const form = view.blocks.find(block => block.type === "form");
+    assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, displayed);
+    assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, kind);
+    assert.equal(form.submit.label, next);
+  }
+  assert.ok(h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com")).every(call => call.method === "GET"));
+});
+
 test("a practice label skips the prices step, since Pitney Bowes is not asked", async () => {
   const sent = [];
   const h = host({ ship: {
@@ -998,10 +1075,15 @@ test("the label history return survives cancellation and a replacement label quo
   assert.deepEqual(returnAction(afterCancel), returnAction(details));
   const form = afterCancel.blocks.find(block => block.type === "form");
   const quote = values => h.page({ type: "form_submit", action_id: form.submit.action_id, values });
+  const beforeRefusal = h.calls.length;
   const refused = await quote({ boxId: "box_small", weightOz: "too heavy" });
   assert.match(text(refused), /Enter the package weight/);
   assert.deepEqual(returnAction(refused), returnAction(details));
-  const quoted = await quote({ boxId: "box_small", weightOz: 28 });
+  const retry = refused.blocks.find(block => block.type === "form");
+  assert.equal(retry.submit.action_id, form.submit.action_id);
+  assert.equal(retry.fields.find(field => field.action_id === "weightOz").initial_value, "too heavy");
+  assert.ok(h.calls.slice(beforeRefusal).every(call => !/\/(prices|label)$/.test(new URL(call.url).pathname)));
+  const quoted = await h.page({ type: "form_submit", action_id: retry.submit.action_id, values: { boxId: "box_small", weightOz: 28 } });
   assert.match(text(quoted), /USPS Ground Advantage · \$5\.10/);
   assert.deepEqual(returnAction(quoted), returnAction(details));
   const back = await use(returnAction(quoted));
