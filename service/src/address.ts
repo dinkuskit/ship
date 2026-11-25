@@ -14,6 +14,12 @@ const STATES: Record<string, string> = {
 const BY_NAME = new Map(Object.entries(STATES).map(([code, name]) => [name.toLowerCase(), code]));
 /** Territories and military mail need customs forms, which v1 does not make. */
 const CUSTOMS_REGIONS = new Set(["PR", "VI", "GU", "AS", "MP", "UM", "FM", "MH", "PW", "AA", "AE", "AP"]);
+/**
+ * The same places by ZIP code, whatever state the shopper typed: 006-009 Puerto Rico and the US Virgin Islands,
+ * 090-098 military AE, 340 military AA, 962-966 military AP, 969 Guam, the Northern Mariana Islands, Palau,
+ * Micronesia and the Marshall Islands, and 96799 American Samoa. Hawaii (967, 968) is a state.
+ */
+const CUSTOMS_ZIP = /^(?:00[6-9]|09[0-8]|340|96[2-69]|96799)/;
 
 /** A label-ready US address, or why it is not one yet. */
 export type LabelAddress =
@@ -35,10 +41,10 @@ export function stateCode(value: string | undefined): string | undefined {
 export function labelAddress(address: Pick<ShipTo, "name" | "line1" | "line2" | "city" | "region" | "postalCode">): LabelAddress {
   const state = stateCode(address.region);
   if (!state) return { ok: false, problem: "The address has no US state. Add the state in Commerce's Orders page." };
-  if (CUSTOMS_REGIONS.has(state)) {
+  const zip = address.postalCode.trim().match(/^(\d{5})(?:-?(\d{4}))?$/);
+  if (CUSTOMS_REGIONS.has(state) || zip && CUSTOMS_ZIP.test(zip[1]!)) {
     return { ok: false, problem: "US territories and military addresses need customs forms, which Ship does not make yet." };
   }
-  const zip = address.postalCode.trim().match(/^(\d{5})(?:-?(\d{4}))?$/);
   if (!zip) return { ok: false, problem: "The ZIP code is not a 5 or 9 digit US ZIP code. Fix it in Commerce's Orders page." };
   return {
     ok: true, name: address.name.trim(), city: address.city.trim(), state,

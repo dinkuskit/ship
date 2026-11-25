@@ -6,6 +6,7 @@ import worker from "../src/worker";
 import { trackingIndex } from "../src/tracking";
 import { pitneyConfig } from "../src/pitney";
 import { addLabelColumns, addPurchaseColumns } from "../src/store";
+import { labelAddress } from "../src/address";
 
 const ORIGIN = "https://ship.example.invalid";
 let site: string;
@@ -376,6 +377,16 @@ test("labels are refused for a changed, unaddressable or completed order", async
   expect(await labels()).toEqual([]);
 });
 
+test("a territory or military ZIP code needs customs forms whatever state was typed, and Hawaii does not", () => {
+  const to = (region: string, postalCode: string) => labelAddress({ name: "A", line1: "B", city: "C", region, postalCode });
+  for (const [region, zip] of [["CA", "00901"], ["NY", "00802"], ["TX", "09012"], ["FL", "34001"], ["CA", "96201"], ["WA", "96910"], ["HI", "96799"]]) {
+    expect(to(region!, zip!)).toMatchObject({ ok: false, problem: expect.stringContaining("customs forms") });
+  }
+  for (const [region, zip] of [["HI", "96813"], ["HI", "96701"], ["CA", "90000"], ["NY", "10001"], ["AK", "99501"]]) {
+    expect(to(region!, zip!)).toMatchObject({ ok: true });
+  }
+});
+
 test("forms from anywhere but Ship's own pages are refused", async () => {
   const cookie = await signedIn();
   for (const origin of [null, "https://evil.example.invalid"]) {
@@ -454,6 +465,17 @@ test("while DinkusKit.com is down Ship waits up to 20 minutes, then asks for sig
   expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(303);
 });
 
+test("a token check that takes too long is cut off after 10 seconds and counts as DinkusKit.com being down", async () => {
+  const cookie = await signedIn();
+  const waits = vi.spyOn(AbortSignal, "timeout");
+  tokenAnswer = async () => { throw new DOMException("The operation was aborted due to timeout", "TimeoutError"); };
+  await age(6 * 60);
+  expect((await request("GET", `/stores/${site}/orders`, { cookie })).status).toBe(200);
+  expect(waits).toHaveBeenCalledWith(10_000);
+  const tokenCall = vi.mocked(globalThis.fetch).mock.calls.filter(([input]) => String(input) === `${issuer}/token`).at(-1);
+  expect(tokenCall?.[1]?.signal).toBeInstanceOf(AbortSignal);
+});
+
 test("signing out of Ship ends the session even for a copied cookie", async () => {
   const cookie = await signedIn();
   const out = await request("POST", "/auth/sign-out", { cookie });
@@ -507,6 +529,20 @@ async function liveOrder() {
   const buy = (form: Record<string, string> = {}) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", ...form } });
   return { cookie, boxId, orderPath, buy };
 }
+
+test("two cancels of one label at once void it at Pitney Bowes once and both get the same answer", async () => {
+  const { buy } = await liveOrder();
+  expect((await buy()).status).toBe(303);
+  const store = shipStore();
+  const label = (await store.orderSummary("order:abc"))!.labels[0]!;
+  const [first, second] = await Promise.all([store.cancelLabel(label.labelId), store.cancelLabel(label.labelId)]);
+  expect(first).toEqual(second);
+  expect(first).toMatchObject({ ok: true });
+  expect(pbCalls.filter(call => call.method === "DELETE")).toHaveLength(1);
+  // Once it has finished, a later press is told there is nothing left to cancel.
+  expect(await store.cancelLabel(label.labelId)).toMatchObject({ ok: false });
+  expect(pbCalls.filter(call => call.method === "DELETE")).toHaveLength(1);
+});
 
 test("a real order's label is bought from the store's Pitney Bowes postage account and can be cancelled for a refund", async () => {
   const { cookie, boxId, orderPath, buy } = await liveOrder();
