@@ -1,0 +1,7 @@
+ ✓ spec/owner.spec.ts > a territory or military ZIP code needs customs forms whatever state was typed, and Hawaii does not
+ ✓ spec/owner.spec.ts > a token check that takes too long is cut off after 10 seconds and counts as DinkusKit.com being down
+ ✓ spec/owner.spec.ts > two cancels of one label at once void it at Pitney Bowes once and both get the same answer
+ ✓ spec/tracking.spec.ts > an update a store cannot record right now answers 500 for that one event, and the others still land
+ ✓ spec/tracking.spec.ts > the daily check counts a store that cannot record as failed and still records the rest
+ ✓ spec/tracking.spec.ts > a status named like a built-in, such as constructor, is an unknown status and changes nothing
+      Tests  6 passed | 43 skipped (49)

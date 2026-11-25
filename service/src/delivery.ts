@@ -50,9 +50,10 @@ export function scanTime(date: unknown, time: unknown, offset: unknown, heardAt 
 /** One Pitney Bowes scan as a Delivery; null when it moves nothing or is not a status Ship knows. */
 export function deliveryFromScan(packageStatus: unknown, description: unknown, at: string): Delivery | null {
   if (typeof packageStatus !== "string") return null;
-  const state = STATES[packageStatus];
+  // Own keys only, so a status like "constructor" is unknown rather than a function from Object.prototype.
+  const state = Object.hasOwn(STATES, packageStatus) ? STATES[packageStatus] : null;
   if (!state) return null;
-  const note = oneLineNote(description) ?? PLAIN[packageStatus] ?? null;
+  const note = oneLineNote(description) ?? (Object.hasOwn(PLAIN, packageStatus) ? PLAIN[packageStatus] : null) ?? null;
   return { state, at, note };
 }
 
