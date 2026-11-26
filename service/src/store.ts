@@ -423,9 +423,14 @@ export class StoreShipping extends DurableObject<Env> {
       const password = typeof fields.password === "string" ? fields.password : "";
       if (!password || password.length > 200) refuse("INVALID_INPUT", "Enter your Pitney Bowes password.");
       const revision = this.meta("pb_account_revision");
-      const merchant = await authorizeMerchant(config, developerId, username, password);
-      if (this.meta("pb_account_revision") !== revision) {
-        refuse("POSTAGE_SETTINGS_CHANGED", "Postage settings changed while Ship checked the account. Review the current settings before connecting again.", 409);
+      let merchant: Awaited<ReturnType<typeof authorizeMerchant>>;
+      try {
+        merchant = await authorizeMerchant(config, developerId, username, password);
+      } finally {
+        // Once the settings change, neither a successful nor a failed check describes the current form.
+        if (this.meta("pb_account_revision") !== revision) {
+          refuse("POSTAGE_SETTINGS_CHANGED", "Postage settings changed while Ship checked the account. Review the current settings before connecting again.", 409);
+        }
       }
       const account: PostageAccount = {
         shipperId: merchant.shipperId, company: merchant.company, email: merchant.email,

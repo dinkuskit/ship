@@ -156,7 +156,9 @@ test("the plugin connects the owner's Pitney Bowes account without Ship keeping 
   expect((await shipStore().getSettings()).postageAccount).toBeNull();
 });
 
-test.each(["Disconnect", "Connect"] as const)("a slower postage check cannot undo a completed %s from another tab", async action => {
+test.each([
+  ["Disconnect", 200], ["Connect", 200], ["Disconnect", 401], ["Connect", 401],
+] as const)("a slower postage check cannot supersede a completed %s (carrier HTTP %i)", async (action, carrierStatus) => {
   const connect = () => call("POST", "/v1/admin/settings/postage", {
     body: { username: "owner@example.test", password: "not-a-real-login" }, adminUser: "admin@example.test",
   });
@@ -176,7 +178,7 @@ test.each(["Disconnect", "Connect"] as const)("a slower postage check cannot und
     expect(current.status).toBe(200);
     expect(current.json.settings.postageAccount?.accountEnding ?? null).toBe(action === "Disconnect" ? null : "0091");
   } finally {
-    finish(Response.json(merchant));
+    finish(carrierStatus === 200 ? Response.json(merchant) : new Response(null, { status: carrierStatus }));
   }
   const late = await slower;
   expect(late.status).toBe(409);
