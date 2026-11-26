@@ -12,8 +12,12 @@ export interface OrderView {
   order: ShipOrder; settings: ShipSettings; siteId: string;
   /** Prices Ship quoted for the typed box and weight, when "See prices" was pressed. */
   prices?: Prices;
+  /** Package and rates as reviewed for this Commerce order revision. */
+  reviewVersion?: number;
+  /** The merchant chose a service and is ready to confirm the purchase. */
+  confirmLabel?: boolean;
   /** What the owner typed, kept across a refusal or a quote. */
-  typed?: { boxId?: string; weightOz?: number; service?: string; kind?: string; buyAgain?: boolean };
+  typed?: { boxId?: string; weightOz?: number; service?: string; kind?: string; buyAgain?: boolean; sandboxService?: string };
   /** Why the last press was refused, shown as it came from Ship. */
   failure?: string;
   /** A local validation error keeps the editable weight and cannot advance a quote. */
@@ -258,64 +262,88 @@ function labelsTable(labels: Label[]): Block {
   })) };
 }
 
-/**
- * The label form: box and weight, then once Ship has quoted them, the USPS services with their
- * prices to pick from and "Buy label". A practice label needs no quote (Pitney Bowes is not asked),
- * so picking it goes straight to the buy step; so does Ship's "tick Buy a new label" refusal,
- * which stays on the buy step unless the owner submits an invalid package or service.
+const services = (Object.keys(SERVICES) as ServiceCode[]).map(value => ({ value, label: SERVICES[value] }));
+
+/** Only prices for the reviewed package belong here. Read the service and next step in
+ * one submit: a separate Block action button cannot see the form's current selection.
  */
+function labelReview(view: OrderView, box: Box, packed: number, practice: boolean): Block[] | null {
+  const { order, typed = {}, prices } = view;
+  const options = practice ? services : services.flatMap(option => {
+    const cents = prices?.[option.value];
+    return cents == null ? [] : [{ ...option, label: `${option.label} · ${money(cents)}` }];
+  });
+  if (!options.length) return null;
+  const service = options.find(option => option.value === typed.service)?.value ?? options[0]!.value;
+  const id = `${order.version}:${encodeURIComponent(order.orderId)}`;
+  const draft = { boxId: box.boxId, weightOz: packed, service, ...(practice ? { kind: "practice", sandboxService: typed.sandboxService } : {}) };
+  const action = (verb: string) => orderAction(`${verb}:${id}`, view.historyFrom);
+  const packageLine = section(`${box.name}: ${box.lengthIn} × ${box.widthIn} × ${box.heightIn} in · Package ${weight(packed)}`);
+  const edit = { type: "button" as const, label: practice ? "Back to sandbox pricing" : "See prices again", action_id: action("package"),
+    value: { boxId: box.boxId, weightOz: packed, service: practice ? typed.sandboxService : service } };
+  const detail = encodeURIComponent(JSON.stringify({ ...draft, prices: practice ? undefined : prices }));
+  if (view.confirmLabel) return [packageLine, section(options.find(option => option.value === service)!.label),
+    ...(practice ? [context("A practice label is free and asks Pitney Bowes nothing.")] : []),
+    { type: "actions", elements: [
+      { type: "button", label: practice ? "Make practice label" : order.test ? "Create TEST label" : "Buy label", action_id: action("buy"), style: "primary", value: draft },
+      { type: "button", label: "Back to services", action_id: `${action("review")}:${detail}` }, edit,
+    ] },
+  ];
+  return [packageLine,
+    { type: "form", block_id: `label-${order.orderId}-${practice ? "practice" : "rates"}`, fields: [
+      { type: "radio", label: practice ? "USPS service for practice label" : "USPS service and price", action_id: "service", options, initial_value: service },
+      ...(!practice ? [{ type: "select" as const, label: "Next step", action_id: "next", initial_value: "review", options: [
+        { label: "Review this label", value: "review" }, { label: "See prices again", value: "prices" },
+        ...(order.test ? [{ label: "Use a practice label instead", value: "practice" }] : []),
+      ] }] : []),
+    ], submit: { label: practice ? "Review practice label" : "Continue", action_id: `${action("review")}:${detail}` } },
+    ...(practice ? [context("A practice label is free and asks Pitney Bowes nothing."), { type: "actions" as const, elements: [edit] }] : []),
+  ];
+}
+
+/** The editable package or recovery form, before reviewing a quote or practice label. */
 function labelForm(view: OrderView): Block[] {
-  const { order, settings, typed = {}, prices } = view;
-  const box = settings.boxes.find(candidate => candidate.boxId === typed.boxId) ?? settings.boxes[0]!;
+  const { order, settings, typed = {} } = view;
+  const selectedBox = settings.boxes.find(candidate => candidate.boxId === typed.boxId);
+  const box = selectedBox ?? settings.boxes[0]!;
   const packed = typed.weightOz ?? Math.round((order.itemsWeightOz + box.weightOz) * 10) / 10;
   const id = `${order.version}:${encodeURIComponent(order.orderId)}`;
   const boxOption = (candidate: Box) => ({ label: `${candidate.name}: ${candidate.lengthIn} × ${candidate.widthIn} × ${candidate.heightIn} in, ${weight(candidate.weightOz)} empty`, value: candidate.boxId });
   const practiceOnly = order.test && !settings.testSandbox;
-  const practice = practiceOnly || (order.test && typed.kind === "practice");
-  // A local refusal ends replacement confirmation. A corrected sandbox or live package needs new prices.
+  const practice = order.test && typed.kind === "practice";
+  const currentReview = selectedBox !== undefined && view.reviewVersion === order.version;
+  const prices = currentReview ? view.prices : undefined;
+  if (currentReview && !practiceOnly && (prices !== undefined || practice)) {
+    const review = labelReview(view, box, packed, practice);
+    if (review) return review;
+  }
+  // A local refusal ends replacement confirmation. A corrected package needs new prices.
   const buyAgain = !view.labelInputError && (view.askBuyAgain === true || typed.buyAgain === true);
-  const services = (Object.keys(SERVICES) as ServiceCode[]).map(value => ({ value, label: SERVICES[value] }));
-  const options = prices === undefined ? services : services.flatMap(option => {
-    const cents = prices[option.value];
-    return cents == null ? [] : [{ ...option, label: `${option.label} · ${money(cents)}` }];
-  });
-  const first = options[0];
-  const canBuy = !view.labelInputError?.quote && (prices !== undefined ? first !== undefined : practice || buyAgain);
-  const testQuote = order.test && !practiceOnly && prices !== undefined;
-  // Block Kit has a single submit action per form. An unquoted practice buy
-  // must not be able to switch to the sandbox while keeping that action.
-  const practiceStep = canBuy && practice && !practiceOnly && prices === undefined;
-  const selected = (choices: typeof services) => choices.find(option => option.value === typed.service)?.value ?? choices[0]!.value;
+  const canBuy = !view.labelInputError?.quote && (practiceOnly || buyAgain);
+  const preferred = services.find(option => option.value === typed.service)?.value;
   const form: FormField[] = [
     { type: "select", action_id: "boxId", label: "Box", options: settings.boxes.map(boxOption), initial_value: box.boxId },
     // A text field: the browser's number field rejects most tenths of an ounce as "not a valid value".
     { type: "text_input", action_id: "weightOz", label: `Package weight in ounces, items plus box (16 oz = 1 lb)`, initial_value: view.labelInputError?.weight ?? String(Math.max(0.1, Math.min(MAX_WEIGHT_OZ, packed))), placeholder: "28.5" },
   ];
   if (order.test) {
-    form.push({ type: "select", action_id: "kind", label: "Label kind", initial_value: practiceOnly || typed.kind === "practice" ? "practice" : "sandbox",
-      options: [...(practiceOnly || practiceStep ? [] : [{ label: "Pitney Bowes sandbox (no charge)", value: "sandbox" }]),
+    form.push({ type: "select", action_id: "kind", label: "Label kind", initial_value: practiceOnly || practice ? "practice" : "sandbox",
+      options: [...(practiceOnly ? [] : [{ label: "Pitney Bowes sandbox (no charge)", value: "sandbox" }]),
         { label: "Practice label (no postage)", value: "practice" }] });
   }
-  if (canBuy && first) {
-    form.push({ type: "radio", action_id: "service", label: prices === undefined ? "USPS service" : "USPS service and price",
-      initial_value: selected(options), options, ...(testQuote ? { condition: { field: "kind", eq: "sandbox" } } : {}) });
-    // A sandbox quote must not restrict the practice label on the same TEST order.
-    if (testQuote) form.push({ type: "radio", action_id: "practiceService", label: "USPS service for practice label",
-      initial_value: selected(services), options: services, condition: { field: "kind", eq: "practice" } });
-  }
+  if (canBuy) form.push({ type: "radio", action_id: "service", label: "USPS service", initial_value: preferred ?? "GA", options: services });
   if (canBuy && buyAgain) form.push({ type: "toggle", action_id: "buyAgain", label: "Buy a new label", description: "Pitney Bowes has no record of the last one Ship bought for this order.", initial_value: typed.buyAgain === true });
   const action = (id: string) => orderAction(id, view.historyFrom);
   const blocks: Block[] = [
     ...(view.labelInputError && view.failure ? [banner("error", "Check label details", view.failure)] : []),
-    ...(prices !== undefined && !first ? [section("No USPS rates are available for this package. Check the box and weight, then press See prices again." +
-      (testQuote ? " To continue without a rate, choose Practice label before pressing See prices." : ""))] : []),
-    { type: "form", block_id: `label-${order.orderId}-${practiceStep ? "practice" : canBuy ? "buy" : "prices"}`, fields: form,
-    submit: canBuy ? { label: testQuote ? "Create TEST label" : practice ? "Make practice label" : "Buy label", action_id: action(`buy:${id}`) } : { label: "See prices", action_id: action(`prices:${id}`) } }];
-  if (canBuy && prices !== undefined) blocks.push(context("Prices are for the box and weight above. Changed them? Press See prices again." +
-    (testQuote ? " Practice labels do not use these prices." : "")));
-  else if (practiceStep) blocks.push(context("A practice label is free and asks Pitney Bowes nothing. To use the sandbox instead, go back to sandbox pricing."));
-  else if (canBuy && buyAgain) blocks.push(context("Pitney Bowes has no record of the last label Ship bought for this order. Tick Buy a new label and press Buy label to buy one, with the service you chose."));
-  if (canBuy && !practiceOnly) blocks.push({ type: "actions", elements: [{ type: "button", label: practiceStep ? "Back to sandbox pricing" : "See prices again", action_id: action("open"), value: order.orderId }] });
+    ...(view.reviewVersion !== undefined && !currentReview ? [section("The order or package changed. Check these details before continuing.")] : []),
+    ...(prices !== undefined ? [section("No USPS rates are available for this package. Check the box and weight, then press See prices again." +
+      (order.test ? " To continue without a rate, choose Practice label before pressing See prices." : ""))] : []),
+    { type: "form", block_id: `label-${order.orderId}-${canBuy ? "buy" : "prices"}`, fields: form,
+      submit: canBuy ? { label: practiceOnly ? "Make practice label" : "Buy label", action_id: action(`buy:${id}`) }
+        : { label: "See prices", action_id: action(`prices:${id}${preferred ? `:${preferred}` : ""}`) } }];
+  if (canBuy && buyAgain) blocks.push(context("Pitney Bowes has no record of the last label Ship bought for this order. Tick Buy a new label and press Buy label to buy one, with the service you chose."));
+  if (canBuy && !practiceOnly) blocks.push({ type: "actions", elements: [{ type: "button", label: "See prices again", action_id: action(`package:${id}`), value: { boxId: box.boxId, weightOz: packed, service: preferred } }] });
   return blocks;
 }
 

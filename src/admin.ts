@@ -6,7 +6,7 @@ import {
 } from "./pages.js";
 import { settingsAdmin } from "./settings.js";
 import { cancelConnect, connectedTo, connectionState, finishSetup, startConnect, type ConnectView } from "./connect.js";
-import { adminPageFrom, adminUserFrom, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
+import { adminPageFrom, adminUserFrom, ship, ShipError, type LabelRequest, type Prices, type Ship, type ShipOrder } from "./ship.js";
 
 /** EmDash's Editor role; Administrators are above it. Lower roles never see Shipping. */
 const EDITOR = 40;
@@ -30,12 +30,12 @@ function interaction(input: unknown): Interaction | null {
   return null;
 }
 
-/** `verb:<version>:<encoded order id>` from a form's submit action. */
-function target(actionId: string): { version: number; orderId: string } | null {
-  const [, version, encoded] = actionId.split(":", 3);
+/** `verb:<version>:<encoded order id>[:<preference or quote>]` from an order action. */
+function target(actionId: string): { version: number; orderId: string; detail?: string } | null {
+  const [, version, encoded, detail] = actionId.split(":", 4);
   if (!version || !encoded || !/^\d{1,15}$/.test(version)) return null;
   try {
-    return { version: Number(version), orderId: decodeURIComponent(encoded) };
+    return { version: Number(version), orderId: decodeURIComponent(encoded), detail };
   } catch {
     return null;
   }
@@ -53,7 +53,21 @@ function labelDraft(values: Record<string, unknown>): NonNullable<OrderView["typ
   // Block Kit sends values for hidden fields too. Read the picker for the active label kind only.
   const service = kind === "practice" ? values.practiceService ?? values.service : values.service;
   return { boxId: text(values.boxId), weightOz: Number.isFinite(weightOz) ? weightOz : undefined,
-    service: text(service), kind, buyAgain: values.buyAgain === true };
+    service: text(service), kind, buyAgain: values.buyAgain === true, sandboxService: text(values.sandboxService) };
+}
+
+function fields(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+/** Rehydrate the displayed rates for a service selection. These are never purchase prices. */
+function reviewedPrices(value: unknown): OrderView["prices"] {
+  const record = fields(value);
+  if (!record) return undefined;
+  return Object.fromEntries(Object.keys(SERVICES).flatMap(service => {
+    const price = record[service];
+    return typeof price === "number" && Number.isSafeInteger(price) && price >= 0 ? [[service, price]] : [];
+  }));
 }
 
 /** Check the draft before asking Ship for prices or a label. */
@@ -61,7 +75,7 @@ function labelRequest(version: number, typed: NonNullable<OrderView["typed"]>, b
   const { boxId, weightOz, service, kind, buyAgain } = typed;
   if (!boxId) throw new ShipError("INPUT", "Pick a box.");
   if (weightOz === undefined || weightOz < 0.1 || weightOz > MAX_WEIGHT_OZ) throw new ShipError("INPUT", `Enter the package weight in ounces, from 0.1 to ${MAX_WEIGHT_OZ} (70 lb).`);
-  if (service !== undefined && !(service in SERVICES)) throw new ShipError("INPUT", "Pick a USPS service.");
+  if (service !== undefined && !Object.hasOwn(SERVICES, service)) throw new ShipError("INPUT", "Pick a USPS service.");
   return { version, boxId, weightOz, by, ...(service ? { service: service as LabelRequest["service"] } : {}),
     ...(kind === "practice" ? { kind: "practice" as const } : {}), ...(buyAgain ? { buyAgain: true as const } : {}) };
 }
@@ -103,7 +117,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
   if (parsed.page === SETTINGS_PATH) return settingsAdmin(parsed, isAdmin, route, ctx);
   let input = parsed, historyFrom: OrderView["historyFrom"];
   if (parsed.type !== "page_load" && parsed.action_id.startsWith("history-order:")) {
-    const wrapped = /^history-order:([^:]*):(open|(?:prices|buy|cancel):.+)$/.exec(parsed.action_id);
+    const wrapped = /^history-order:([^:]*):(open|(?:prices|buy|cancel|package|review):.+)$/.exec(parsed.action_id);
     if (!wrapped) return { blocks: [] };
     try { historyFrom = decodeURIComponent(wrapped[1]!) || null; } catch { return { blocks: [] }; }
     if (historyFrom !== null && historyCursor({ cursor: historyFrom }) === null) return { blocks: [] };
@@ -150,19 +164,45 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
         throw error;
       }
     }
-    if (input.type === "form_submit") {
+    if (input.type === "block_action" && input.action_id.startsWith("package:")) {
+      const found = target(input.action_id), values = fields(input.value);
+      if (!found || !values) return { blocks: [] };
+      const { boxId, weightOz, service } = labelDraft(values);
+      return await openOrder(hosted, found.orderId, { typed: { boxId, weightOz, service }, historyFrom });
+    }
+    if (input.type !== "page_load" && input.action_id.startsWith("review:")) {
       const found = target(input.action_id);
-      if (!found) return { blocks: [] };
-      const typed = labelDraft(input.values);
+      if (!found?.detail || found.detail.length > 2400) return { blocks: [] };
+      let draft;
+      try { draft = fields(JSON.parse(decodeURIComponent(found.detail))); } catch { return { blocks: [] }; }
+      if (!draft) return { blocks: [] };
+      const submitted = input.type === "form_submit" ? input.values : null;
+      const typed = labelDraft(submitted ? { ...draft, service: submitted.service } : draft);
+      const { boxId, weightOz, kind, service } = typed;
+      const next = submitted?.next;
+      if (next === "prices") return await openOrder(hosted, found.orderId, { typed: { boxId, weightOz, service }, historyFrom });
+      const prices = reviewedPrices(draft.prices);
+      if (next === "practice") {
+        return await openOrder(hosted, found.orderId, { typed: { boxId, weightOz, kind: "practice", sandboxService: service }, reviewVersion: found.version, historyFrom });
+      }
+      if (!service || !Object.hasOwn(SERVICES, service) || kind !== "practice" && prices?.[service as keyof Prices] === undefined) return { blocks: [] };
+      return await openOrder(hosted, found.orderId, { typed, prices, reviewVersion: found.version, confirmLabel: submitted !== null, historyFrom });
+    }
+    if (input.type === "form_submit" || input.type === "block_action" && input.action_id.startsWith("buy:")) {
+      const found = target(input.action_id);
+      const values = input.type === "form_submit" ? input.values : fields(input.value);
+      if (!found || !values) return { blocks: [] };
       const quote = input.action_id.startsWith("prices:");
       const buy = input.action_id.startsWith("buy:");
       if (!quote && !buy) return { blocks: [] };
+      const typed = labelDraft(values);
+      if (quote && typed.kind !== "practice" && found.detail && Object.hasOwn(SERVICES, found.detail)) typed.service = found.detail;
       let request: LabelRequest;
       try {
         request = labelRequest(found.version, typed, by);
       } catch (error) {
         if (!(error instanceof ShipError)) throw error;
-        const rawWeight = input.values.weightOz;
+        const rawWeight = values.weightOz;
         return await refused(hosted, found.orderId, error, typed, historyFrom, {
           // Text fields have no length cap in Block Kit. Reflect a bounded draft,
           // or leave it blank rather than replacing an oversized paste with a weight.
@@ -172,9 +212,11 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       try {
         if (quote) {
           // A practice label asks Pitney Bowes nothing, so there is nothing to quote: straight to the buy step.
-          if (request.kind === "practice") return await openOrder(hosted, found.orderId, { typed, historyFrom });
+          if (request.kind === "practice") {
+            return await openOrder(hosted, found.orderId, { typed: { ...typed, sandboxService: found.detail }, reviewVersion: found.version, historyFrom });
+          }
           const prices = await hosted.prices(found.orderId, request);
-          return await openOrder(hosted, found.orderId, { prices, typed, historyFrom });
+          return await openOrder(hosted, found.orderId, { prices, typed, reviewVersion: found.version, historyFrom });
         }
         const label = await hosted.buy(found.orderId, request);
         const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;

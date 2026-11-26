@@ -531,6 +531,13 @@ test("known item weights keep the old total; labelled and completed orders need 
   }
 });
 
+const controls = page => page.blocks.flatMap(block => block.type === "actions" ? block.elements : []);
+const button = (page, name) => controls(page).find(element => element.type === "button" && element.label === name);
+const formOn = page => page.blocks.find(block => block.type === "form");
+const servicePicker = page => formOn(page).fields.find(field => field.action_id === "service");
+const press = (h, element, value = element.value) => h.page({ type: "block_action", action_id: element.action_id, value });
+const pick = (h, page, service, next = "review") => h.page({ type: "form_submit", action_id: formOn(page).submit.action_id, values: { service, next } });
+
 test("opening an order shows the form with the items plus box weight, then prices, then buys with who pressed the button", async () => {
   const sent = [];
   const h = host({ ship: {
@@ -550,15 +557,18 @@ test("opening an order shows the form with the items plus box weight, then price
 
   const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: " 30.0 oz", kind: "sandbox" } });
   assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, by: "staff@example.test" });
-  const buy = priced.blocks.find(block => block.type === "form");
-  assert.equal(buy.submit.action_id, "buy:1:order%3Aabc");
-  assert.equal(buy.fields[1].initial_value, "30");
-  const service = buy.fields.find(field => field.action_id === "service");
+  assert.equal(button(priced, "Create TEST label"), undefined);
+  const service = servicePicker(priced);
   assert.deepEqual(service.options.map(option => option.label), ["USPS Ground Advantage · $5.10", "USPS Priority Mail · $9.35"]);
   assert.equal(service.type, "radio");
   assert.equal(service.initial_value, "GA");
 
-  const bought = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, service: "PM", kind: "sandbox" } });
+  const selected = await pick(h, priced, "PM");
+  const buy = button(selected, "Create TEST label");
+  assert.equal(buy.action_id, "buy:1:order%3Aabc");
+  assert.equal(buy.value.weightOz, 30);
+  assert.match(text(selected), /USPS Priority Mail · \$9\.35/);
+  const bought = await press(h, buy);
   assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", by: "staff@example.test" });
   assert.equal(bought.toast.message, "Label bought, $9.35 sandbox. Tracking SANDBOX-TRACKING-A.");
   // The page after buying is read from Ship again; the stand-in still has no label, so the form shows again.
@@ -573,22 +583,40 @@ test("Shipments falls back to a quoted service when Ground Advantage is unavaila
   const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: {
     boxId: "box_small", weightOz: "30", kind: "sandbox", service: "GA",
   } });
-  const form = priced.blocks.find(block => block.type === "form");
-  const service = form.fields.find(field => field.action_id === "service");
-  assert.equal(form.submit.action_id, "buy:1:order%3Aabc");
+  const service = servicePicker(priced);
+  assert.equal(button(priced, "Create TEST label"), undefined);
   assert.equal(service.initial_value, "PM");
   assert.deepEqual(service.options, [{ value: "PM", label: "USPS Priority Mail · $0.00" }]);
 });
 
-test("a quoted selection stays selected even when Ground Advantage is available", async () => {
+test("See prices again keeps the reviewed draft and selected service if still available", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
-    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: 510, PM: 935 } },
+    "POST /v1/admin/orders/order%3Aabc/prices": body => Response.json({ prices: { GA: 510, PM: body.weightOz === 32 ? null : 935 } }),
   } });
-  const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: {
-    boxId: "box_small", weightOz: "30", kind: "sandbox", service: "PM",
+  const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: "30", kind: "sandbox" } });
+  const edit = formOn(await pick(h, priced, "PM", "prices"));
+  assert.deepEqual(Object.fromEntries(edit.fields.map(field => [field.action_id, field.initial_value])), { boxId: "box_small", weightOz: "30", kind: "sandbox" });
+  for (const [weightOz, service] of [["31", "PM"], ["32", "GA"]]) {
+    const next = await h.page({ type: "form_submit", action_id: edit.submit.action_id, values: { boxId: "box_small", weightOz, kind: "sandbox" } });
+    assert.equal(servicePicker(next).initial_value, service);
+  }
+  assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
+});
+
+test("reviewing a quote after the order changes returns to pricing without buying", async () => {
+  let version = 1;
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: { ...order(), version }, settings }),
+    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { PM: 935 } },
   } });
-  assert.equal(priced.blocks.find(block => block.type === "form").fields.find(field => field.action_id === "service").initial_value, "PM");
+  const quoted = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: "30" } });
+  version = 2;
+  const stale = await pick(h, quoted, "PM");
+  assert.match(text(stale), /The order or package changed/);
+  assert.equal(formOn(stale).submit.action_id, "prices:2:order%3Aabc:PM");
+  assert.equal(button(stale, "Create TEST label"), undefined);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
 });
 
 test("a quoted TEST order keeps independent sandbox and practice service choices", async () => {
@@ -599,18 +627,16 @@ test("a quoted TEST order keeps independent sandbox and practice service choices
   } });
   const draft = { boxId: "box_small", weightOz: "30" };
   const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { ...draft, kind: "sandbox" } });
-  const form = priced.blocks.find(block => block.type === "form");
-  assert.equal(form.submit.label, "Create TEST label");
-  const sandbox = form.fields.find(field => field.action_id === "service");
-  const practice = form.fields.find(field => field.action_id === "practiceService");
-  assert.deepEqual(sandbox.condition, { field: "kind", eq: "sandbox" });
-  assert.deepEqual(sandbox.options.map(option => option.value), ["PM"]);
-  assert.deepEqual(practice.condition, { field: "kind", eq: "practice" });
-  assert.deepEqual(practice.options.map(option => option.value), ["GA", "PM", "EM"]);
-  for (const kind of ["practice", "sandbox"]) {
-    await h.page({ type: "form_submit", action_id: form.submit.action_id,
-      values: { ...draft, kind, service: "PM", practiceService: "EM" } });
-  }
+  assert.deepEqual(servicePicker(priced).options.map(option => option.value), ["PM"]);
+  const practice = await pick(h, priced, "PM", "practice");
+  assert.equal(button(practice, "Create TEST label"), undefined);
+  assert.deepEqual(servicePicker(practice).options.map(option => option.value), ["GA", "PM", "EM"]);
+  const selected = await pick(h, practice, "EM");
+  const back = await press(h, button(selected, "Back to sandbox pricing"));
+  const edit = back.blocks.find(block => block.type === "form");
+  assert.equal(edit.submit.action_id, "prices:1:order%3Aabc:PM");
+  await press(h, button(selected, "Make practice label"));
+  await press(h, button(await pick(h, priced, "PM"), "Create TEST label"));
   assert.deepEqual(h.calls.filter(call => call.url.endsWith("/labels")).map(({ body }) => [body.kind, body.service]),
     [["practice", "EM"], [undefined, "PM"]]);
   assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 1);
@@ -633,10 +659,9 @@ test("no USPS rates keeps the package editable without offering to buy, then a r
   assert.deepEqual(Object.fromEntries(form.fields.map(field => [field.action_id, field.initial_value])), values);
 
   const retry = await h.page({ type: "form_submit", action_id: form.submit.action_id, values: { ...values, weightOz: "31" } });
-  const buy = retry.blocks.find(block => block.type === "form");
   assert.doesNotMatch(text(retry), /No USPS rates are available/);
-  assert.equal(buy.submit.label, "Create TEST label");
-  assert.equal(buy.fields.find(field => field.action_id === "service").initial_value, "EM");
+  assert.equal(button(retry, "Create TEST label"), undefined);
+  assert.equal(servicePicker(retry).initial_value, "EM");
   assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 2);
   assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
 });
@@ -650,16 +675,13 @@ test("from an unquoted practice label the sandbox opens the price step, not a bu
   const unquoted = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { ...draft, kind: "sandbox" } });
   const practice = await h.page({ type: "form_submit", action_id: unquoted.blocks.find(block => block.type === "form").submit.action_id,
     values: { ...draft, kind: "practice" } });
-  const form = practice.blocks.find(block => block.type === "form");
-  assert.equal(form.submit.label, "Make practice label");
-  assert.deepEqual(form.fields.find(field => field.action_id === "kind").options.map(option => option.value), ["practice"]);
-  assert.equal(form.fields.find(field => field.action_id === "service").options.length, 3);
-  const back = practice.blocks.flatMap(block => block.type === "actions" ? block.elements : []).find(element => element.label === "Back to sandbox pricing");
-  assert.ok(back);
-  const sandbox = await h.page({ type: "block_action", action_id: back.action_id, value: back.value });
+  assert.equal(formOn(practice).submit.label, "Review practice label");
+  assert.equal(button(practice, "Create TEST label"), undefined);
+  assert.equal(servicePicker(practice).options.length, 3);
+  const sandbox = await press(h, button(practice, "Back to sandbox pricing"));
   const prices = sandbox.blocks.find(block => block.type === "form");
   assert.equal(prices.submit.label, "See prices");
-  assert.equal(prices.fields.find(field => field.action_id === "kind").initial_value, "sandbox");
+  assert.deepEqual(Object.fromEntries(prices.fields.map(field => [field.action_id, field.initial_value])), { ...draft, kind: "sandbox" });
   assert.ok(!prices.fields.some(field => field.action_id === "service"));
   assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 1);
   assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
@@ -780,17 +802,16 @@ test("an invalid replacement label weight returns to prices without carrying pur
     assert.deepEqual(sent.map(call => call.route), ["labels", "prices"]);
     assert.equal(sent[1].body.weightOz, 32);
     assert.equal(sent[1].body.buyAgain, undefined);
-    const next = quoted.blocks.find(block => block.type === "form");
-    assert.equal(next.submit.label, isTest ? "Create TEST label" : "Buy label");
+    assert.ok(button(await pick(h, quoted, "PM"), isTest ? "Create TEST label" : "Buy label"));
     assert.match(text(quoted), /USPS Priority Mail · \$9\.50/);
-    assert.equal(next.fields.some(field => field.action_id === "buyAgain"), false);
+    assert.doesNotMatch(text(quoted), /buyAgain/);
   }
 });
 
 test("a locally rejected weight keeps the label draft without advancing or requesting a label", async () => {
   const tall = { ...box, boxId: "box_tall", name: "Tall", heightIn: 8 };
   const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order(), settings: { ...settings, boxes: [box, tall] } } } });
-  for (const [step, expected] of [["prices", "See prices"], ["buy", "Make practice label"]]) {
+  for (const step of ["prices", "buy"]) {
     const view = await h.page({ type: "form_submit", action_id: `${step}:1:order%3Aabc`, values: {
       boxId: "box_tall", weightOz: "29x", kind: "practice", ...(step === "buy" ? { service: "PM" } : {}),
     } });
@@ -798,11 +819,11 @@ test("a locally rejected weight keeps the label draft without advancing or reque
     const form = view.blocks[index];
     assert.equal(view.blocks[index - 1].title, "Check label details");
     assert.match(text(view), /Enter the package weight in ounces/);
-    assert.equal(form.submit.label, expected);
+    assert.equal(form.submit.label, "See prices");
     assert.equal(form.fields.find(field => field.action_id === "boxId").initial_value, "box_tall");
     assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, "29x");
     assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, "practice");
-    assert.equal(form.fields.find(field => field.action_id === "service")?.initial_value, step === "buy" ? "PM" : undefined);
+    assert.ok(!form.fields.some(field => field.action_id === "service"));
   }
   assert.ok(h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com")).every(call => call.method === "GET"));
 });
@@ -811,8 +832,8 @@ test("invalid pasted weights do not turn into a calculated weight or reuse a san
   const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order(), settings } } });
   const pasted = "weight copied from the packing slip: 29 ounces";
   for (const [kind, raw, displayed, next] of [
-    ["practice", pasted, pasted, "Make practice label"],
-    ["practice", pasted.repeat(5), "", "Make practice label"],
+    ["practice", pasted, pasted, "See prices"],
+    ["practice", pasted.repeat(5), "", "See prices"],
     ["sandbox", pasted, pasted, "See prices"],
   ]) {
     const view = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
@@ -835,13 +856,12 @@ test("a practice label skips the prices step, since Pitney Bowes is not asked", 
   } });
   const chosen = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, kind: "practice" } });
   assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 0);
-  const form = chosen.blocks.find(block => block.type === "form");
-  assert.equal(form.submit.action_id, "buy:1:order%3Aabc");
-  assert.equal(form.submit.label, "Make practice label");
-  assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, "practice");
-  assert.deepEqual(form.fields.find(field => field.action_id === "service").options.map(option => option.label), ["USPS Ground Advantage", "USPS Priority Mail", "USPS Priority Mail Express"]);
+  const buy = button(await pick(h, chosen, "GA"), "Make practice label");
+  assert.equal(buy.action_id, "buy:1:order%3Aabc");
+  assert.equal(buy.value.kind, "practice");
+  assert.deepEqual(servicePicker(chosen).options.map(option => option.label), ["USPS Ground Advantage", "USPS Priority Mail", "USPS Priority Mail Express"]);
   assert.match(text(chosen), /A practice label is free and asks Pitney Bowes nothing/);
-  const made = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, service: "GA", kind: "practice" } });
+  const made = await press(h, buy);
   assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, service: "GA", kind: "practice", by: "staff@example.test" });
   assert.equal(made.toast.message, "Practice label made.");
 });
