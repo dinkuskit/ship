@@ -30,13 +30,13 @@ function interaction(input: unknown): Interaction | null {
   return null;
 }
 
-/** `verb:<version>:<encoded order id>[:<replacement transaction>]` from a form. */
-function target(actionId: string): { version: number; orderId: string; transactionId?: string } | null {
-  const [verb, version, encoded, transactionId, extra] = actionId.split(":", 5);
+/** `verb:<version>:<encoded order id>[:fresh|:<replacement approval>]` from a form. */
+function target(actionId: string): { version: number; orderId: string; fresh: boolean; transactionId?: string } | null {
+  const [verb, version, encoded, intent, extra] = actionId.split(":", 5);
   if (!version || !encoded || !/^\d{1,15}$/.test(version) || extra !== undefined ||
-      transactionId !== undefined && (verb !== "buy" || !/^shp[a-z0-9]{22}$/.test(transactionId))) return null;
+      intent !== undefined && (verb !== "buy" || intent !== "fresh" && !/^shp[a-z0-9]{22}$/.test(intent))) return null;
   try {
-    return { version: Number(version), orderId: decodeURIComponent(encoded), transactionId };
+    return { version: Number(version), orderId: decodeURIComponent(encoded), fresh: intent === "fresh", transactionId: intent === "fresh" ? undefined : intent };
   } catch {
     return null;
   }
@@ -180,9 +180,11 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
           const prices = await hosted.prices(found.orderId, request);
           return await openOrder(hosted, found.orderId, { prices, typed, historyFrom });
         }
-        if (found.transactionId && request.kind !== "practice") {
+        if (found.transactionId) {
           if (input.values.buyAgain === true) request.buyAgain = found.transactionId;
           else request.retryTransactionId = found.transactionId;
+        } else if (found.fresh) {
+          request.intent = "buy";
         }
         const label = await hosted.buy(found.orderId, request);
         const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;

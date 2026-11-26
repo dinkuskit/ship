@@ -123,7 +123,7 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   expect(Object.keys(before.json.settings).sort()).toEqual(["boxes", "postageConnected", "shipFrom", "testSandbox"]);
 
   const boxId = await setUp();
-  const form = { version: 1, boxId, weightOz: 28 };
+  const form = { version: 1, boxId, weightOz: 28, intent: "buy" };
   const prices = await call("POST", "/v1/admin/orders/order%3Aabc/prices", { body: form });
   expect(prices.status).toBe(200);
   expect(prices.json).toEqual({ prices: { GA: 510, PM: 935, EM: 3120 } });
@@ -164,7 +164,7 @@ test("the confirmed retry does not buy for a superseded address while the carrie
   await sendOrder();
   const boxId = await setUp();
   const buy = (version: number, buyAgain?: string) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
-    body: { version, boxId, weightOz: 28, service: "GA", buyAgain, by: "staff@example.test" },
+    body: { version, boxId, weightOz: 28, service: "GA", ...(buyAgain ? { buyAgain } : { intent: "buy" }), by: "staff@example.test" },
   });
   const creates = () => pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments");
   const events = () => call("GET", "/v1/labels", { scope: "ship:orders" });
@@ -199,8 +199,13 @@ test("the confirmed retry does not buy for a superseded address while the carrie
   expect((await call("GET", "/v1/admin/orders/order%3Aabc")).json.order.labels).toEqual([]);
 
   shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  // Refreshing the version in the old form must not refresh its approval.
+  expect((await buy(2, first.retryTransactionId)).json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
   const second = (await buy(2)).json.error;
-  expect(second).toMatchObject({ code: "CHECK_PITNEY_BOWES", retryTransactionId: first.retryTransactionId });
+  expect(second).toMatchObject({ code: "CHECK_PITNEY_BOWES", retryTransactionId: expect.stringMatching(/^shp[a-z0-9]{22}$/) });
+  expect(second.retryTransactionId).not.toBe(first.retryTransactionId);
+  expect((await buy(2, first.retryTransactionId)).json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
+  expect(creates()).toHaveLength(1);
   expect((await buy(2, second.retryTransactionId)).status).toBe(201);
   expect(creates()).toHaveLength(2);
   expect(creates()[1]!.body.toAddress.addressLines).toEqual(["2 Example Way"]);
@@ -211,12 +216,12 @@ test.each([[400, false], [400, true], [504, false], [504, true]] as const)(
   "overlapping retries use one lookup and start one replacement (carrier HTTP %i, second checked: %s)", async (status, checked) => {
   await sendOrder();
   const boxId = await setUp();
-  const buy = (extra: { buyAgain?: string | boolean; retryTransactionId?: string } = {}) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+  const buy = (extra: { intent?: string; buyAgain?: string | boolean; retryTransactionId?: string } = {}) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
     body: { version: 1, boxId, weightOz: 28, service: "GA", by: "staff@example.test", ...extra },
   });
   shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : new Response(null, { status: 404 });
-  expect((await buy()).json.error.code).toBe("PITNEY_BOWES_NO_ANSWER");
-  const prompt = (await buy()).json.error;
+  expect((await buy({ intent: "buy" })).json.error.code).toBe("PITNEY_BOWES_NO_ANSWER");
+  const prompt = (await buy()).json.error; // An old unchecked submission can still look up the current attempt.
   expect(prompt.code).toBe("CHECK_PITNEY_BOWES");
   const retryTransactionId: string = prompt.retryTransactionId;
 
@@ -254,6 +259,13 @@ test.each([[400, false], [400, true], [504, false], [504, true]] as const)(
     expect(fresh.retryTransactionId).not.toBe(retryTransactionId);
     expect((await buy({ buyAgain: fresh.retryTransactionId })).status).toBe(201);
     expect(creates()).toHaveLength(3);
+  } else {
+    // Actual old JSON: no buyAgain property, no retry ID. A refused replacement
+    // left no purchase or label to distinguish this from a brand-new form.
+    const legacy = await buy();
+    expect(legacy).toMatchObject({ status: 409, json: { error: { code: "LABEL_FORM_EXPIRED" } } });
+    expect(creates()).toHaveLength(2);
+    expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
   }
 });
 
@@ -264,7 +276,7 @@ test("a pending carrier lookup that finds the original prevents a concurrent rep
     body: { version: 1, boxId, weightOz: 28, service: "GA", by: "staff@example.test", ...extra },
   });
   shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : new Response(null, { status: 404 });
-  expect((await buy()).status).toBe(502);
+  expect((await buy({ intent: "buy" })).status).toBe(502);
   const { retryTransactionId } = (await buy()).json.error;
   const entered = barrier(), release = barrier();
   let lookups = 0;
@@ -306,14 +318,14 @@ test("an explicitly invalid or unbound retry never becomes a fresh label purchas
   expect((await buy({ kind: "practice", retryTransactionId: `shp${"a".repeat(22)}` })).json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
   expect(pbCalls).toHaveLength(0);
   expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
-  expect((await buy({})).status).toBe(201);
+  expect((await buy({ intent: "buy" })).status).toBe(201);
 });
 
 test("orders, labels and settings stored before item options keep working, and options sent later come through the real routes (commerce#264)", async () => {
   // A store as it stands before this change: an order without options, a bought label, ship-from and a box.
   await sendOrder();
   const boxId = await setUp();
-  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" } });
+  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", intent: "buy", by: "staff@example.test" } });
   expect(bought.status).toBe(201);
   // A row exactly as the previous Ship wrote it: the stored record has no options key at all.
   await runInDurableObject(shipStore(), async (_instance, state) => {
@@ -348,7 +360,7 @@ test("orders, labels and settings stored before item options keep working, and o
 test("after Commerce completes the order with the label, the Shipping page can still print and cancel it", async () => {
   await sendOrder();
   const boxId = await setUp();
-  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" } });
+  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", intent: "buy", by: "staff@example.test" } });
   expect(bought.status).toBe(201);
   // Commerce marks the order Completed at the next version and sends that version to Ship, as it does on every sync.
   await sendOrder({ version: 2, status: "completed", completed: { at: "2026-10-19T23:59:00.000Z", carrier: "USPS", tracking: "SANDBOX-TRACKING-A" } });
@@ -515,7 +527,7 @@ test("the order Ship forwarded the owner from opens once in the store admin, for
 test("cancelling a label before Commerce polls retires its unacknowledged label event and re-buy delivers only the live tracking", async () => {
   await sendOrder();
   const boxId = await setUp();
-  const form = { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" };
+  const form = { version: 1, boxId, weightOz: 28, service: "PM", intent: "buy", by: "staff@example.test" };
 
   const first = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: form });
   expect(first.status).toBe(201);
@@ -551,7 +563,7 @@ test("label events stored before this change keep working: cancelling retires on
   });
   expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json.map((label: { tracking: string }) => label.tracking)).toEqual(["OTHER-WAITING"]);
 
-  const form = { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" };
+  const form = { version: 1, boxId, weightOz: 28, service: "PM", intent: "buy", by: "staff@example.test" };
   const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: form });
   expect(bought.status).toBe(201);
   expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).status).toBe(200);

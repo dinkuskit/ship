@@ -50,7 +50,7 @@ const ROUTES: PageRoute[] = [
       const retryTransactionId = outcome.code === "CHECK_PITNEY_BOWES" && !checkedOldOrder && typeof retry === "string" ? retry : undefined;
       return html(orderPage(site, session.email, summary, await store.getSettings(), {
         error: checkedOldOrder ? "The order changed in Commerce. Check the updated details before buying a label." : outcome.message,
-        fields, retryTransactionId,
+        fields, retryTransactionId, reopenLabel: outcome.code === "LABEL_FORM_EXPIRED",
       }), errorStatus(outcome));
     },
   },

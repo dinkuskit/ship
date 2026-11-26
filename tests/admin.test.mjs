@@ -551,14 +551,14 @@ test("opening an order shows the form with the items plus box weight, then price
   const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: " 30.0 oz", kind: "sandbox" } });
   assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, by: "staff@example.test" });
   const buy = priced.blocks.find(block => block.type === "form");
-  assert.equal(buy.submit.action_id, "buy:1:order%3Aabc");
+  assert.equal(buy.submit.action_id, "buy:1:order%3Aabc:fresh");
   assert.equal(buy.fields[1].initial_value, "30");
   const service = buy.fields.find(field => field.action_id === "service");
   assert.deepEqual(service.options.map(option => option.label), ["USPS Ground Advantage · $5.10", "USPS Priority Mail · $9.35", "USPS Priority Mail Express · not available for this package"]);
   assert.equal(service.type, "radio", "every service and its price stay in view, as Shopify and WooCommerce Shipping list rates");
 
-  const bought = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, service: "PM", kind: "sandbox" } });
-  assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", by: "staff@example.test" });
+  const bought = await h.page({ type: "form_submit", action_id: buy.submit.action_id, values: { boxId: "box_small", weightOz: 30, service: "PM", kind: "sandbox" } });
+  assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", by: "staff@example.test", intent: "buy" });
   assert.equal(bought.toast.message, "Label bought, $9.35 sandbox. Tracking SANDBOX-TRACKING-A.");
   // The page after buying is read from Ship again; the stand-in still has no label, so the form shows again.
   assert.ok(bought.blocks.some(block => block.type === "form"));
@@ -742,13 +742,13 @@ test("a practice label skips the prices step, since Pitney Bowes is not asked", 
   const chosen = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, kind: "practice" } });
   assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 0);
   const form = chosen.blocks.find(block => block.type === "form");
-  assert.equal(form.submit.action_id, "buy:1:order%3Aabc");
+  assert.equal(form.submit.action_id, "buy:1:order%3Aabc:fresh");
   assert.equal(form.submit.label, "Make practice label");
   assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, "practice");
   assert.deepEqual(form.fields.find(field => field.action_id === "service").options.map(option => option.label), ["USPS Ground Advantage", "USPS Priority Mail", "USPS Priority Mail Express"]);
   assert.match(text(chosen), /no prices to see/);
-  const made = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, service: "GA", kind: "practice" } });
-  assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, service: "GA", kind: "practice", by: "staff@example.test" });
+  const made = await h.page({ type: "form_submit", action_id: form.submit.action_id, values: { boxId: "box_small", weightOz: 30, service: "GA", kind: "practice" } });
+  assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, service: "GA", kind: "practice", by: "staff@example.test", intent: "buy" });
   assert.equal(made.toast.message, "Practice label made.");
 });
 
@@ -785,7 +785,30 @@ test("an unbound or out-of-date replacement form never carries purchase approval
       assert.match(text(await press({ buyAgain })), /confirmation no longer applies/);
     }
     assert.equal(purchases.length, 1);
+    assert.equal(Object.hasOwn(purchases[0], "intent"), false, "old unchecked actions cannot authorize a first carrier POST");
   }
+});
+
+test("a TEST replacement form does not offer practice or discard its binding when practice is submitted", async () => {
+  const sent = [];
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+    "POST /v1/admin/orders/order%3Aabc/labels": body => {
+      sent.push(body);
+      return Response.json({ error: body.kind === "practice"
+        ? { code: "LABEL_ATTEMPT_CHANGED", message: "This confirmation does not apply to a practice label." }
+        : { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer.", retryTransactionId } }, { status: 409 });
+    },
+  } });
+  const values = { boxId: "box_small", weightOz: 31, service: "GA" };
+  const prompt = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc:fresh", values });
+  const form = prompt.blocks.find(block => block.type === "form");
+  assert.ok(form.fields.some(field => field.action_id === "buyAgain"));
+  assert.ok(!form.fields.some(field => field.action_id === "kind"));
+  const refused = await h.page({ type: "form_submit", action_id: form.submit.action_id, values: { ...values, kind: "practice" } });
+  assert.match(text(refused), /confirmation does not apply to a practice label/);
+  assert.equal(sent[1].retryTransactionId, retryTransactionId);
+  assert.equal(sent[1].intent, undefined);
 });
 
 test("Ship's refusals keep the order page, with the reason and what was typed", async () => {

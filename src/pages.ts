@@ -286,7 +286,7 @@ function labelForm(view: OrderView): Block[] {
       options: (Object.keys(SERVICES) as ServiceCode[]).map(code => ({ value: code, label: prices === undefined ? SERVICES[code]
         : `${SERVICES[code]} · ${prices[code] == null ? "not available for this package" : money(prices[code]!)}` })) });
   }
-  if (order.test) {
+  if (order.test && !buyAgain) {
     form.push({ type: "select", action_id: "kind", label: "Label kind", initial_value: practiceOnly || typed.kind === "practice" ? "practice" : "sandbox",
       options: [...(practiceOnly ? [] : [{ label: "Pitney Bowes sandbox (no charge)", value: "sandbox" }]),
         { label: "Practice label (no postage)", value: "practice" }] });
@@ -296,7 +296,7 @@ function labelForm(view: OrderView): Block[] {
   const blocks: Block[] = [
     ...(view.labelInputError && view.failure ? [banner("error", "Check label details", view.failure)] : []),
     { type: "form", block_id: `label-${order.orderId}-${quoted ? "buy" : "prices"}`, fields: form,
-    submit: quoted ? { label: practice ? "Make practice label" : "Buy label", action_id: action(`buy:${id}${buyAgain ? `:${buyAgain}` : ""}`) } : { label: "See prices", action_id: action(`prices:${id}`) } }];
+    submit: quoted ? { label: practice ? "Make practice label" : "Buy label", action_id: action(`buy:${id}:${buyAgain ?? "fresh"}`) } : { label: "See prices", action_id: action(`prices:${id}`) } }];
   if (prices !== undefined) blocks.push(context("Prices are for the box and weight above. Changed them? Press See prices again."));
   else if (quoted && practice && !practiceOnly) blocks.push(context("A practice label is free and asks Pitney Bowes nothing, so there are no prices to see. Want a sandbox label instead? Press See prices."));
   else if (quoted && buyAgain) blocks.push(context("Pitney Bowes has no record of the last label Ship bought for this order. Tick Buy a new label and press Buy label to buy one, with the service you chose."));

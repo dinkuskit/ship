@@ -284,7 +284,8 @@ test("a TEST order gets a free Pitney Bowes sandbox label that stays TEST, shows
   expect(page).toContain("free Pitney Bowes sandbox label");
   expect(page).toContain("Make sandbox label");
   expect(page).not.toContain("Postage is paid from your Pitney Bowes postage account");
-  const form = { version: "1", boxId, weightOz: "28", service: "PM" };
+  expect(page).toContain('name="intent" value="buy"');
+  const form = { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy" };
   const prices = await request("POST", `${orderPath}/prices`, { cookie, form });
   expect(prices.status).toBe(200);
   expect(await prices.text()).toContain("USPS Priority Mail: $9.35");
@@ -325,7 +326,7 @@ test("a TEST order whose sandbox answer was lost stays TEST when Ship finds the 
   await sendOrder();
   const cookie = await signedIn();
   const boxId = await setUp(cookie);
-  const buy = () => request("POST", `/stores/${site}/orders/${encodeURIComponent("order:abc")}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM" } });
+  const buy = () => request("POST", `/stores/${site}/orders/${encodeURIComponent("order:abc")}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy" } });
   pbAnswer = call => {
     if (call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments") throw new Error("connection reset");
     if (call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments") return Response.json(pbLabel("PM"));
@@ -526,7 +527,7 @@ async function liveOrder() {
   const boxId = await setUp(cookie);
   expect((await connect(cookie)).status).toBe(303);
   const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
-  const buy = (form: Record<string, string> = {}) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", ...form } });
+  const buy = (form: Record<string, string> = {}) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy", ...form } });
   return { cookie, boxId, orderPath, buy };
 }
 
@@ -677,7 +678,8 @@ test("when Pitney Bowes has no record of a lost purchase, the owner decides whet
   const ask = await buy();
   expect(ask.status).toBe(409);
   const retryTransactionId = (await ask.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
-  expect(retryTransactionId).toBe(creates()[0]!.headers.get("x-pb-transactionid"));
+  expect(retryTransactionId).toMatch(/^shp[a-z0-9]{22}$/);
+  expect(retryTransactionId).not.toBe(creates()[0]!.headers.get("x-pb-transactionid"));
   expect(creates()).toHaveLength(1);
   expect((await buy({ buyAgain: retryTransactionId! })).status).toBe(303);
   expect(creates()).toHaveLength(2);
@@ -804,7 +806,7 @@ test("a real order gets no label until the owner connects their own Pitney Bowes
   const cookie = await signedIn();
   const boxId = await setUp(cookie);
   const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
-  const form = { version: "1", boxId, weightOz: "28", service: "PM" };
+  const form = { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy" };
   expect(await (await request("GET", orderPath, { cookie })).text()).toContain("Connect your Pitney Bowes postage account in <a");
   for (const action of ["labels", "prices"]) {
     const refused = await request("POST", `${orderPath}/${action}`, { cookie, form });

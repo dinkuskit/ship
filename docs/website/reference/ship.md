@@ -69,7 +69,7 @@ If any item has no weight in Commerce, the plugin shows its weight as **Not set*
 
 On Ship's own order page, **Labels** keeps the full tracking number, package, postage and **Open PDF to print** / **Cancel label** actions together. On phones each label's fields stack rather than pushing its actions offscreen. Printing reopens the label already bought; it does not buy another one.
 
-If a label purchase's answer is lost, Ship checks whether Pitney Bowes made the original label before allowing a new one. **Buy a new label** confirms only the attempt Ship just checked. If someone is already checking the last label, Ship asks you to reopen the order in a moment instead of starting another check. If someone else already retried or the order changed, review the current order and check the label again; don't reuse the old confirmation.
+If a label purchase's answer is lost, Ship checks whether Pitney Bowes made the original label before allowing a new one. **Buy a new label** confirms only the attempt and order details Ship just checked. If someone is already checking the last label, Ship asks you to reopen the order in a moment instead of starting another check. If someone else already retried or the order changed, review the current order and check the label again; don't reuse the old confirmation. To switch from a sandbox retry to a practice label, go back to the label options first.
 
 ## Sandbox and practice labels
 
