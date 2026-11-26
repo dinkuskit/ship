@@ -81,7 +81,9 @@ export type SettingsForm = "ship-from" | "reply-to" | "boxes" | "postage";
 export type HistoryLabel = Label & { number: number | null };
 /** Fifty labels, newest first; `next` asks for the fifty after them. */
 export interface LabelHistory { labels: HistoryLabel[]; next: string | null }
-export interface LabelRequest { version: number; boxId: string; weightOz: number; service?: ServiceCode; kind?: "practice"; buyAgain?: true; by?: string }
+export interface LabelRequest { version: number; boxId: string; weightOz: number; service?: ServiceCode; kind?: "practice"; buyAgain?: true; by?: string; quoteId?: string; reviewedDimensions?: string }
+export interface LabelQuote { prices: Prices; quoteId?: string }
+export const quoteIdFrom = (value: unknown) => typeof value === "string" && /^[0-9a-f-]{36}$/.test(value) ? value : undefined;
 
 /** A refusal with a message the page can show as it is. */
 export class ShipError extends Error {
@@ -165,7 +167,7 @@ export interface Ship {
   siteId: string;
   orders(): Promise<ShipList>;
   order(orderId: string): Promise<{ order: ShipOrder; settings: ShipSettings }>;
-  prices(orderId: string, request: LabelRequest): Promise<Prices>;
+  prices(orderId: string, request: LabelRequest): Promise<LabelQuote>;
   buy(orderId: string, request: LabelRequest): Promise<Label>;
   cancel(labelId: string): Promise<{ labelId: string; refund: string | null }>;
   printLink(labelId: string): Promise<{ url: string; expiresAt: string }>;
@@ -271,7 +273,7 @@ export function ship(ctx: PluginContext, siteId: string, key: string, adminPage:
       return { orders: list.orders, settings: list.settings, open: typeof list.open === "string" && list.open ? list.open : null };
     },
     order: id => call("GET", `/v1/admin/orders/${segment(id)}`) as Promise<{ order: ShipOrder; settings: ShipSettings }>,
-    prices: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/prices`, request)) as { prices: Prices }).prices,
+    prices: (id, request) => call("POST", `/v1/admin/orders/${segment(id)}/prices`, request) as Promise<LabelQuote>,
     buy: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels`, request)) as { label: Label }).label,
     cancel: id => call("POST", `/v1/admin/labels/${segment(id)}/cancel`) as Promise<{ labelId: string; refund: string | null }>,
     printLink: id => call("POST", `/v1/admin/labels/${segment(id)}/print-link`) as Promise<{ url: string; expiresAt: string }>,

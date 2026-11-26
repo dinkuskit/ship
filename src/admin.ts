@@ -6,7 +6,7 @@ import {
 } from "./pages.js";
 import { settingsAdmin } from "./settings.js";
 import { cancelConnect, connectedTo, connectionState, finishSetup, startConnect, type ConnectView } from "./connect.js";
-import { adminPageFrom, adminUserFrom, ship, ShipError, type LabelRequest, type Prices, type Ship, type ShipOrder } from "./ship.js";
+import { adminPageFrom, adminUserFrom, quoteIdFrom, ship, ShipError, type LabelRequest, type Prices, type Ship, type ShipOrder } from "./ship.js";
 
 /** EmDash's Editor role; Administrators are above it. Lower roles never see Shipping. */
 const EDITOR = 40;
@@ -186,11 +186,11 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       const next = submitted?.next;
       if (next === "prices") return await openOrder(hosted, found.orderId, { typed: { ...typed, kind: undefined }, historyFrom });
       const prices = reviewedPrices(draft.prices);
-      const review = { reviewVersion: found.version, reviewDimensions: text(draft.dimensions), historyFrom };
+      const review = { reviewVersion: found.version, reviewDimensions: text(draft.dimensions), quoteId: quoteIdFrom(draft.quoteId), historyFrom };
       if (next === "practice") {
         return await openOrder(hosted, found.orderId, { ...review, typed: { ...typed, kind: "practice", service: undefined, sandboxService: service } });
       }
-      if (!service || !Object.hasOwn(SERVICES, service) || kind !== "practice" && prices?.[service as keyof Prices] === undefined) return { blocks: [] };
+      if (!service || !Object.hasOwn(SERVICES, service) || kind !== "practice" && (!review.quoteId || prices?.[service as keyof Prices] === undefined)) return { blocks: [] };
       return await openOrder(hosted, found.orderId, { ...review, typed, prices, confirmLabel: submitted !== null });
     }
     if (input.type === "form_submit" || input.type === "block_action" && input.action_id.startsWith("buy:")) {
@@ -202,10 +202,12 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       const values = input.type === "block_action" ? fields(input.value) : quote ? input.values : actionDraft(found.detail);
       if (!values) return buy ? await openOrder(hosted, found.orderId, { historyFrom }) : { blocks: [] };
       const typed = labelDraft(values);
-      const [preferred, replacement] = (found.detail ?? "").split(",");
+      const options = quote ? (found.detail ?? "").split(",") : [];
+      const openedForPractice = options.includes("practice");
       if (quote) {
-        typed.replace = preferred === "replace" || replacement === "replace";
-        typed.service = preferred && Object.hasOwn(SERVICES, preferred) ? preferred : undefined;
+        typed.replace = options.includes("replace");
+        typed.service = options.find(option => Object.hasOwn(SERVICES, option));
+        if (openedForPractice) typed.kind = "practice";
       }
       const approveReplacement = buy && typed.replace === true && typed.kind !== "practice"
         && input.type === "form_submit" && input.values.buyAgain === true;
@@ -229,20 +231,25 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
         const dimensions = box && boxDimensions(box);
         const practiceOnly = order.test && !settings.testSandbox;
         const practice = order.test && (practiceOnly || request.kind === "practice");
-        const review = { reviewVersion: found.version, reviewDimensions: dimensions, historyFrom };
+        const review = { reviewVersion: found.version, reviewDimensions: dimensions, quoteId: quoteIdFrom(values.quoteId), historyFrom };
         const stale = () => orderPage({ order, settings, siteId: hosted.siteId, typed, historyFrom, reviewVersion: found.version });
         // Capture the box before requesting rates, then re-read when displaying them.
-        // A new size can keep the same box ID and the Commerce order version.
+        // Commerce's order revision does not track changes to Ship settings.
         if (order.version !== found.version || !box) return stale();
         if (quote) {
           if (practice) {
             return orderPage({ order, settings, siteId: hosted.siteId, ...review, typed: { ...typed, kind: "practice",
-              ...(practiceOnly ? {} : { service: undefined, sandboxService: typed.service }) } });
+              ...(practiceOnly || openedForPractice ? {} : { service: undefined, sandboxService: typed.service }) } });
           }
-          const prices = await hosted.prices(found.orderId, request);
-          return await openOrder(hosted, found.orderId, { ...review, prices, typed });
+          const { prices, quoteId } = await hosted.prices(found.orderId, request);
+          const issued = quoteIdFrom(quoteId);
+          if (!issued) throw new ShipError("QUOTE_UNAVAILABLE", "Ship could not confirm these rates for purchase. Open in Ship to review and buy a label.");
+          return await openOrder(hosted, found.orderId, { ...review, quoteId: issued, prices, typed });
         }
         if (dimensions !== text(values.dimensions) || practice !== (request.kind === "practice") || !request.service) return stale();
+        if (!practice && !review.quoteId) throw new ShipError("QUOTE_CHANGED", "Check prices again before buying a label.");
+        if (practice) request.reviewedDimensions = dimensions;
+        else request.quoteId = review.quoteId;
         if (!practice && typed.replace && !approveReplacement) {
           const prices = reviewedPrices(values.prices);
           return orderPage({ order, settings, siteId: hosted.siteId, ...review, typed, prices, confirmLabel: true,

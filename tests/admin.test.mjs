@@ -534,6 +534,8 @@ test("known item weights keep the old total; labelled and completed orders need 
 const controls = page => page.blocks.flatMap(block => block.type === "actions" ? block.elements : []);
 const button = (page, name) => controls(page).find(element => element.type === "button" && element.label === name);
 const formOn = page => page.blocks.find(block => block.type === "form");
+const QUOTE = "b18cea54-82ae-4782-a1d1-f6ea459aa7f1";
+const reviewed = prices => ({ prices, quoteId: QUOTE });
 const servicePicker = page => formOn(page).fields.find(field => field.action_id === "service");
 const press = (h, element, value = element.value) => h.page({ type: "block_action", action_id: element.action_id, value });
 const submit = (h, page, values) => h.page({ type: "form_submit", action_id: formOn(page).submit.action_id, values });
@@ -544,7 +546,7 @@ test("opening an order shows the form with the items plus box weight, then price
   const sent = [];
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
-    "POST /v1/admin/orders/order%3Aabc/prices": body => { sent.push(body); return Response.json({ prices: { GA: 510, PM: 935, EM: null } }); },
+    "POST /v1/admin/orders/order%3Aabc/prices": body => { sent.push(body); return Response.json(reviewed({ GA: 510, PM: 935, EM: null })); },
     "POST /v1/admin/orders/order%3Aabc/labels": body => { sent.push(body); return Response.json({ label: label({ service: body.service }) }, { status: 201 }); },
     "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
   } });
@@ -571,7 +573,7 @@ test("opening an order shows the form with the items plus box weight, then price
   assert.equal(buy.value.weightOz, 30);
   assert.match(text(selected), /USPS Priority Mail · \$9\.35/);
   const bought = await press(h, buy);
-  assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", by: "staff@example.test" });
+  assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", quoteId: QUOTE, by: "staff@example.test" });
   assert.equal(bought.toast.message, "Label bought, $9.35 sandbox. Tracking SANDBOX-TRACKING-A.");
   // The page after buying is read from Ship again; the stand-in still has no label, so the form shows again.
   assert.ok(bought.blocks.some(block => block.type === "form"));
@@ -580,7 +582,7 @@ test("opening an order shows the form with the items plus box weight, then price
 test("Shipments falls back to a quoted service when Ground Advantage is unavailable", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
-    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: null, PM: 0 } },
+    "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ GA: null, PM: 0 }),
   } });
   const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: {
     boxId: "box_small", weightOz: "30", kind: "sandbox", service: "GA",
@@ -594,7 +596,7 @@ test("Shipments falls back to a quoted service when Ground Advantage is unavaila
 test("See prices again keeps the reviewed draft and selected service if still available", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
-    "POST /v1/admin/orders/order%3Aabc/prices": body => Response.json({ prices: { GA: 510, PM: body.weightOz === 32 ? null : 935 } }),
+    "POST /v1/admin/orders/order%3Aabc/prices": body => Response.json(reviewed({ GA: 510, PM: body.weightOz === 32 ? null : 935 })),
   } });
   const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: "30", kind: "sandbox" } });
   const edit = formOn(await pick(h, priced, "PM", "prices"));
@@ -610,7 +612,7 @@ test("reviewing a quote after the order changes returns to pricing without buyin
   let version = 1;
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: { ...order(), version }, settings }),
-    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { PM: 935 } },
+    "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ PM: 935 }),
   } });
   const quoted = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: "30" } });
   version = 2;
@@ -628,7 +630,7 @@ test("changing a saved box in place invalidates its rates at review and purchase
     "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order(), settings: { ...settings, boxes: [{ ...box, lengthIn }] } }),
     "POST /v1/admin/orders/order%3Aabc/prices": () => {
       if (resizeOnPrice) lengthIn++;
-      return Response.json({ prices: { PM: 935 } });
+      return Response.json(reviewed({ PM: 935 }));
     },
   } });
   const price = page => submit(h, page, { boxId: "box_small", weightOz: "30" });
@@ -675,7 +677,7 @@ test("practice-only TEST orders choose a service and review before creating a la
 test("a quoted TEST order keeps independent sandbox and practice service choices", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
-    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: null, PM: 950, EM: null } },
+    "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ GA: null, PM: 950, EM: null }),
     "POST /v1/admin/orders/order%3Aabc/labels": () => Response.json({ error: { code: "FIXTURE", message: "No label was made." } }, { status: 422 }),
   } });
   const draft = { boxId: "box_small", weightOz: "30" };
@@ -700,7 +702,7 @@ test("no USPS rates keeps the package editable without offering to buy, then a r
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings: { ...settings, boxes: [box, tall] } },
     "POST /v1/admin/orders/order%3Aabc/prices": body => Response.json({
-      prices: { GA: null, PM: null, EM: body.weightOz === 31 ? 1200 : null },
+      ...reviewed({ GA: null, PM: null, EM: body.weightOz === 31 ? 1200 : null }),
     }),
   } });
   const values = { boxId: "box_tall", weightOz: "30", kind: "sandbox" };
@@ -722,7 +724,7 @@ test("no USPS rates keeps the package editable without offering to buy, then a r
 test("from an unquoted practice label the sandbox opens the price step, not a buy form", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
-    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: null, PM: null, EM: null } },
+    "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ GA: null, PM: null, EM: null }),
   } });
   const draft = { boxId: "box_small", weightOz: "30" };
   const unquoted = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { ...draft, kind: "sandbox" } });
@@ -811,7 +813,7 @@ test("replacement uses fresh rates and sends approval only from the final review
       "POST /v1/admin/orders/order%3Aabc/labels": body => { sent.push(["labels", body]); return attempts++ === 0
         ? Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes has no record of the last label." } }, { status: 409 })
         : Response.json({ label: label({ test: isTest, service: body.service }) }, { status: 201 }); },
-      "POST /v1/admin/orders/order%3Aabc/prices": body => { sent.push(["prices", body]); return Response.json({ prices: body.boxId === "box_tall" ? { EM: 1210 } : { PM: 950 } }); },
+      "POST /v1/admin/orders/order%3Aabc/prices": body => { sent.push(["prices", body]); return Response.json(reviewed(body.boxId === "box_tall" ? { EM: 1210 } : { PM: 950 })); },
     } });
     const buy = isTest ? "Create TEST label" : "Buy label";
     const first = await submit(h, await open(h), { boxId: "box_small", weightOz: "31" });
@@ -840,7 +842,7 @@ test("replacement uses fresh rates and sends approval only from the final review
       ["prices", "box_tall", 37.5, undefined], ["prices", "box_tall", 38, undefined],
     ]);
     const bought = await submit(h, unchecked, { buyAgain: true });
-    assert.deepEqual(sent.at(-1), ["labels", { version: 1, boxId: "box_tall", weightOz: 38, service: "EM", buyAgain: true, by: "staff@example.test" }]);
+    assert.deepEqual(sent.at(-1), ["labels", { version: 1, boxId: "box_tall", weightOz: 38, service: "EM", buyAgain: true, quoteId: QUOTE, by: "staff@example.test" }]);
     assert.match(bought.toast.message, /Label bought/);
   }
 });
@@ -893,8 +895,51 @@ test("a practice label skips the prices step, since Pitney Bowes is not asked", 
   assert.deepEqual(servicePicker(chosen).options.map(option => option.label), ["USPS Ground Advantage", "USPS Priority Mail", "USPS Priority Mail Express"]);
   assert.match(text(chosen), /A practice label is free and asks Pitney Bowes nothing/);
   const made = await press(h, buy);
-  assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, service: "GA", kind: "practice", by: "staff@example.test" });
+  assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, service: "GA", kind: "practice", reviewedDimensions: "8:6:4", by: "staff@example.test" });
   assert.equal(made.toast.message, "Practice label made.");
+});
+
+test("Choose a service stays in practice when sandbox becomes available", async () => {
+  let sandbox = false;
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order(), settings: { ...settings, testSandbox: sandbox } }),
+    "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ PM: 950 }),
+  } });
+  const opened = await open(h);
+  assert.equal(formOn(opened).submit.label, "Choose a service");
+  sandbox = true;
+  const chosen = await submit(h, opened, { boxId: "box_small", weightOz: 30 });
+  assert.equal(formOn(chosen).submit.label, "Review practice label");
+  assert.deepEqual(servicePicker(chosen).options.map(o => o.value), ["GA", "PM", "EM"]);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 0);
+});
+
+test("returning from a stale practice review retains the sandbox service preference", async () => {
+  let currentBox = box;
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order(), settings: { ...settings, boxes: [currentBox] } }),
+    "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ GA: 510, PM: 950 }),
+  } });
+  const pack = { boxId: "box_small", weightOz: 30, kind: "sandbox" };
+  const rates = await submit(h, await open(h), pack);
+  const practice = await pick(h, rates, "PM", "practice");
+  currentBox = { ...box, heightIn: 5 }; // Simulate settings changed since the review was rendered.
+  const stale = await pick(h, practice, "GA");
+  assert.match(text(stale), /order or package changed/);
+  const repriced = await submit(h, stale, pack);
+  assert.equal(servicePicker(repriced).initial_value, "PM");
+});
+
+test("missing receipt or old label action returns to review instead of sending a buy", async () => {
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: 510 } },
+  } });
+  const priced = await submit(h, await open(h), { boxId: "box_small", weightOz: 30 });
+  assert.match(text(priced), /Open in Ship to review and buy/);
+  const old = await h.page({ type: "block_action", action_id: "buy:1:order%3Aabc", value: { boxId: "box_small", weightOz: 30, service: "GA", dimensions: "8:6:4" } });
+  assert.match(text(old), /Check prices again before buying/);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
 });
 
 test("a Completed order keeps its label's Print and Cancel, and gets no form", async () => {
@@ -914,7 +959,7 @@ test("Ship's refusals keep the order page, with the reason and what was typed", 
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
     "POST /v1/admin/orders/order%3Aabc/labels": () => Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer the last time." } }, { status: 409 }),
-    "POST /v1/admin/orders/order%3Aabc/prices": body => body.weightOz === 30 ? Response.json({ prices: { GA: 510 } })
+    "POST /v1/admin/orders/order%3Aabc/prices": body => body.weightOz === 30 ? Response.json(reviewed({ GA: 510 }))
       : Response.json({ error: { code: "ORDER_CHANGED", message: "The order changed in Commerce since this page opened." } }, { status: 409 }),
   } });
   const quote = await submit(h, await open(h), { boxId: "box_small", weightOz: "30" });
@@ -1217,7 +1262,7 @@ test("the label history return survives cancellation and a replacement label quo
     "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order({ label: active ? bought : null, labels: [active ? bought : cancelled] }), settings }),
     "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/test-fixture", expiresAt: "2026-10-20T00:05:00.000Z" },
     "POST /v1/admin/labels/label_1/cancel": () => { active = false; return Response.json({ labelId: "label_1", refund: null }); },
-    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: 510, PM: 935, EM: null } },
+    "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ GA: 510, PM: 935, EM: null }),
   } });
   const use = control => h.page({ type: "block_action", action_id: control.action_id, value: control.value });
   const fromHistory = await use({ action_id: "history", value: { cursor } });

@@ -18,6 +18,8 @@ let issuer: string;
 let privateKey: CryptoKey;
 let sessionKey: string;
 let pbCalls: { method: string; path: string; body: any }[];
+let shipmentAnswer: ((method: string) => Promise<Response> | Response | undefined) | undefined;
+let unavailable: string | undefined;
 
 const configured = () => ({
   ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: `${issuer}/jwks`,
@@ -32,6 +34,8 @@ beforeEach(async () => {
   privateKey = keys.privateKey;
   const jwk = { ...await exportJWK(keys.publicKey), kid: "synthetic", alg: "ES256", use: "sig" };
   pbCalls = [];
+  shipmentAnswer = undefined;
+  unavailable = undefined;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new Request(input, init).url;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
@@ -41,7 +45,13 @@ beforeEach(async () => {
     const path = new URL(url).pathname, method = init?.method ?? "GET";
     pbCalls.push({ method, path, body });
     if (path === "/oauth/token") return Response.json({ access_token: "synthetic-pb-pass", tokenType: "BearerToken", expiresIn: 36000 });
-    if (path === "/shippingservices/v1/rates") return Response.json({ rates: [{ ...body.rates[0], totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }] });
+    if (path === "/shippingservices/v1/rates") return unavailable === body.rates[0].serviceId
+      ? new Response(null, { status: 400 })
+      : Response.json({ rates: [{ ...body.rates[0], totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }] });
+    if (path === "/shippingservices/v1/shipments") {
+      const override = shipmentAnswer?.(method);
+      if (override) return override;
+    }
     if (path === "/shippingservices/v1/shipments" && method === "POST") return Response.json({
       shipmentId: "SANDBOX-SHIPMENT-A", parcelTrackingNumber: "SANDBOX-TRACKING-A",
       rates: [{ carrier: "USPS", serviceId: body.rates[0].serviceId, parcelType: "PKG", totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }],
@@ -114,10 +124,10 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   const form = { version: 1, boxId, weightOz: 28 };
   const prices = await call("POST", "/v1/admin/orders/order%3Aabc/prices", { body: form });
   expect(prices.status).toBe(200);
-  expect(prices.json).toEqual({ prices: { GA: 510, PM: 935, EM: 3120 } });
+  expect(prices.json).toEqual({ prices: { GA: 510, PM: 935, EM: 3120 }, quoteId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
 
   expect((await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { ...form, service: "PM" } })).json.error.code).toBe("INVALID_INPUT");
-  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { ...form, service: "PM", by: "staff@example.test" } });
+  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { ...form, service: "PM", quoteId: prices.json.quoteId, by: "staff@example.test" } });
   expect(bought.status).toBe(201);
   expect(bought.json.label).toMatchObject({ orderId: "order:abc", version: 1, test: true, practice: false, service: "PM", tracking: "SANDBOX-TRACKING-A", status: "bought", priceCents: 935, createdBy: "admin:staff@example.test" });
   expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(1);
@@ -146,6 +156,58 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   expect(after.json.order.labels).toMatchObject([{ status: "cancelled", refund: "INITIATED" }]);
   expect((await call("GET", "/v1/admin/orders")).json.orders[0].labelStatus).toBe("cancelled");
   expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).json.error.code).toBe("NOT_FOUND");
+});
+
+test("a quote only applies to its eligible services, package and expiry", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const path = "/v1/admin/orders/order%3Aabc";
+  const form = { version: 1, boxId, weightOz: 28 };
+  unavailable = "EM";
+  const { quoteId } = (await call("POST", `${path}/prices`, { body: form })).json;
+  const buy = (extra: Record<string, unknown> = {}) => call("POST", `${path}/labels`, {
+    body: { ...form, service: "GA", quoteId, by: "staff@example.test", ...extra },
+  });
+  for (const change of [{ service: "EM" }, { weightOz: 29 }, { quoteId: null }, { quoteId: crypto.randomUUID() }]) {
+    const result = await buy(change);
+    expect(result).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  }
+  await runInDurableObject(shipStore(), async (_, state) => state.storage.sql.exec("UPDATE label_quotes SET expires_at = 0"));
+  expect((await buy()).json.error.code).toBe("QUOTE_CHANGED");
+  expect(pbCalls.filter(c => c.path === "/shippingservices/v1/shipments")).toHaveLength(0);
+  expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
+  const fresh = (await call("POST", `${path}/prices`, { body: form })).json.quoteId;
+  expect((await buy({ quoteId: fresh })).status).toBe(201);
+});
+
+test("removing the reviewed box during carrier lookup keeps the unresolved purchase and buys nothing new", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const path = "/v1/admin/orders/order%3Aabc";
+  const form = { version: 1, boxId, weightOz: 28 };
+  const { quoteId } = (await call("POST", `${path}/prices`, { body: form })).json;
+  const buy = (buyAgain?: boolean) => call("POST", `${path}/labels`, { body: { ...form, service: "GA", quoteId, buyAgain, by: "staff@example.test" } });
+  shipmentAnswer = () => new Response(null, { status: 504 });
+  expect((await buy()).status).toBe(502);
+  let markEntered!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { markEntered = resolve; });
+  const paused = new Promise<void>(resolve => { release = resolve; });
+  shipmentAnswer = async method => {
+    if (method !== "GET") return new Response(null, { status: 400 });
+    markEntered();
+    await paused;
+    return new Response(null, { status: 404 });
+  };
+  const replacement = buy(true);
+  await entered;
+  try { expect((await call("POST", `/v1/admin/settings/boxes/${boxId}/remove`)).status).toBe(200); }
+  finally { release(); }
+  expect((await replacement).json.error.code).toBe("QUOTE_CHANGED");
+  expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(1);
+  expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT state FROM purchases").toArray()).toEqual([{ state: "unknown" }]);
+  });
 });
 
 test("orders, labels and settings stored before item options keep working, and options sent later come through the real routes (commerce#264)", async () => {

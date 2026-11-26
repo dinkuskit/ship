@@ -140,14 +140,15 @@ export async function showAdminOrder(store: Store, orderId: string): Promise<Out
 }
 
 export async function quoteAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {
-  const outcome = await outcomeOf(store.quoteLabel({ orderId, fields: labelFields(body(input), ["version", "boxId", "weightOz"]) }));
-  return outcome.ok ? ok({ prices: outcome.body }) : outcome;
+  return outcomeOf(store.quoteLabel({ orderId, review: true, fields: labelFields(body(input), ["version", "boxId", "weightOz"]) }));
 }
 
 export async function buyAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {
-  const fields = labelFields(body(input), ["version", "boxId", "weightOz", "service", "kind"]);
-  if (body(input).buyAgain === true) fields.buyAgain = "yes";
-  const outcome = await outcomeOf(store.buyLabel({ orderId, fields, uid: actor(body(input)) }));
+  const payload = body(input);
+  const fields = labelFields(payload, ["version", "boxId", "weightOz", "service", "kind", "reviewedDimensions"]);
+  if (Object.hasOwn(payload, "quoteId")) fields.quoteId = typeof payload.quoteId === "string" && /^[0-9a-f-]{36}$/.test(payload.quoteId) ? payload.quoteId : "";
+  if (payload.buyAgain === true) fields.buyAgain = "yes";
+  const outcome = await outcomeOf(store.buyLabel({ orderId, fields, uid: actor(payload) }));
   return outcome.ok ? ok({ label: outcome.body }, 201) : outcome;
 }
 

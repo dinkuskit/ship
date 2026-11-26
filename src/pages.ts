@@ -12,6 +12,8 @@ export interface OrderView {
   order: ShipOrder; settings: ShipSettings; siteId: string;
   /** Prices Ship quoted for the typed box and weight, when "See prices" was pressed. */
   prices?: Prices;
+  /** Ship's receipt for the box, weight and eligible services. */
+  quoteId?: string;
   /** Package and rates as reviewed for this Commerce order revision. */
   reviewVersion?: number;
   reviewDimensions?: string;
@@ -277,7 +279,7 @@ function labelReview(view: OrderView, box: Box, packed: number, practice: boolea
   const service = options.find(option => option.value === typed.service)?.value ?? options[0]!.value;
   const id = `${order.version}:${encodeURIComponent(order.orderId)}`;
   const draft = { boxId: box.boxId, weightOz: packed, service, dimensions: boxDimensions(box), replace: typed.replace,
-    ...(practice ? { kind: "practice", sandboxService: typed.sandboxService } : {}) };
+    ...(practice ? { kind: "practice", sandboxService: typed.sandboxService } : { quoteId: view.quoteId }) };
   const action = (verb: string) => orderAction(`${verb}:${id}`, view.historyFrom);
   const packageLine = section(`${box.name}: ${box.lengthIn} × ${box.widthIn} × ${box.heightIn} in · Package ${weight(packed)}`);
   const edit = { type: "button" as const,
@@ -327,7 +329,7 @@ function labelForm(view: OrderView): Block[] {
     const review = labelReview(view, box, packed, practice);
     if (review) return review;
   }
-  const preferred = services.find(option => option.value === typed.service)?.value;
+  const preferred = services.find(option => option.value === (practice && !practiceOnly ? typed.sandboxService : typed.service))?.value;
   const form: FormField[] = [
     { type: "select", action_id: "boxId", label: "Box", options: settings.boxes.map(boxOption), initial_value: box.boxId },
     // A text field: the browser's number field rejects most tenths of an ounce as "not a valid value".
@@ -337,7 +339,7 @@ function labelForm(view: OrderView): Block[] {
     form.push({ type: "select", action_id: "kind", label: "Label kind", initial_value: practice ? "practice" : "sandbox",
       options: [{ label: "Pitney Bowes sandbox (no charge)", value: "sandbox" }, { label: "Practice label (no postage)", value: "practice" }] });
   }
-  const detail = [preferred, typed.replace ? "replace" : undefined].filter(Boolean).join(",");
+  const detail = [preferred, typed.replace ? "replace" : undefined, practiceOnly ? "practice" : undefined].filter(Boolean).join(",");
   return [
     ...(view.labelInputError && view.failure ? [banner("error", "Check label details", view.failure)] : []),
     ...(view.reviewVersion !== undefined && !currentReview ? [section("The order or package changed. Check these details before continuing.")] : []),

@@ -49,6 +49,10 @@ export interface Settings {
   testSandbox: boolean;
 }
 export type Quotes = Partial<Record<ServiceCode, number | null>>;
+export interface LabelQuote { prices: Quotes; quoteId?: string }
+type QuoteBox = { length_in: number; width_in: number; height_in: number };
+const quoteDimensions = (box: Box) => `${box.lengthIn}:${box.widthIn}:${box.heightIn}`;
+const QUOTE_LIFETIME_MS = 15 * 60_000;
 /** The owner's PB postage account as Ship keeps it: never their PB password. */
 export interface PostageAccount {
   shipperId: string; company: string | null; email: string | null;
@@ -237,6 +241,11 @@ export class StoreShipping extends DurableObject<Env> {
       transaction_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL, service TEXT NOT NULL, box TEXT NOT NULL,
       weight_oz REAL NOT NULL, state TEXT NOT NULL, created_by TEXT NOT NULL, created_at INTEGER NOT NULL)`);
     addPurchaseColumns(this.sql);
+    this.sql.exec(`CREATE TABLE IF NOT EXISTS label_quotes (
+      quote_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL,
+      box_id TEXT NOT NULL, dimensions TEXT NOT NULL, weight_oz REAL NOT NULL, services TEXT NOT NULL,
+      shipper_id TEXT NOT NULL, test INTEGER NOT NULL, expires_at INTEGER NOT NULL)`);
+    this.sql.exec("CREATE INDEX IF NOT EXISTS label_quotes_expiry ON label_quotes (expires_at)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS labels_by_order ON labels (order_id, created_at)");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS shipped_emails (
       order_id TEXT NOT NULL, completed_at TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
@@ -256,7 +265,7 @@ export class StoreShipping extends DurableObject<Env> {
     const expected = JSON.stringify({ recipient: config.recipient, generation: config.generation, site: config.site });
     if (kept && kept !== expected) throw new ServiceError(403, "FORBIDDEN", "storage generation does not match");
     if (!kept) {
-      if (this.sql.exec<{ n: number }>("SELECT (SELECT COUNT(*) FROM orders) + (SELECT COUNT(*) FROM sessions) + (SELECT COUNT(*) FROM labels) + (SELECT COUNT(*) FROM label_events) + (SELECT COUNT(*) FROM purchases) + (SELECT COUNT(*) FROM boxes) + (SELECT COUNT(*) FROM store_meta) + (SELECT COUNT(*) FROM shipped_emails) + (SELECT COUNT(*) FROM tracking_work) AS n").one().n) throw new ServiceError(403, "FORBIDDEN", "isolated storage must start empty");
+      if (this.sql.exec<{ n: number }>("SELECT (SELECT COUNT(*) FROM orders) + (SELECT COUNT(*) FROM sessions) + (SELECT COUNT(*) FROM labels) + (SELECT COUNT(*) FROM label_events) + (SELECT COUNT(*) FROM purchases) + (SELECT COUNT(*) FROM label_quotes) + (SELECT COUNT(*) FROM boxes) + (SELECT COUNT(*) FROM store_meta) + (SELECT COUNT(*) FROM shipped_emails) + (SELECT COUNT(*) FROM tracking_work) AS n").one().n) throw new ServiceError(403, "FORBIDDEN", "isolated storage must start empty");
       this.setMeta("isolation_tuple", expected);
     }
   }
@@ -555,6 +564,9 @@ export class StoreShipping extends DurableObject<Env> {
     const box = settings.boxes.find(candidate => candidate.boxId === fields.boxId);
     if (!box) refuse("INVALID_INPUT", "Pick one of your box sizes. Add box sizes in Settings.");
     const weightOz = formNumber(fields, "weightOz", "Package weight (oz)", 0.1, MAX_WEIGHT_OZ);
+    if (fields.reviewedDimensions !== undefined && fields.reviewedDimensions !== quoteDimensions(box)) {
+      refuse("BOX_CHANGED", "The box changed. Check the package again before making the label.", 409);
+    }
     const to = summary.address as Extract<LabelAddress, { ok: true }>;
     const from = settings.shipFrom;
     const shipment = (code: ServiceCode): PbShipment => ({
@@ -575,8 +587,26 @@ export class StoreShipping extends DurableObject<Env> {
     return this.sql.exec<Purchase>("SELECT * FROM purchases WHERE order_id = ? ORDER BY created_at LIMIT 1", orderId).toArray()[0];
   }
 
+  /** Compare the reviewed package and eligible service at the point of purchase, not on a separate HTTP read. */
+  private checkQuote(request: Awaited<ReturnType<StoreShipping["labelRequest"]>>, id: unknown): void {
+    const { box, order, weightOz, service } = request;
+    const stale = () => refuse("QUOTE_CHANGED", "The reviewed rates no longer apply. Check prices again before buying a label.", 409);
+    if (typeof id !== "string" || !id) return stale();
+    const currentBox = this.sql.exec<QuoteBox>("SELECT length_in, width_in, height_in FROM boxes WHERE box_id = ?", box.boxId).toArray()[0];
+    const dimensions = quoteDimensions(box);
+    if (!currentBox || `${currentBox.length_in}:${currentBox.width_in}:${currentBox.height_in}` !== dimensions) return stale();
+    const current = this.sql.exec<{ record: string }>("SELECT record FROM orders WHERE order_id = ? AND version = ?", order.orderId, order.version).toArray()[0];
+    const latest = current ? JSON.parse(current.record) as ShipOrder : null;
+    if (!latest || latest.status !== "processing" || latest.test !== order.test || JSON.stringify(latest.shipTo) !== JSON.stringify(order.shipTo)) return stale();
+    const reviewed = this.sql.exec<{ services: string }>(`SELECT services FROM label_quotes
+      WHERE quote_id = ? AND order_id = ? AND version = ? AND box_id = ? AND dimensions = ? AND weight_oz = ?
+      AND shipper_id = ? AND test = ? AND expires_at > ?`, id, order.orderId, order.version, box.boxId,
+      dimensions, weightOz, this.postageConfig(order.test).shipperId, order.test ? 1 : 0, Date.now()).toArray()[0];
+    if (!reviewed?.services.split(",").includes(service)) return stale();
+  }
+
   /** What each USPS service costs for this package, from the store's PB postage account (or PB's sandbox for a TEST order). */
-  async quoteLabel(input: { orderId: string; fields: Fields }): Promise<Outcome> {
+  async quoteLabel(input: { orderId: string; fields: Fields; review?: boolean }): Promise<Outcome> {
     try {
       const request = await this.labelRequest(input.orderId, input.fields, false);
       if (request.order.test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "Practice labels for TEST orders are free.", 409);
@@ -590,7 +620,17 @@ export class StoreShipping extends DurableObject<Env> {
         const result = prices[index]!;
         quotes[code] = result.status === "fulfilled" ? result.value : null;
       });
-      return ok(quotes);
+      const result: LabelQuote = { prices: quotes };
+      if (input.review) {
+        const now = Date.now(), quoteId = crypto.randomUUID();
+        this.sql.exec("DELETE FROM label_quotes WHERE expires_at <= ?", now);
+        this.sql.exec(`INSERT INTO label_quotes (quote_id, order_id, version, box_id, dimensions, weight_oz, services, shipper_id, test, expires_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, quoteId, request.order.orderId, request.order.version, request.box.boxId,
+          quoteDimensions(request.box), request.weightOz, codes.filter(code => quotes[code] != null).join(","),
+          config.shipperId, request.order.test ? 1 : 0, now + QUOTE_LIFETIME_MS);
+        result.quoteId = quoteId;
+      }
+      return ok(result);
     } catch (error) {
       return toOutcome(asServiceError(error));
     }
@@ -608,9 +648,10 @@ export class StoreShipping extends DurableObject<Env> {
   async buyLabel(input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
     try {
       const request = await this.labelRequest(input.orderId, input.fields, true);
-      if (!request.order.test) return await this.postageLabel(request, input);
-      return testUsesSandbox(this.env) && input.fields.kind !== "practice"
-        ? await this.postageLabel(request, input) : this.practiceLabel(request, input.uid);
+      const practice = request.order.test && (!testUsesSandbox(this.env) || input.fields.kind === "practice");
+      if (!practice) return await this.postageLabel(request, input);
+      if (input.fields.quoteId !== undefined) refuse("QUOTE_CHANGED", "That quote was for postage. Choose a practice label from the current label options.", 409);
+      return this.practiceLabel(request, input.uid);
     } catch (error) {
       return toOutcome(asServiceError(error));
     }
@@ -650,6 +691,8 @@ export class StoreShipping extends DurableObject<Env> {
     if (order.test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "TEST orders get practice labels while Ship is not on the Pitney Bowes sandbox.", 409);
     const config = this.postageConfig(order.test);
     const earlier = this.openPurchase(order.orderId);
+    const quoteId = input.fields.quoteId;
+    if (quoteId !== undefined) this.checkQuote(request, quoteId);
     if (earlier) {
       if (earlier.state === "pending" && Date.now() - earlier.created_at < IN_FLIGHT_MS) {
         refuse("LABEL_IN_PROGRESS", "Ship is buying a label for this order right now. Reload the page in a moment.", 409);
@@ -659,6 +702,9 @@ export class StoreShipping extends DurableObject<Env> {
       if (input.fields.buyAgain !== "yes") {
         refuse("CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", 409);
       }
+      // A box can be removed while the carrier lookup is in flight. Leave the
+      // original purchase intact if the reviewed package can no longer be used.
+      if (quoteId !== undefined) this.checkQuote(request, quoteId);
       this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? AND state = ?", earlier.transaction_id, earlier.state);
     }
     // Nothing above may have changed while Ship waited on Pitney Bowes.
