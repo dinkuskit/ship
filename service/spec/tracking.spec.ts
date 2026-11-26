@@ -200,10 +200,11 @@ test("the daily check records a recovered delivery in the carrier's time zone", 
   expect(earlier.json.responses[0].statusCode).toBe(200);
   expect((await labelOf(tracking)).delivery).toMatchObject({ state: "out_for_delivery", at: "2026-10-22T14:00:00.000Z" });
 
-  // PB's summary and delivered scan use destination-local time. The delivery webhook never arrived.
+  // The delivery webhook never arrived. The scan is at 15:15Z; Ship uses
+  // the delivery summary's timestamp, while the scan supplies the note.
   trackAnswer = () => Response.json({ trackingNumber: tracking, status: "Delivered", deliveryDate: "2026-10-22",
     deliveryTime: "11:30:00", deliveryTimeOffset: "-04:00", scanDetailsList: [
-      { packageStatus: "Delivered", eventDate: "2026-10-22", eventTime: "11:30:00", eventTimeOffset: "-04:00", scanDescription: "Delivered, Front Door" },
+      { packageStatus: "Delivered", eventDate: "2026-10-22", eventTime: "10:15:00", eventTimeOffset: "-05:00", scanDescription: "Delivered, Front Door" },
     ],
   });
   await checkDeliveries(env as unknown as Env);
