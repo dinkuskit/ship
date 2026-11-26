@@ -46,9 +46,12 @@ const ROUTES: PageRoute[] = [
       const summary = await store.orderSummary(params[0]!);
       if (!summary) return messagePage("Order not found", outcome.message, { href: `${storePath(site)}/orders`, text: "Back to orders" }, 404);
       const retry = outcome.detail?.retryTransactionId;
-      const retryTransactionId = outcome.code === "CHECK_PITNEY_BOWES" && Number(fields.version) === summary.order.version && typeof retry === "string" ? retry : undefined;
-      return html(orderPage(site, session.email, summary, await store.getSettings(),
-        { error: outcome.message, fields, retryTransactionId }), errorStatus(outcome));
+      const checkedOldOrder = outcome.code === "CHECK_PITNEY_BOWES" && Number(fields.version) !== summary.order.version;
+      const retryTransactionId = outcome.code === "CHECK_PITNEY_BOWES" && !checkedOldOrder && typeof retry === "string" ? retry : undefined;
+      return html(orderPage(site, session.email, summary, await store.getSettings(), {
+        error: checkedOldOrder ? "The order changed in Commerce. Check the updated details before buying a label." : outcome.message,
+        fields, retryTransactionId,
+      }), errorStatus(outcome));
     },
   },
   {

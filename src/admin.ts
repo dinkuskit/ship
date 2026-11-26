@@ -158,7 +158,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       const quote = input.action_id.startsWith("prices:");
       const buy = input.action_id.startsWith("buy:");
       if (!quote && !buy) return { blocks: [] };
-      if (buy && input.values.buyAgain === true && !found.transactionId) {
+      if (buy && Object.hasOwn(input.values, "buyAgain") && !found.transactionId) {
         return await refused(hosted, found.orderId, new ShipError("LABEL_ATTEMPT_CHANGED", "This confirmation no longer applies. Check the label again, or open Ship to confirm a replacement there."), typed, historyFrom);
       }
       let request: LabelRequest;

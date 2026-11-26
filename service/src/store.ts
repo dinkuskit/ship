@@ -212,6 +212,8 @@ export class StoreShipping extends DurableObject<Env> {
   private readonly sql: SqlStorage;
   /** Cancels in progress, by label, so a second press waits for the first. */
   private readonly cancels = new Map<string, Promise<Outcome>>();
+  /** Allow only one active carrier lookup per purchase, not one per browser tab. */
+  private readonly purchaseLookups = new Set<string>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -611,10 +613,16 @@ export class StoreShipping extends DurableObject<Env> {
    */
   async buyLabel(input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
     try {
+      const retry = input.fields.retryTransactionId;
+      if (retry !== undefined && (typeof retry !== "string" || !/^shp[a-z0-9]{22}$/.test(retry))) {
+        refuse("INVALID_INPUT", "retryTransactionId must name the purchase Ship checked.");
+      }
       const request = await this.labelRequest(input.orderId, input.fields, true);
-      if (!request.order.test) return await this.postageLabel(request, input);
-      return testUsesSandbox(this.env) && input.fields.kind !== "practice"
-        ? await this.postageLabel(request, input) : this.practiceLabel(request, input.uid);
+      if (!request.order.test || testUsesSandbox(this.env) && input.fields.kind !== "practice") return await this.postageLabel(request, input);
+      if (retry !== undefined || input.fields.buyAgain !== undefined) {
+        refuse("LABEL_ATTEMPT_CHANGED", "This confirmation does not apply to a practice label. Open the order and choose Practice label again.", 409);
+      }
+      return this.practiceLabel(request, input.uid);
     } catch (error) {
       return toOutcome(asServiceError(error));
     }
@@ -658,27 +666,36 @@ export class StoreShipping extends DurableObject<Env> {
     const changed = () => refuse("LABEL_ATTEMPT_CHANGED", confirmation === "legacy"
       ? "This confirmation uses an older form. Open Ship to check the label and confirm a replacement there."
       : "This confirmation no longer applies. Check the label again before confirming a replacement.", 409);
-    const retry = confirmation || input.fields.retryTransactionId;
-    if (retry && retry !== earlier?.transaction_id) changed();
+    const retry = input.fields.retryTransactionId;
+    if ((confirmation !== undefined && confirmation !== earlier?.transaction_id) || (retry !== undefined && retry !== earlier?.transaction_id)) changed();
     if (earlier) {
       if (earlier.state === "pending" && Date.now() - earlier.created_at < IN_FLIGHT_MS) {
         refuse("LABEL_IN_PROGRESS", "Ship is buying a label for this order right now. Reload the page in a moment.", 409);
       }
-      const found = await findPurchase(config, earlier.transaction_id);
-      if (found) return ok(await this.finishPurchase(earlier, found), 201);
-      // An order update can land during the lookup. Keep the earlier attempt
-      // and require confirmation on the current order before buying anything new.
-      const current = this.readOrder(order.orderId);
-      if (!current) refuse("NOT_FOUND", "Ship has not received this order.", 404);
-      this.requireLabelVersion(current, order.version);
-      this.refuseIfLabeled(order.orderId, order.version);
-      if (this.openPurchase(order.orderId)?.transaction_id !== earlier.transaction_id) changed();
-      if (!confirmation) {
-        throw new ServiceError(409, "CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", { retryTransactionId: earlier.transaction_id });
+      const id = earlier.transaction_id;
+      if (this.purchaseLookups.has(id)) {
+        refuse("LABEL_IN_PROGRESS", "Ship is already checking the last label. Open the order again in a moment.", 409);
       }
-      // Claim this exact transaction before starting its replacement in the same turn.
-      const claimed = this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? RETURNING transaction_id", earlier.transaction_id);
-      if (claimed.toArray().length === 0) changed();
+      this.purchaseLookups.add(id);
+      try {
+        const found = await findPurchase(config, id);
+        if (found) return ok(await this.finishPurchase(earlier, found), 201);
+        // An order update can land during the lookup. Keep the earlier attempt
+        // and require confirmation on the current order before buying anything new.
+        const current = this.readOrder(order.orderId);
+        if (!current) refuse("NOT_FOUND", "Ship has not received this order.", 404);
+        this.requireLabelVersion(current, order.version);
+        this.refuseIfLabeled(order.orderId, order.version);
+        if (this.openPurchase(order.orderId)?.transaction_id !== id) changed();
+        if (!confirmation) {
+          throw new ServiceError(409, "CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", { retryTransactionId: id });
+        }
+        // Keep the lookup locked through the claim. The replacement is recorded below without yielding.
+        const claimed = this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? RETURNING transaction_id", id);
+        if (claimed.toArray().length === 0) changed();
+      } finally {
+        this.purchaseLookups.delete(id);
+      }
     }
     // Nothing above may have changed while Ship waited on Pitney Bowes.
     this.refuseIfLabeled(order.orderId, order.version);

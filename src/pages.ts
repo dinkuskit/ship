@@ -322,7 +322,9 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
   if (order.test) blocks.push(banner("alert", "TEST order", "Nothing ships and nothing is charged. A TEST order gets a free Pitney Bowes sandbox label, or a practice label, never live postage."));
   const canEnterLabel = !label && order.status === "processing" && !order.addressProblem && settings.shipFrom
     && settings.boxes.length > 0 && (order.test || settings.postageConnected);
-  if (view.failure && !(view.labelInputError && canEnterLabel)) blocks.push(banner("error", label ? "Not done" : "No label bought", view.failure));
+  const failure = view.replacement && view.replacement.version !== order.version
+    ? "The order changed in Commerce. Check the updated details before buying a label." : view.failure;
+  if (failure && !(view.labelInputError && canEnterLabel)) blocks.push(banner("error", label ? "Not done" : "No label bought", failure));
   if (order.addressProblem && !label) {
     blocks.push(banner("error", "This address cannot take a label yet", `${order.addressProblem} Correct it on the order in Commerce; Commerce sends Ship the corrected address.`));
   }

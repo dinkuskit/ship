@@ -146,9 +146,13 @@ export async function quoteAdminLabel(store: Store, orderId: string, input: unkn
 
 export async function buyAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {
   const payload = body(input);
-  const fields = labelFields(payload, ["version", "boxId", "weightOz", "service", "kind", "retryTransactionId"]);
-  // Refuse confirmations from older plugins rather than treating them as a fresh buy.
-  if (payload.buyAgain !== undefined && payload.buyAgain !== false) {
+  const fields = labelFields(payload, ["version", "boxId", "weightOz", "service", "kind"]);
+  if (Object.hasOwn(payload, "retryTransactionId")) {
+    // Keep explicit invalid values distinct from omission; the latter permits a fresh buy.
+    fields.retryTransactionId = typeof payload.retryTransactionId === "string" ? payload.retryTransactionId : "";
+  }
+  // Refuse unbound forms from older plugins rather than treating them as a fresh buy.
+  if (payload.buyAgain !== undefined && !(payload.buyAgain === false && fields.retryTransactionId !== undefined)) {
     fields.buyAgain = typeof payload.buyAgain === "string" && /^shp[a-z0-9]{22}$/.test(payload.buyAgain) ? payload.buyAgain : "legacy";
   }
   const outcome = await outcomeOf(store.buyLabel({ orderId, fields, uid: actor(payload) }));

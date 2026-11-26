@@ -777,8 +777,13 @@ test("an unbound or out-of-date replacement form never carries purchase approval
     } });
     const values = { boxId: "box_small", weightOz: 31, service: "PM" };
     const press = extra => h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { ...values, ...extra } });
-    assert.equal((await press({})).blocks.find(block => block.type === "form").fields.some(field => field.action_id === "buyAgain"), false);
-    assert.match(text(await press({ buyAgain: true })), /confirmation no longer applies/);
+    const refreshed = await press({});
+    assert.equal(refreshed.blocks.find(block => block.type === "form").fields.some(field => field.action_id === "buyAgain"), false);
+    assert.match(text(refreshed), version === 2 ? /The order changed in Commerce/ : /Open in Ship to check the last label/);
+    assert.doesNotMatch(text(refreshed), /Pitney Bowes did not answer/);
+    for (const buyAgain of [true, false]) {
+      assert.match(text(await press({ buyAgain })), /confirmation no longer applies/);
+    }
     assert.equal(purchases.length, 1);
   }
 });
