@@ -580,6 +580,17 @@ test("Shipments falls back to a quoted service when Ground Advantage is unavaila
   assert.deepEqual(service.options, [{ value: "PM", label: "USPS Priority Mail · $0.00" }]);
 });
 
+test("a quoted selection stays selected even when Ground Advantage is available", async () => {
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: 510, PM: 935 } },
+  } });
+  const priced = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: {
+    boxId: "box_small", weightOz: "30", kind: "sandbox", service: "PM",
+  } });
+  assert.equal(priced.blocks.find(block => block.type === "form").fields.find(field => field.action_id === "service").initial_value, "PM");
+});
+
 test("a quoted TEST order keeps independent sandbox and practice service choices", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
@@ -627,6 +638,30 @@ test("no USPS rates keeps the package editable without offering to buy, then a r
   assert.equal(buy.submit.label, "Create TEST label");
   assert.equal(buy.fields.find(field => field.action_id === "service").initial_value, "EM");
   assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 2);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
+});
+
+test("from an unquoted practice label the sandbox opens the price step, not a buy form", async () => {
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+    "POST /v1/admin/orders/order%3Aabc/prices": { prices: { GA: null, PM: null, EM: null } },
+  } });
+  const draft = { boxId: "box_small", weightOz: "30" };
+  const unquoted = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { ...draft, kind: "sandbox" } });
+  const practice = await h.page({ type: "form_submit", action_id: unquoted.blocks.find(block => block.type === "form").submit.action_id,
+    values: { ...draft, kind: "practice" } });
+  const form = practice.blocks.find(block => block.type === "form");
+  assert.equal(form.submit.label, "Make practice label");
+  assert.deepEqual(form.fields.find(field => field.action_id === "kind").options.map(option => option.value), ["practice"]);
+  assert.equal(form.fields.find(field => field.action_id === "service").options.length, 3);
+  const back = practice.blocks.flatMap(block => block.type === "actions" ? block.elements : []).find(element => element.label === "Back to sandbox pricing");
+  assert.ok(back);
+  const sandbox = await h.page({ type: "block_action", action_id: back.action_id, value: back.value });
+  const prices = sandbox.blocks.find(block => block.type === "form");
+  assert.equal(prices.submit.label, "See prices");
+  assert.equal(prices.fields.find(field => field.action_id === "kind").initial_value, "sandbox");
+  assert.ok(!prices.fields.some(field => field.action_id === "service"));
+  assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 1);
   assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
 });
 
@@ -805,7 +840,7 @@ test("a practice label skips the prices step, since Pitney Bowes is not asked", 
   assert.equal(form.submit.label, "Make practice label");
   assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, "practice");
   assert.deepEqual(form.fields.find(field => field.action_id === "service").options.map(option => option.label), ["USPS Ground Advantage", "USPS Priority Mail", "USPS Priority Mail Express"]);
-  assert.match(text(chosen), /no prices to see/);
+  assert.match(text(chosen), /A practice label is free and asks Pitney Bowes nothing/);
   const made = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 30, service: "GA", kind: "practice" } });
   assert.deepEqual(sent[0], { version: 1, boxId: "box_small", weightOz: 30, service: "GA", kind: "practice", by: "staff@example.test" });
   assert.equal(made.toast.message, "Practice label made.");
