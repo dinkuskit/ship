@@ -400,6 +400,15 @@ export class StoreShipping extends DurableObject<Env> {
     return kept ? JSON.parse(kept) as PostageAccount : null;
   }
 
+  private writePostageAccount(account: PostageAccount | null): void {
+    this.ctx.storage.transactionSync(() => {
+      if (account) this.setMeta("pb_account", JSON.stringify(account));
+      else this.sql.exec("DELETE FROM store_meta WHERE key = 'pb_account'");
+      // A Disconnect also supersedes pending checks when no account was saved.
+      this.setMeta("pb_account_revision", crypto.randomUUID());
+    });
+  }
+
   /**
    * Connects the owner's own PB postage account (decision 2a). The username and password
    * go to PB once to find the account's Shipper ID; Ship keeps only what PostageAccount holds.
@@ -414,13 +423,22 @@ export class StoreShipping extends DurableObject<Env> {
       const username = formText(fields, "username", "Pitney Bowes username", 254)!;
       const password = typeof fields.password === "string" ? fields.password : "";
       if (!password || password.length > 200) refuse("INVALID_INPUT", "Enter your Pitney Bowes password.");
-      const merchant = await authorizeMerchant(config, developerId, username, password);
+      const revision = this.meta("pb_account_revision");
+      let merchant: Awaited<ReturnType<typeof authorizeMerchant>>;
+      try {
+        merchant = await authorizeMerchant(config, developerId, username, password);
+      } finally {
+        // Once the settings change, neither a successful nor a failed check describes the current form.
+        if (this.meta("pb_account_revision") !== revision) {
+          refuse("POSTAGE_SETTINGS_CHANGED", "Postage settings changed while Ship checked the account. Review the current settings before connecting again.", 409);
+        }
+      }
       const account: PostageAccount = {
         shipperId: merchant.shipperId, company: merchant.company, email: merchant.email,
         accountEnding: merchant.accountNumber ? merchant.accountNumber.slice(-4) : null,
         connectedBy: uid, connectedAt: new Date().toISOString(),
       };
-      this.setMeta("pb_account", JSON.stringify(account));
+      this.writePostageAccount(account);
       return ok(account);
     } catch (error) {
       return toOutcome(asServiceError(error));
@@ -432,7 +450,7 @@ export class StoreShipping extends DurableObject<Env> {
     try {
       this.checkIsolation();
       if (isolation(this.env)) refuse("FORBIDDEN", "owner postage connections are unavailable in the isolated test service", 403);
-      this.sql.exec("DELETE FROM store_meta WHERE key = 'pb_account'");
+      this.writePostageAccount(null);
       return ok({ disconnected: true });
     } catch (error) {
       return toOutcome(error);

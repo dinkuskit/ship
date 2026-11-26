@@ -15,6 +15,7 @@ let site: string;
 let issuer: string;
 let privateKey: CryptoKey;
 let pbCalls: { method: string; path: string; body: any }[];
+let merchantAnswer: () => Response | Promise<Response>;
 const merchant = {
   company: "Demo Store", fullName: "Demo Owner", email: "owner@example.test", developerId: "synthetic-developer",
   merchantStatus: "ACTIVE", merchantStatusReason: null, merchantType: "INDIVIDUAL", paymentAccountNumber: "SANDBOX-ACCT-0042",
@@ -32,6 +33,7 @@ beforeEach(async () => {
   privateKey = keys.privateKey;
   const jwk = { ...await exportJWK(keys.publicKey), kid: "synthetic", alg: "ES256", use: "sig" };
   pbCalls = [];
+  merchantAnswer = () => Response.json(merchant);
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new Request(input, init).url;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
@@ -44,7 +46,7 @@ beforeEach(async () => {
       if (body.username !== "owner@example.test" || body.password !== "not-a-real-login") {
         return Response.json({ errors: [{ errorCode: "PB-SYNTHETIC", message: "Invalid credentials" }] }, { status: 401 });
       }
-      return Response.json(merchant);
+      return merchantAnswer();
     }
     throw new Error(`unexpected Pitney Bowes call ${method} ${path}`);
   });
@@ -152,6 +154,45 @@ test("the plugin connects the owner's Pitney Bowes account without Ship keeping 
   const disconnected = await call("POST", "/v1/admin/settings/postage/disconnect");
   expect(disconnected.json.settings.postageAccount).toBeNull();
   expect((await shipStore().getSettings()).postageAccount).toBeNull();
+});
+
+test.each([
+  ["Disconnect", 200, "connected"], ["Connect", 200, "connected"],
+  ["Disconnect", 401, "connected"], ["Connect", 401, "connected"],
+  ["Disconnect", 200, "disconnected"], ["Disconnect", 401, "disconnected"],
+] as const)("a slower postage check cannot supersede a completed %s (carrier HTTP %i, initially %s)", async (action, carrierStatus, initial) => {
+  const connect = () => call("POST", "/v1/admin/settings/postage", {
+    body: { username: "owner@example.test", password: "not-a-real-login" }, adminUser: "admin@example.test",
+  });
+  const settings = () => call("GET", "/v1/admin/settings");
+  // Another tab may still have an earlier Connect or Disconnect control open.
+  if (initial === "connected") expect((await connect()).status).toBe(200);
+  const before = await settings();
+  expect(before.json.settings.postageAccount?.accountEnding ?? null).toBe(initial === "connected" ? "0042" : null);
+  let started!: () => void;
+  const checking = new Promise<void>(resolve => { started = resolve; });
+  let finish!: (response: Response) => void;
+  const reply = new Promise<Response>(resolve => { finish = resolve; });
+  merchantAnswer = () => { started(); return reply; };
+  const slower = connect();
+  await checking;
+  merchantAnswer = () => Response.json({ ...merchant, paymentAccountNumber: "SANDBOX-ACCT-0091" });
+  try {
+    const current = action === "Disconnect" ? await call("POST", "/v1/admin/settings/postage/disconnect") : await connect();
+    expect(current.status).toBe(200);
+    expect(current.json.settings.postageAccount?.accountEnding ?? null).toBe(action === "Disconnect" ? null : "0091");
+    if (initial === "disconnected") expect(current.json.settings).toEqual(before.json.settings);
+  } finally {
+    finish(carrierStatus === 200 ? Response.json(merchant) : new Response(null, { status: carrierStatus }));
+  }
+  const late = await slower;
+  expect(late.status).toBe(409);
+  expect(late.json.error.code).toBe("POSTAGE_SETTINGS_CHANGED");
+  expect((await settings()).json.settings.postageAccount?.accountEnding ?? null).toBe(action === "Disconnect" ? null : "0091");
+
+  // An intentional fresh Connect still works.
+  expect((await connect()).status).toBe(200);
+  expect((await settings()).json.settings.postageAccount.accountEnding).toBe("0091");
 });
 
 test("label history lists every label newest first with its order number, 50 at a time", async () => {
