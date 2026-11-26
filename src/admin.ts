@@ -1,7 +1,7 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
 import {
-  connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, unconfirmedPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH,
+  boxDimensions, connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, unconfirmedPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH,
   type OrderView, type Toast,
 } from "./pages.js";
 import { settingsAdmin } from "./settings.js";
@@ -30,7 +30,7 @@ function interaction(input: unknown): Interaction | null {
   return null;
 }
 
-/** `verb:<version>:<encoded order id>[:<preference or quote>]` from an order action. */
+/** `verb:<version>:<encoded order id>[:<draft>]` from an order action. */
 function target(actionId: string): { version: number; orderId: string; detail?: string } | null {
   const [, version, encoded, detail] = actionId.split(":", 4);
   if (!version || !encoded || !/^\d{1,15}$/.test(version)) return null;
@@ -50,14 +50,17 @@ function labelDraft(values: Record<string, unknown>): NonNullable<OrderView["typ
   const weight = typeof values.weightOz === "number" ? values.weightOz : typeof values.weightOz === "string" ? Number(values.weightOz.trim().replace(/\s*oz\.?$/i, "") || NaN) : NaN;
   const weightOz = Math.round(weight * 10) / 10;
   const kind = text(values.kind);
-  // Block Kit sends values for hidden fields too. Read the picker for the active label kind only.
-  const service = kind === "practice" ? values.practiceService ?? values.service : values.service;
   return { boxId: text(values.boxId), weightOz: Number.isFinite(weightOz) ? weightOz : undefined,
-    service: text(service), kind, buyAgain: values.buyAgain === true, sandboxService: text(values.sandboxService) };
+    service: text(values.service), kind, replace: values.replace === true, sandboxService: text(values.sandboxService) };
 }
 
 function fields(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function actionDraft(detail: string | undefined): Record<string, unknown> | null {
+  if (!detail || detail.length > 2400) return null;
+  try { return fields(JSON.parse(decodeURIComponent(detail))); } catch { return null; }
 }
 
 /** Rehydrate the displayed rates for a service selection. These are never purchase prices. */
@@ -71,8 +74,8 @@ function reviewedPrices(value: unknown): OrderView["prices"] {
 }
 
 /** Check the draft before asking Ship for prices or a label. */
-function labelRequest(version: number, typed: NonNullable<OrderView["typed"]>, by: string): LabelRequest {
-  const { boxId, weightOz, service, kind, buyAgain } = typed;
+function labelRequest(version: number, typed: NonNullable<OrderView["typed"]>, by: string, buyAgain = false): LabelRequest {
+  const { boxId, weightOz, service, kind } = typed;
   if (!boxId) throw new ShipError("INPUT", "Pick a box.");
   if (weightOz === undefined || weightOz < 0.1 || weightOz > MAX_WEIGHT_OZ) throw new ShipError("INPUT", `Enter the package weight in ounces, from 0.1 to ${MAX_WEIGHT_OZ} (70 lb).`);
   if (service !== undefined && !Object.hasOwn(SERVICES, service)) throw new ShipError("INPUT", "Pick a USPS service.");
@@ -82,7 +85,10 @@ function labelRequest(version: number, typed: NonNullable<OrderView["typed"]>, b
 
 /** The order as Ship has it right now, with a fresh five-minute print link when it has a live label. */
 async function openOrder(hosted: Ship, orderId: string, extra: Partial<OrderView> = {}, toast?: Toast | ((order: ShipOrder) => Toast)): Promise<BlockResponse> {
-  const { order, settings } = await hosted.order(orderId);
+  return showOrder(hosted, await hosted.order(orderId), extra, toast);
+}
+
+async function showOrder(hosted: Ship, { order, settings }: Awaited<ReturnType<Ship["order"]>>, extra: Partial<OrderView>, toast?: Toast | ((order: ShipOrder) => Toast)): Promise<BlockResponse> {
   if (typeof toast === "function") toast = toast(order);
   let printUrl: string | undefined;
   if (order.label) {
@@ -96,7 +102,7 @@ async function refused(hosted: Ship, orderId: string, error: ShipError, typed: O
   if (error.code === "RECONNECT") throw error;
   if (error.code === "NOT_FOUND") return problemPage(hosted.siteId, "Order not at Ship", error.message);
   try {
-    return await openOrder(hosted, orderId, { failure: error.message, typed, labelInputError, askBuyAgain: error.code === "CHECK_PITNEY_BOWES", historyFrom });
+    return await openOrder(hosted, orderId, { failure: error.message, typed: error.code === "CHECK_PITNEY_BOWES" ? { ...typed, replace: true } : typed, labelInputError, historyFrom });
   } catch (again) {
     return problemPage(hosted.siteId, "Ship could not be used", again instanceof ShipError ? again.message : error.message);
   }
@@ -167,56 +173,80 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
     if (input.type === "block_action" && input.action_id.startsWith("package:")) {
       const found = target(input.action_id), values = fields(input.value);
       if (!found || !values) return { blocks: [] };
-      const { boxId, weightOz, service } = labelDraft(values);
-      return await openOrder(hosted, found.orderId, { typed: { boxId, weightOz, service }, historyFrom });
+      return await openOrder(hosted, found.orderId, { typed: labelDraft(values), historyFrom });
     }
     if (input.type !== "page_load" && input.action_id.startsWith("review:")) {
       const found = target(input.action_id);
-      if (!found?.detail || found.detail.length > 2400) return { blocks: [] };
-      let draft;
-      try { draft = fields(JSON.parse(decodeURIComponent(found.detail))); } catch { return { blocks: [] }; }
+      if (!found) return { blocks: [] };
+      const draft = actionDraft(found.detail);
       if (!draft) return { blocks: [] };
       const submitted = input.type === "form_submit" ? input.values : null;
       const typed = labelDraft(submitted ? { ...draft, service: submitted.service } : draft);
-      const { boxId, weightOz, kind, service } = typed;
+      const { kind, service } = typed;
       const next = submitted?.next;
-      if (next === "prices") return await openOrder(hosted, found.orderId, { typed: { boxId, weightOz, service }, historyFrom });
+      if (next === "prices") return await openOrder(hosted, found.orderId, { typed: { ...typed, kind: undefined }, historyFrom });
       const prices = reviewedPrices(draft.prices);
+      const review = { reviewVersion: found.version, reviewDimensions: text(draft.dimensions), historyFrom };
       if (next === "practice") {
-        return await openOrder(hosted, found.orderId, { typed: { boxId, weightOz, kind: "practice", sandboxService: service }, reviewVersion: found.version, historyFrom });
+        return await openOrder(hosted, found.orderId, { ...review, typed: { ...typed, kind: "practice", service: undefined, sandboxService: service } });
       }
       if (!service || !Object.hasOwn(SERVICES, service) || kind !== "practice" && prices?.[service as keyof Prices] === undefined) return { blocks: [] };
-      return await openOrder(hosted, found.orderId, { typed, prices, reviewVersion: found.version, confirmLabel: submitted !== null, historyFrom });
+      return await openOrder(hosted, found.orderId, { ...review, typed, prices, confirmLabel: submitted !== null });
     }
     if (input.type === "form_submit" || input.type === "block_action" && input.action_id.startsWith("buy:")) {
       const found = target(input.action_id);
-      const values = input.type === "form_submit" ? input.values : fields(input.value);
-      if (!found || !values) return { blocks: [] };
-      const quote = input.action_id.startsWith("prices:");
+      if (!found) return { blocks: [] };
+      const quote = input.type === "form_submit" && input.action_id.startsWith("prices:");
       const buy = input.action_id.startsWith("buy:");
       if (!quote && !buy) return { blocks: [] };
+      const values = input.type === "block_action" ? fields(input.value) : quote ? input.values : actionDraft(found.detail);
+      if (!values) return buy ? await openOrder(hosted, found.orderId, { historyFrom }) : { blocks: [] };
       const typed = labelDraft(values);
-      if (quote && typed.kind !== "practice" && found.detail && Object.hasOwn(SERVICES, found.detail)) typed.service = found.detail;
+      const [preferred, replacement] = (found.detail ?? "").split(",");
+      if (quote) {
+        typed.replace = preferred === "replace" || replacement === "replace";
+        typed.service = preferred && Object.hasOwn(SERVICES, preferred) ? preferred : undefined;
+      }
+      const approveReplacement = buy && typed.replace === true && typed.kind !== "practice"
+        && input.type === "form_submit" && input.values.buyAgain === true;
       let request: LabelRequest;
       try {
-        request = labelRequest(found.version, typed, by);
+        request = labelRequest(found.version, typed, by, approveReplacement);
       } catch (error) {
         if (!(error instanceof ShipError)) throw error;
         const rawWeight = values.weightOz;
         return await refused(hosted, found.orderId, error, typed, historyFrom, {
           // Text fields have no length cap in Block Kit. Reflect a bounded draft,
           // or leave it blank rather than replacing an oversized paste with a weight.
-          quote, weight: typeof rawWeight === "string" ? text(rawWeight) ?? "" : undefined,
+          weight: typeof rawWeight === "string" ? text(rawWeight) ?? "" : undefined,
         });
       }
       try {
+        const current = await hosted.order(found.orderId);
+        const { order, settings } = current;
+        if (order.label || order.status !== "processing" || order.addressProblem) return await showOrder(hosted, current, { historyFrom });
+        const box = settings.boxes.find(box => box.boxId === request.boxId);
+        const dimensions = box && boxDimensions(box);
+        const practiceOnly = order.test && !settings.testSandbox;
+        const practice = order.test && (practiceOnly || request.kind === "practice");
+        const review = { reviewVersion: found.version, reviewDimensions: dimensions, historyFrom };
+        const stale = () => orderPage({ order, settings, siteId: hosted.siteId, typed, historyFrom, reviewVersion: found.version });
+        // Capture the box before requesting rates, then re-read when displaying them.
+        // A new size can keep the same box ID and the Commerce order version.
+        if (order.version !== found.version || !box) return stale();
         if (quote) {
-          // A practice label asks Pitney Bowes nothing, so there is nothing to quote: straight to the buy step.
-          if (request.kind === "practice") {
-            return await openOrder(hosted, found.orderId, { typed: { ...typed, sandboxService: found.detail }, reviewVersion: found.version, historyFrom });
+          if (practice) {
+            return orderPage({ order, settings, siteId: hosted.siteId, ...review, typed: { ...typed, kind: "practice",
+              ...(practiceOnly ? {} : { service: undefined, sandboxService: typed.service }) } });
           }
           const prices = await hosted.prices(found.orderId, request);
-          return await openOrder(hosted, found.orderId, { prices, typed, reviewVersion: found.version, historyFrom });
+          return await openOrder(hosted, found.orderId, { ...review, prices, typed });
+        }
+        if (dimensions !== text(values.dimensions) || practice !== (request.kind === "practice") || !request.service) return stale();
+        if (!practice && typed.replace && !approveReplacement) {
+          const prices = reviewedPrices(values.prices);
+          return orderPage({ order, settings, siteId: hosted.siteId, ...review, typed, prices, confirmLabel: true,
+            failure: "Tick Buy a new label to approve the replacement." });
         }
         const label = await hosted.buy(found.orderId, request);
         const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;

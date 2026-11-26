@@ -536,7 +536,9 @@ const button = (page, name) => controls(page).find(element => element.type === "
 const formOn = page => page.blocks.find(block => block.type === "form");
 const servicePicker = page => formOn(page).fields.find(field => field.action_id === "service");
 const press = (h, element, value = element.value) => h.page({ type: "block_action", action_id: element.action_id, value });
-const pick = (h, page, service, next = "review") => h.page({ type: "form_submit", action_id: formOn(page).submit.action_id, values: { service, next } });
+const submit = (h, page, values) => h.page({ type: "form_submit", action_id: formOn(page).submit.action_id, values });
+const pick = (h, page, service, next = "review") => submit(h, page, { service, next });
+const open = h => h.page({ type: "block_action", action_id: "open", value: "order:abc" });
 
 test("opening an order shows the form with the items plus box weight, then prices, then buys with who pressed the button", async () => {
   const sent = [];
@@ -617,6 +619,57 @@ test("reviewing a quote after the order changes returns to pricing without buyin
   assert.equal(formOn(stale).submit.action_id, "prices:2:order%3Aabc:PM");
   assert.equal(button(stale, "Create TEST label"), undefined);
   assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
+});
+
+test("changing a saved box in place invalidates its rates at review and purchase", async () => {
+  let lengthIn = box.lengthIn;
+  let resizeOnPrice = false;
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order(), settings: { ...settings, boxes: [{ ...box, lengthIn }] } }),
+    "POST /v1/admin/orders/order%3Aabc/prices": () => {
+      if (resizeOnPrice) lengthIn++;
+      return Response.json({ prices: { PM: 935 } });
+    },
+  } });
+  const price = page => submit(h, page, { boxId: "box_small", weightOz: "30" });
+  const quoted = await price(await open(h));
+  lengthIn++;
+  const stale = await pick(h, quoted, "PM");
+  assert.match(text(stale), /The order or package changed/);
+  assert.equal(button(stale, "Create TEST label"), undefined);
+  assert.doesNotMatch(text(stale), /\$9\.35/);
+  assert.equal(formOn(stale).fields.find(field => field.action_id === "weightOz").initial_value, "30");
+  const review = await pick(h, await price(stale), "PM");
+  lengthIn++;
+  const refused = await press(h, button(review, "Create TEST label"));
+  assert.match(text(refused), /The order or package changed/);
+  assert.equal(formOn(refused).submit.label, "See prices");
+  assert.doesNotMatch(text(refused), /\$9\.35/);
+  resizeOnPrice = true;
+  const changedDuringQuote = await price(refused);
+  assert.equal(formOn(changedDuringQuote).submit.label, "See prices");
+  assert.doesNotMatch(text(changedDuringQuote), /\$9\.35/);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
+});
+
+test("practice-only TEST orders choose a service and review before creating a label", async () => {
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings: { ...settings, testSandbox: false } },
+    "POST /v1/admin/orders/order%3Aabc/labels": { label: label({ practice: true }) },
+  } });
+  const form = await open(h);
+  assert.equal(formOn(form).submit.label, "Choose a service");
+  const services = await submit(h, form, { boxId: "box_small", weightOz: "31.5" });
+  assert.equal(servicePicker(services).options.length, 3);
+  const reviewed = await pick(h, services, "EM");
+  assert.match(text(reviewed), /USPS Priority Mail Express/);
+  const edit = await press(h, button(reviewed, "Edit package"));
+  assert.equal(formOn(edit).fields.find(field => field.action_id === "weightOz").initial_value, "31.5");
+  assert.equal(button(reviewed, "Back to sandbox pricing"), undefined);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
+  await press(h, button(reviewed, "Make practice label"));
+  const writes = h.calls.filter(call => /\/(prices|labels)$/.test(call.url));
+  assert.deepEqual(writes.map(({ body }) => [body.kind, body.service, body.weightOz]), [["practice", "EM", 31.5]]);
 });
 
 test("a quoted TEST order keeps independent sandbox and practice service choices", async () => {
@@ -748,83 +801,63 @@ test("the live label's tracking number links to USPS, and every label's number s
   assert.match(text(page), /\$9\.35 from your Pitney Bowes postage account/);
 });
 
-test("after \"tick Buy a new label\" the form stays on the buy step and the next buy carries the confirmation", async () => {
-  const sent = [];
-  let answers = 0;
-  const h = host({ ship: {
-    "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false }), settings },
-    "POST /v1/admin/orders/order%3Aabc/labels": body => { sent.push(body); return answers++ === 0
-      ? Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer the last time." } }, { status: 409 })
-      : Response.json({ label: label({ test: false, service: body.service, tracking: "9400100000000000000003" }) }, { status: 201 }); },
-    "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
-  } });
-  const refused = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31, service: "PM" } });
-  const form = refused.blocks.find(block => block.type === "form");
-  assert.equal(form.submit.action_id, "buy:1:order%3Aabc");
-  assert.equal(form.submit.label, "Buy label");
-  assert.equal(form.fields.find(field => field.action_id === "service").initial_value, "PM");
-  const toggle = form.fields.find(field => field.action_id === "buyAgain");
-  assert.equal(toggle.initial_value, false);
-  const bought = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31, service: "PM", buyAgain: true } });
-  assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 31, service: "PM", buyAgain: true, by: "staff@example.test" });
-  assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 0);
-  assert.match(bought.toast.message, /Label bought, \$9\.35\. Tracking 9400100000000000000003/);
-});
-
-test("an invalid replacement label weight returns to prices without carrying purchase approval", async () => {
+test("replacement uses fresh rates and sends approval only from the final review", async () => {
+  const tall = { ...box, boxId: "box_tall", name: "Tall", heightIn: 8 };
   for (const isTest of [true, false]) {
     const sent = [];
+    let attempts = 0;
     const h = host({ ship: {
-      "GET /v1/admin/orders/order%3Aabc": { order: order({ test: isTest }), settings },
-      "POST /v1/admin/orders/order%3Aabc/labels": body => {
-        sent.push({ route: "labels", body });
-        return Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes has no record of the last label." } }, { status: 409 });
-      },
-      "POST /v1/admin/orders/order%3Aabc/prices": body => {
-        sent.push({ route: "prices", body });
-        return Response.json({ prices: { GA: 420, PM: 950, EM: null } });
-      },
+      "GET /v1/admin/orders/order%3Aabc": { order: order({ test: isTest }), settings: { ...settings, boxes: [box, tall] } },
+      "POST /v1/admin/orders/order%3Aabc/labels": body => { sent.push(["labels", body]); return attempts++ === 0
+        ? Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes has no record of the last label." } }, { status: 409 })
+        : Response.json({ label: label({ test: isTest, service: body.service }) }, { status: 201 }); },
+      "POST /v1/admin/orders/order%3Aabc/prices": body => { sent.push(["prices", body]); return Response.json({ prices: body.boxId === "box_tall" ? { EM: 1210 } : { PM: 950 } }); },
     } });
-    const replacement = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
-      boxId: "box_small", weightOz: 31, service: "PM",
-    } });
-    assert.equal(replacement.blocks.find(block => block.type === "form").fields.find(field => field.action_id === "buyAgain").initial_value, false);
-    const refused = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
-      boxId: "box_small", weightOz: "31x", service: "PM", buyAgain: true,
-    } });
-    const retry = refused.blocks.find(block => block.type === "form");
-    assert.equal(retry.submit.label, "See prices");
-    assert.equal(retry.fields.find(field => field.action_id === "weightOz").initial_value, "31x");
-    assert.equal(retry.fields.some(field => field.action_id === "buyAgain"), false);
-    assert.deepEqual(sent.map(call => call.route), ["labels"]);
+    const buy = isTest ? "Create TEST label" : "Buy label";
+    const first = await submit(h, await open(h), { boxId: "box_small", weightOz: "31" });
+    const recovery = await press(h, button(await pick(h, first, "PM"), buy));
+    assert.match(text(recovery), /Pitney Bowes has no record/);
+    assert.equal(formOn(recovery).submit.label, "See prices");
+    assert.equal(formOn(recovery).fields.some(field => field.action_id === "service" || field.action_id === "buyAgain"), false);
+    const invalid = await submit(h, recovery, { boxId: "box_tall", weightOz: "37x" });
+    assert.equal(formOn(invalid).fields.find(field => field.action_id === "weightOz").initial_value, "37x");
+    assert.equal(sent.length, 2);
 
-    const quoted = await h.page({ type: "form_submit", action_id: retry.submit.action_id, values: { boxId: "box_small", weightOz: "32" } });
-    assert.deepEqual(sent.map(call => call.route), ["labels", "prices"]);
-    assert.equal(sent[1].body.weightOz, 32);
-    assert.equal(sent[1].body.buyAgain, undefined);
-    assert.ok(button(await pick(h, quoted, "PM"), isTest ? "Create TEST label" : "Buy label"));
-    assert.match(text(quoted), /USPS Priority Mail · \$9\.50/);
-    assert.doesNotMatch(text(quoted), /buyAgain/);
+    const priced = await submit(h, invalid, { boxId: "box_tall", weightOz: "37.5" });
+    assert.deepEqual(servicePicker(priced).options.map(option => option.value), ["EM"]);
+    assert.equal(button(priced, buy), undefined);
+    const edit = await pick(h, priced, "EM", "prices");
+    assert.equal(formOn(edit).fields.find(field => field.action_id === "weightOz").initial_value, "37.5");
+    const repriced = await submit(h, edit, { boxId: "box_tall", weightOz: "38" });
+    const review = await pick(h, repriced, "EM");
+    assert.match(text(review), /USPS Priority Mail Express · \$12\.10/);
+    assert.equal(formOn(review).submit.label, buy);
+    assert.equal(formOn(review).fields[0].initial_value, false);
+    const unchecked = await submit(h, review, { buyAgain: false });
+    assert.match(text(unchecked), /Tick Buy a new label to approve the replacement/);
+    assert.deepEqual(sent.map(([route, body]) => [route, body.boxId, body.weightOz, body.buyAgain]), [
+      ["prices", "box_small", 31, undefined], ["labels", "box_small", 31, undefined],
+      ["prices", "box_tall", 37.5, undefined], ["prices", "box_tall", 38, undefined],
+    ]);
+    const bought = await submit(h, unchecked, { buyAgain: true });
+    assert.deepEqual(sent.at(-1), ["labels", { version: 1, boxId: "box_tall", weightOz: 38, service: "EM", buyAgain: true, by: "staff@example.test" }]);
+    assert.match(bought.toast.message, /Label bought/);
   }
 });
 
 test("a locally rejected weight keeps the label draft without advancing or requesting a label", async () => {
   const tall = { ...box, boxId: "box_tall", name: "Tall", heightIn: 8 };
   const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order(), settings: { ...settings, boxes: [box, tall] } } } });
-  for (const step of ["prices", "buy"]) {
-    const view = await h.page({ type: "form_submit", action_id: `${step}:1:order%3Aabc`, values: {
-      boxId: "box_tall", weightOz: "29x", kind: "practice", ...(step === "buy" ? { service: "PM" } : {}),
-    } });
-    const index = view.blocks.findIndex(block => block.type === "form");
-    const form = view.blocks[index];
-    assert.equal(view.blocks[index - 1].title, "Check label details");
-    assert.match(text(view), /Enter the package weight in ounces/);
-    assert.equal(form.submit.label, "See prices");
-    assert.equal(form.fields.find(field => field.action_id === "boxId").initial_value, "box_tall");
-    assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, "29x");
-    assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, "practice");
-    assert.ok(!form.fields.some(field => field.action_id === "service"));
-  }
+  const view = await submit(h, await open(h), { boxId: "box_tall", weightOz: "29x", kind: "practice" });
+  const index = view.blocks.findIndex(block => block.type === "form");
+  const form = view.blocks[index];
+  assert.equal(view.blocks[index - 1].title, "Check label details");
+  assert.match(text(view), /Enter the package weight in ounces/);
+  assert.equal(form.submit.label, "See prices");
+  assert.equal(form.fields.find(field => field.action_id === "boxId").initial_value, "box_tall");
+  assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, "29x");
+  assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, "practice");
+  assert.ok(!form.fields.some(field => field.action_id === "service"));
   assert.ok(h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com")).every(call => call.method === "GET"));
 });
 
@@ -836,9 +869,7 @@ test("invalid pasted weights do not turn into a calculated weight or reuse a san
     ["practice", pasted.repeat(5), "", "See prices"],
     ["sandbox", pasted, pasted, "See prices"],
   ]) {
-    const view = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
-      boxId: "box_small", weightOz: raw, kind, service: "PM",
-    } });
+    const view = await submit(h, await open(h), { boxId: "box_small", weightOz: raw, kind });
     const form = view.blocks.find(block => block.type === "form");
     assert.equal(form.fields.find(field => field.action_id === "weightOz").initial_value, displayed);
     assert.equal(form.fields.find(field => field.action_id === "kind").initial_value, kind);
@@ -883,13 +914,15 @@ test("Ship's refusals keep the order page, with the reason and what was typed", 
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
     "POST /v1/admin/orders/order%3Aabc/labels": () => Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer the last time." } }, { status: 409 }),
-    "POST /v1/admin/orders/order%3Aabc/prices": () => Response.json({ error: { code: "ORDER_CHANGED", message: "The order changed in Commerce since this page opened." } }, { status: 409 }),
+    "POST /v1/admin/orders/order%3Aabc/prices": body => body.weightOz === 30 ? Response.json({ prices: { GA: 510 } })
+      : Response.json({ error: { code: "ORDER_CHANGED", message: "The order changed in Commerce since this page opened." } }, { status: 409 }),
   } });
-  const refused = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31, service: "GA" } });
+  const quote = await submit(h, await open(h), { boxId: "box_small", weightOz: "30" });
+  const refused = await press(h, button(await pick(h, quote, "GA"), "Create TEST label"));
   assert.match(text(refused), /Pitney Bowes did not answer the last time/);
-  const form = refused.blocks.find(block => block.type === "form");
-  assert.ok(form.fields.some(field => field.action_id === "buyAgain"));
-  assert.equal(form.fields[1].initial_value, "31");
+  const form = formOn(refused);
+  assert.equal(form.submit.label, "See prices");
+  assert.equal(form.fields[1].initial_value, "30");
   const changed = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31 } });
   assert.match(text(changed), /order changed in Commerce/);
   // Impossible input never reaches Ship.
@@ -898,7 +931,7 @@ test("Ship's refusals keep the order page, with the reason and what was typed", 
     const heavy = await h.page({ type: "form_submit", action_id: "prices:1:order%3Aabc", values: { boxId: "box_small", weightOz } });
     assert.match(text(heavy), /0.1 to 1120/);
   }
-  assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 1);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 2);
   assert.ok(h.calls.length > before); // the page itself was re-read
 });
 

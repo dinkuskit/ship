@@ -14,16 +14,15 @@ export interface OrderView {
   prices?: Prices;
   /** Package and rates as reviewed for this Commerce order revision. */
   reviewVersion?: number;
+  reviewDimensions?: string;
   /** The merchant chose a service and is ready to confirm the purchase. */
   confirmLabel?: boolean;
   /** What the owner typed, kept across a refusal or a quote. */
-  typed?: { boxId?: string; weightOz?: number; service?: string; kind?: string; buyAgain?: boolean; sandboxService?: string };
+  typed?: { boxId?: string; weightOz?: number; service?: string; kind?: string; replace?: boolean; sandboxService?: string };
   /** Why the last press was refused, shown as it came from Ship. */
   failure?: string;
   /** A local validation error keeps the editable weight and cannot advance a quote. */
-  labelInputError?: { quote: boolean; weight?: string };
-  /** Ship has no record of its last purchase for this order: offer to buy a new label. */
-  askBuyAgain?: boolean;
+  labelInputError?: { weight?: string };
   /** The five-minute link that opens the live label's PDF in a new tab. */
   printUrl?: string;
   /** undefined: opened from Shipments; null: opened from the newest Label history page. */
@@ -263,6 +262,7 @@ function labelsTable(labels: Label[]): Block {
 }
 
 const services = (Object.keys(SERVICES) as ServiceCode[]).map(value => ({ value, label: SERVICES[value] }));
+export const boxDimensions = (box: Box) => `${box.lengthIn}:${box.widthIn}:${box.heightIn}`;
 
 /** Only prices for the reviewed package belong here. Read the service and next step in
  * one submit: a separate Block action button cannot see the form's current selection.
@@ -276,19 +276,28 @@ function labelReview(view: OrderView, box: Box, packed: number, practice: boolea
   if (!options.length) return null;
   const service = options.find(option => option.value === typed.service)?.value ?? options[0]!.value;
   const id = `${order.version}:${encodeURIComponent(order.orderId)}`;
-  const draft = { boxId: box.boxId, weightOz: packed, service, ...(practice ? { kind: "practice", sandboxService: typed.sandboxService } : {}) };
+  const draft = { boxId: box.boxId, weightOz: packed, service, dimensions: boxDimensions(box), replace: typed.replace,
+    ...(practice ? { kind: "practice", sandboxService: typed.sandboxService } : {}) };
   const action = (verb: string) => orderAction(`${verb}:${id}`, view.historyFrom);
   const packageLine = section(`${box.name}: ${box.lengthIn} × ${box.widthIn} × ${box.heightIn} in · Package ${weight(packed)}`);
-  const edit = { type: "button" as const, label: practice ? "Back to sandbox pricing" : "See prices again", action_id: action("package"),
-    value: { boxId: box.boxId, weightOz: packed, service: practice ? typed.sandboxService : service } };
+  const edit = { type: "button" as const,
+    label: practice ? view.settings.testSandbox ? "Back to sandbox pricing" : "Edit package" : "See prices again",
+    action_id: action("package"), value: { ...draft, kind: undefined, service: practice && view.settings.testSandbox ? typed.sandboxService : service } };
   const detail = encodeURIComponent(JSON.stringify({ ...draft, prices: practice ? undefined : prices }));
-  if (view.confirmLabel) return [packageLine, section(options.find(option => option.value === service)!.label),
-    ...(practice ? [context("A practice label is free and asks Pitney Bowes nothing.")] : []),
-    { type: "actions", elements: [
-      { type: "button", label: practice ? "Make practice label" : order.test ? "Create TEST label" : "Buy label", action_id: action("buy"), style: "primary", value: draft },
-      { type: "button", label: "Back to services", action_id: `${action("review")}:${detail}` }, edit,
-    ] },
-  ];
+  if (view.confirmLabel) {
+    const label = practice ? "Make practice label" : order.test ? "Create TEST label" : "Buy label";
+    return [packageLine, section(options.find(option => option.value === service)!.label),
+      ...(practice ? [context("A practice label is free and asks Pitney Bowes nothing.")] : []),
+      ...(!practice && typed.replace ? [context("Pitney Bowes has no record of the last label. Approve a replacement below."),
+        { type: "form" as const, block_id: `label-${order.orderId}-replacement`, fields: [
+          { type: "toggle" as const, action_id: "buyAgain", label: "Buy a new label", initial_value: false },
+        ], submit: { label, action_id: `${action("buy")}:${detail}` } }] : []),
+      { type: "actions", elements: [
+        ...(practice || !typed.replace ? [{ type: "button" as const, label, action_id: action("buy"), style: "primary" as const, value: draft }] : []),
+        { type: "button", label: "Back to services", action_id: `${action("review")}:${detail}` }, edit,
+      ] },
+    ];
+  }
   return [packageLine,
     { type: "form", block_id: `label-${order.orderId}-${practice ? "practice" : "rates"}`, fields: [
       { type: "radio", label: practice ? "USPS service for practice label" : "USPS service and price", action_id: "service", options, initial_value: service },
@@ -311,40 +320,34 @@ function labelForm(view: OrderView): Block[] {
   const boxOption = (candidate: Box) => ({ label: `${candidate.name}: ${candidate.lengthIn} × ${candidate.widthIn} × ${candidate.heightIn} in, ${weight(candidate.weightOz)} empty`, value: candidate.boxId });
   const practiceOnly = order.test && !settings.testSandbox;
   const practice = order.test && typed.kind === "practice";
-  const currentReview = selectedBox !== undefined && view.reviewVersion === order.version;
+  const currentReview = selectedBox !== undefined && view.reviewVersion === order.version
+    && view.reviewDimensions === boxDimensions(selectedBox) && (!practiceOnly || practice);
   const prices = currentReview ? view.prices : undefined;
-  if (currentReview && !practiceOnly && (prices !== undefined || practice)) {
+  if (currentReview && (prices !== undefined || practice)) {
     const review = labelReview(view, box, packed, practice);
     if (review) return review;
   }
-  // A local refusal ends replacement confirmation. A corrected package needs new prices.
-  const buyAgain = !view.labelInputError && (view.askBuyAgain === true || typed.buyAgain === true);
-  const canBuy = !view.labelInputError?.quote && (practiceOnly || buyAgain);
   const preferred = services.find(option => option.value === typed.service)?.value;
   const form: FormField[] = [
     { type: "select", action_id: "boxId", label: "Box", options: settings.boxes.map(boxOption), initial_value: box.boxId },
     // A text field: the browser's number field rejects most tenths of an ounce as "not a valid value".
     { type: "text_input", action_id: "weightOz", label: `Package weight in ounces, items plus box (16 oz = 1 lb)`, initial_value: view.labelInputError?.weight ?? String(Math.max(0.1, Math.min(MAX_WEIGHT_OZ, packed))), placeholder: "28.5" },
   ];
-  if (order.test) {
-    form.push({ type: "select", action_id: "kind", label: "Label kind", initial_value: practiceOnly || practice ? "practice" : "sandbox",
-      options: [...(practiceOnly ? [] : [{ label: "Pitney Bowes sandbox (no charge)", value: "sandbox" }]),
-        { label: "Practice label (no postage)", value: "practice" }] });
+  if (order.test && !practiceOnly) {
+    form.push({ type: "select", action_id: "kind", label: "Label kind", initial_value: practice ? "practice" : "sandbox",
+      options: [{ label: "Pitney Bowes sandbox (no charge)", value: "sandbox" }, { label: "Practice label (no postage)", value: "practice" }] });
   }
-  if (canBuy) form.push({ type: "radio", action_id: "service", label: "USPS service", initial_value: preferred ?? "GA", options: services });
-  if (canBuy && buyAgain) form.push({ type: "toggle", action_id: "buyAgain", label: "Buy a new label", description: "Pitney Bowes has no record of the last one Ship bought for this order.", initial_value: typed.buyAgain === true });
-  const action = (id: string) => orderAction(id, view.historyFrom);
-  const blocks: Block[] = [
+  const detail = [preferred, typed.replace ? "replace" : undefined].filter(Boolean).join(",");
+  return [
     ...(view.labelInputError && view.failure ? [banner("error", "Check label details", view.failure)] : []),
     ...(view.reviewVersion !== undefined && !currentReview ? [section("The order or package changed. Check these details before continuing.")] : []),
     ...(prices !== undefined ? [section("No USPS rates are available for this package. Check the box and weight, then press See prices again." +
       (order.test ? " To continue without a rate, choose Practice label before pressing See prices." : ""))] : []),
-    { type: "form", block_id: `label-${order.orderId}-${canBuy ? "buy" : "prices"}`, fields: form,
-      submit: canBuy ? { label: practiceOnly ? "Make practice label" : "Buy label", action_id: action(`buy:${id}`) }
-        : { label: "See prices", action_id: action(`prices:${id}${preferred ? `:${preferred}` : ""}`) } }];
-  if (canBuy && buyAgain) blocks.push(context("Pitney Bowes has no record of the last label Ship bought for this order. Tick Buy a new label and press Buy label to buy one, with the service you chose."));
-  if (canBuy && !practiceOnly) blocks.push({ type: "actions", elements: [{ type: "button", label: "See prices again", action_id: action(`package:${id}`), value: { boxId: box.boxId, weightOz: packed, service: preferred } }] });
-  return blocks;
+    ...(typed.replace && !practiceOnly ? [context("Check prices for the replacement package. You'll approve the new label after reviewing its service and price.")] : []),
+    ...(practiceOnly ? [context("Only free practice labels are available for this TEST order.")] : []),
+    { type: "form", block_id: `label-${order.orderId}-prices`, fields: form, submit: {
+      label: practiceOnly ? "Choose a service" : "See prices", action_id: orderAction(`prices:${id}${detail ? `:${detail}` : ""}`, view.historyFrom),
+    } }];
 }
 
 /**
