@@ -18,6 +18,8 @@ const COOKIE_SECONDS = 30 * 24 * 60 * 60;
 const SIGNIN_SECONDS = 10 * 60;
 const SESSION_COOKIE = "__Host-ship-session";
 const SIGNIN_COOKIE = "__Host-ship-signin";
+/** How long Ship waits for DinkusKit.com to answer a token request before treating it as unavailable. */
+const TOKEN_TIMEOUT_MS = 10_000;
 
 /** Who is signed in to Ship's pages, and for which one store. */
 export interface OwnerSession { site: string; sessionId: string; uid: string; email: string }
@@ -106,7 +108,9 @@ const REFUSED_PASS_ERRORS = [errors.JWTExpired, errors.JWTClaimValidationFailed,
 async function askToken(env: Env, body: object, site: string, fetcher: typeof fetch): Promise<TokenAnswer> {
   try {
     const answer = await fetcher(env.ACCOUNT_TOKEN_URL, {
-      method: "POST", redirect: "manual", cache: "no-store",
+      // Well inside readSession's 30-second refresh lock, so a slow answer ends as "unavailable" before another
+      // request can be handed the same single-use refresh token.
+      method: "POST", redirect: "manual", cache: "no-store", signal: AbortSignal.timeout(TOKEN_TIMEOUT_MS),
       headers: { "content-type": "application/json", accept: "application/json" },
       body: JSON.stringify(body),
     });

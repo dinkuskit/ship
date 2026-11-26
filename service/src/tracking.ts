@@ -130,10 +130,15 @@ export async function handleTrackingWebhook(request: Request, env: Env): Promise
   for (const event of events) {
     const parsed = parseEvent(event);
     if (!parsed) { responses.push({ statusCode: 400, errors: [{ message: "unreadable tracking event" }] }); continue; }
-    const where = await trackingIndex(env).find(parsed.tracking);
-    if (!where) { responses.push({ statusCode: 404, errors: [{ message: "not a label Ship sold" }] }); continue; }
-    const recorded = parsed.delivery === null ? true : await recordDelivery(env, where, parsed.delivery);
-    responses.push(recorded ? { statusCode: 200, errors: [] } : { statusCode: 404, errors: [{ message: "label not found" }] });
+    // Each event stands alone: one that fails to record answers 500 for itself and the rest are still recorded.
+    try {
+      const where = await trackingIndex(env).find(parsed.tracking);
+      if (!where) { responses.push({ statusCode: 404, errors: [{ message: "not a label Ship sold" }] }); continue; }
+      const recorded = parsed.delivery === null ? true : await recordDelivery(env, where, parsed.delivery);
+      responses.push(recorded ? { statusCode: 200, errors: [] } : { statusCode: 404, errors: [{ message: "label not found" }] });
+    } catch {
+      responses.push({ statusCode: 500, errors: [{ message: "could not record this event" }] });
+    }
   }
   return json({ responses }, 200, echo);
 }
@@ -160,7 +165,12 @@ export async function checkDeliveries(env: Env): Promise<{ asked: number; moved:
       continue;
     }
     result.asked += 1;
-    if (delivery && await recordDelivery(env, entry, delivery)) result.moved += 1;
+    // A store that cannot record it now counts as failed; the rest of the batch still gets its turn.
+    try {
+      if (delivery && await recordDelivery(env, entry, delivery)) result.moved += 1;
+    } catch {
+      result.failed += 1;
+    }
   }
   if (result.failed) console.error("ship tracking check", JSON.stringify(result));
   return result;

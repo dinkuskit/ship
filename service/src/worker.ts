@@ -147,7 +147,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
   }
   if (url.pathname.startsWith("/stores/") || url.pathname.startsWith("/auth/")) return handlePage(request, env);
   if (url.pathname.startsWith("/print/")) return handlePrint(request, env);
-  if (url.pathname === PB_TRACKING_PATH) return handleTrackingWebhook(request, env);
+  if (url.pathname === PB_TRACKING_PATH) return handleTrackingWebhook(request, env).catch(error => respond(toOutcome(error)));
   try {
     const matches = ROUTES.map(candidate => ({ candidate, found: candidate.pattern.exec(url.pathname) })).filter(match => match.found);
     if (matches.length === 0) throw new ServiceError(404, "NOT_FOUND", "not found");

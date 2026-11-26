@@ -175,3 +175,47 @@ test("the daily check asks Pitney Bowes about live labels not yet delivered, and
   // Without the sandbox keys nothing is asked at all.
   expect(await checkDeliveries({ ...env, PB_API_KEY: undefined } as unknown as Env)).toEqual({ asked: 0, moved: 0, failed: 0 });
 });
+
+/** The store env with one store whose Durable Object cannot record anything right now. */
+function oneStoreDown(broken: string): Env {
+  const brokenId = env.SHIP_STORES.idFromName(broken);
+  const stores = new Proxy(env.SHIP_STORES, {
+    get(target, key) {
+      if (key === "get") return (id: DurableObjectId) => id.equals(brokenId)
+        ? { recordDelivery: async () => { throw new Error("store busy"); } }
+        : target.get(id);
+      const value = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  return { ...configured(), SHIP_STORES: stores } as unknown as Env;
+}
+
+test("an update a store cannot record right now answers 500 for that one event, and the others still land", async () => {
+  await soldLabel("9400100000000000000011");
+  const broken = `site-${crypto.randomUUID()}`;
+  await index().add({ tracking: "9400100000000000000012", site: broken, labelId: "label_broken" });
+  const result = await update({ trackingEvents: [
+    event("9400100000000000000012", "InTransit"),
+    event("9400100000000000000011", "InTransit", { eventDescription: "Arrived at USPS Regional Facility" }),
+  ] }, { env: oneStoreDown(broken) });
+  expect(result.status).toBe(200);
+  expect(result.json.responses.map((r: { statusCode: number }) => r.statusCode)).toEqual([500, 200]);
+  expect((await labelOf("9400100000000000000011")).delivery).toMatchObject({ state: "in_transit" });
+});
+
+test("the daily check counts a store that cannot record as failed and still records the rest", async () => {
+  await soldLabel("9400100000000000000013");
+  const broken = `site-${crypto.randomUUID()}`;
+  await index().add({ tracking: "9400100000000000000014", site: broken, labelId: "label_broken" });
+  trackAnswer = tracking => Response.json({ trackingNumber: tracking, status: "InTransit", scanDetailsList: [{ packageStatus: "Acceptance", eventDate: "2026-10-21", eventTime: "07:00:00", scanDescription: "USPS in possession of item" }] });
+  expect(await checkDeliveries(oneStoreDown(broken))).toEqual({ asked: 2, moved: 1, failed: 1 });
+  expect((await labelOf("9400100000000000000013")).delivery).toMatchObject({ state: "in_transit" });
+});
+
+test("a status named like a built-in, such as constructor, is an unknown status and changes nothing", async () => {
+  await soldLabel("9400100000000000000015");
+  const result = await update({ trackingEvents: ["constructor", "toString", "__proto__", "hasOwnProperty"].map(status => event("9400100000000000000015", status)) });
+  expect(result.json.responses.map((r: { statusCode: number }) => r.statusCode)).toEqual([200, 200, 200, 200]);
+  expect((await labelOf("9400100000000000000015")).delivery).toBeNull();
+});

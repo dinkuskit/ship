@@ -210,6 +210,8 @@ export interface LabelEvent {
  */
 export class StoreShipping extends DurableObject<Env> {
   private readonly sql: SqlStorage;
+  /** Cancels in progress, by label, so a second press waits for the first. */
+  private readonly cancels = new Map<string, Promise<Outcome>>();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -758,6 +760,15 @@ export class StoreShipping extends DurableObject<Env> {
    * the store's postage account. A practice label has nothing to void.
    */
   async cancelLabel(labelId: string): Promise<Outcome> {
+    // Two presses at once share one answer, so Pitney Bowes is asked to void a label only once.
+    const running = this.cancels.get(labelId);
+    if (running) return running;
+    const cancel = this.cancelOnce(labelId).finally(() => this.cancels.delete(labelId));
+    this.cancels.set(labelId, cancel);
+    return cancel;
+  }
+
+  private async cancelOnce(labelId: string): Promise<Outcome> {
     try {
       await this.admitLabel(labelId);
       const row = this.sql.exec<{ order_id: string; version: number; test: number; shipment_id: string | null; tracking: string; status: Label["status"] }>(
