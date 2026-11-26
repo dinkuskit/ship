@@ -116,7 +116,7 @@ the forward below is for.
 | `POST /v1/admin/settings/reply-to` with `{ replyTo }` | The same. |
 | `POST /v1/admin/settings/boxes` with `{ name, lengthIn, widthIn, heightIn, weightOz }` | `201 { settings: SettingsPage }`, or `400 INVALID_INPUT`. |
 | `POST /v1/admin/settings/boxes/{boxId}/remove` | `200 { settings: SettingsPage }`. |
-| `POST /v1/admin/settings/postage` with `{ username, password }` | `200 { settings: SettingsPage }` once Pitney Bowes finds the account (ship-pitney-connect-in-admin-138); `422` when it does not; `400 INVALID_INPUT` without `x-ship-admin-user`. The password goes to Pitney Bowes once and Ship keeps neither it nor the username; `connectedBy` is `admin:<email>`. |
+| `POST /v1/admin/settings/postage` with `{ username, password }` | `200 { settings: SettingsPage }` once Pitney Bowes finds the account (ship-pitney-connect-in-admin-138); `422` when it does not; `409 POSTAGE_SETTINGS_CHANGED` if a Connect or Disconnect already changed the settings during the check; `400 INVALID_INPUT` without `x-ship-admin-user`. The password goes to Pitney Bowes once and Ship keeps neither it nor the username; `connectedBy` is `admin:<email>`. |
 | `POST /v1/admin/settings/postage/disconnect` | `200 { settings: SettingsPage }`. |
 
 Every settings route refuses a field the form does not have (`400 INVALID_INPUT`)
