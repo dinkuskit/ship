@@ -199,6 +199,44 @@ test("the confirmed retry does not buy for a superseded address while the carrie
   expect((await events()).json).toMatchObject([{ orderId: "order:abc", version: 2, tracking: "SANDBOX-TRACKING-A" }]);
 });
 
+test.each([400, 504])("overlapping confirmations of one missing purchase cannot start two replacements (carrier HTTP %i)", async status => {
+  await sendOrder();
+  const boxId = await setUp();
+  const buy = (buyAgain = false) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version: 1, boxId, weightOz: 28, service: "GA", buyAgain, by: "staff@example.test" },
+  });
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : undefined;
+  expect((await buy()).json.error.code).toBe("PITNEY_BOWES_NO_ANSWER");
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void;
+    const promise = new Promise<T>(done => { resolve = done; });
+    return { promise, resolve };
+  }
+  const held = [deferred<void>(), deferred<void>()];
+  const replies = [deferred<Response>(), deferred<Response>()];
+  let lookups = 0;
+  shipmentAnswer = method => {
+    if (method === "POST") return new Response(null, { status });
+    const index = lookups++;
+    held[index]!.resolve();
+    return replies[index]!.promise;
+  };
+  const first = buy(true);
+  await held[0]!.promise;
+  const second = buy(true);
+  await held[1]!.promise;
+  replies[0]!.resolve(new Response(null, { status: 404 }));
+  const attempted = await first;
+  replies[1]!.resolve(new Response(null, { status: 404 }));
+  const duplicate = await second;
+
+  expect(attempted.status).toBe(status === 400 ? 422 : 502);
+  expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(2);
+  expect(duplicate.status).toBe(409);
+  expect(duplicate.json.error.code).toBe("LABEL_IN_PROGRESS");
+});
+
 test("orders, labels and settings stored before item options keep working, and options sent later come through the real routes (commerce#264)", async () => {
   // A store as it stands before this change: an order without options, a bought label, ship-from and a box.
   await sendOrder();

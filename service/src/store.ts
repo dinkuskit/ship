@@ -668,7 +668,12 @@ export class StoreShipping extends DurableObject<Env> {
       if (input.fields.buyAgain !== "yes") {
         refuse("CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", 409);
       }
-      this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? AND state = ?", earlier.transaction_id, earlier.state);
+      // This answer is about that transaction only. Claim it before buying, even if
+      // another request already tried a replacement and the carrier refused it.
+      const claimed = this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? AND state = ? RETURNING transaction_id", earlier.transaction_id, earlier.state);
+      if (claimed.toArray().length === 0) {
+        refuse("LABEL_IN_PROGRESS", "Another request handled this label attempt while Ship checked it. Reload the order before trying again.", 409);
+      }
     }
     // Nothing above may have changed while Ship waited on Pitney Bowes.
     this.refuseIfLabeled(order.orderId, order.version);
