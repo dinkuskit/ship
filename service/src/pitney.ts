@@ -384,7 +384,7 @@ export async function trackParcel(config: PbConfig, tracking: string): Promise<D
   const latest = scans.map(scan => ({ scan, at: scanTime(scan.eventDate, scan.eventTime, scan.eventTimeOffset) })).sort((a, b) => (a.at < b.at ? 1 : -1))[0];
   // PB names the package's current status beside the scans; a Delivered status with its delivery time wins over any scan.
   const status = typeof body.status === "string" ? body.status : typeof body.currentStatus === "string" ? body.currentStatus : null;
-  if (status === "Delivered") return deliveryFromScan("Delivered", latest?.scan.scanDescription, scanTime(body.deliveryDate, body.deliveryTime, undefined, latest ? new Date(latest.at) : undefined));
+  if (status === "Delivered") return deliveryFromScan("Delivered", latest?.scan.scanDescription, scanTime(body.deliveryDate, body.deliveryTime, body.deliveryTimeOffset, latest ? new Date(latest.at) : undefined));
   if (!latest) return status ? deliveryFromScan(status, null, new Date().toISOString()) : null;
   return deliveryFromScan(latest.scan.packageStatus ?? status, latest.scan.scanDescription, latest.at);
 }

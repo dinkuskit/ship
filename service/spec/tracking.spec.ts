@@ -191,6 +191,27 @@ function oneStoreDown(broken: string): Env {
   return { ...configured(), SHIP_STORES: stores } as unknown as Env;
 }
 
+test("the daily check records a recovered delivery in the carrier's time zone", async () => {
+  const tracking = "FIXTUREDELIVERY001";
+  await soldLabel(tracking);
+  const earlier = await update({ trackingEvents: [event(tracking, "OutForDelivery", {
+    eventDate: "2026-10-22", eventTime: "10:00:00", eventTimeOffset: "-04:00",
+  })] });
+  expect(earlier.json.responses[0].statusCode).toBe(200);
+  expect((await labelOf(tracking)).delivery).toMatchObject({ state: "out_for_delivery", at: "2026-10-22T14:00:00.000Z" });
+
+  // The delivery webhook never arrived. The scan is at 15:15Z; Ship uses
+  // the delivery summary's timestamp, while the scan supplies the note.
+  trackAnswer = () => Response.json({ trackingNumber: tracking, status: "Delivered", deliveryDate: "2026-10-22",
+    deliveryTime: "11:30:00", deliveryTimeOffset: "-04:00", scanDetailsList: [
+      { packageStatus: "Delivered", eventDate: "2026-10-22", eventTime: "10:15:00", eventTimeOffset: "-05:00", scanDescription: "Delivered, Front Door" },
+    ],
+  });
+  await checkDeliveries(env as unknown as Env);
+  expect((await labelOf(tracking)).delivery).toEqual({ state: "delivered", at: "2026-10-22T15:30:00.000Z", note: "Delivered, Front Door" });
+  expect(await index().due()).toEqual([]);
+});
+
 test("an update a store cannot record right now answers 500 for that one event, and the others still land", async () => {
   await soldLabel("9400100000000000000011");
   const broken = `site-${crypto.randomUUID()}`;
