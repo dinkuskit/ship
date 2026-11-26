@@ -404,6 +404,7 @@ export class StoreShipping extends DurableObject<Env> {
     this.ctx.storage.transactionSync(() => {
       if (account) this.setMeta("pb_account", JSON.stringify(account));
       else this.sql.exec("DELETE FROM store_meta WHERE key = 'pb_account'");
+      // A Disconnect also supersedes pending checks when no account was saved.
       this.setMeta("pb_account_revision", crypto.randomUUID());
     });
   }

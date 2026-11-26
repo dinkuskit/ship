@@ -157,14 +157,18 @@ test("the plugin connects the owner's Pitney Bowes account without Ship keeping 
 });
 
 test.each([
-  ["Disconnect", 200], ["Connect", 200], ["Disconnect", 401], ["Connect", 401],
-] as const)("a slower postage check cannot supersede a completed %s (carrier HTTP %i)", async (action, carrierStatus) => {
+  ["Disconnect", 200, "connected"], ["Connect", 200, "connected"],
+  ["Disconnect", 401, "connected"], ["Connect", 401, "connected"],
+  ["Disconnect", 200, "disconnected"], ["Disconnect", 401, "disconnected"],
+] as const)("a slower postage check cannot supersede a completed %s (carrier HTTP %i, initially %s)", async (action, carrierStatus, initial) => {
   const connect = () => call("POST", "/v1/admin/settings/postage", {
     body: { username: "owner@example.test", password: "not-a-real-login" }, adminUser: "admin@example.test",
   });
   const settings = () => call("GET", "/v1/admin/settings");
-  // Connect once; the other tab can still have the earlier Connect form open.
-  expect((await connect()).status).toBe(200);
+  // Another tab may still have an earlier Connect or Disconnect control open.
+  if (initial === "connected") expect((await connect()).status).toBe(200);
+  const before = await settings();
+  expect(before.json.settings.postageAccount?.accountEnding ?? null).toBe(initial === "connected" ? "0042" : null);
   let started!: () => void;
   const checking = new Promise<void>(resolve => { started = resolve; });
   let finish!: (response: Response) => void;
@@ -177,6 +181,7 @@ test.each([
     const current = action === "Disconnect" ? await call("POST", "/v1/admin/settings/postage/disconnect") : await connect();
     expect(current.status).toBe(200);
     expect(current.json.settings.postageAccount?.accountEnding ?? null).toBe(action === "Disconnect" ? null : "0091");
+    if (initial === "disconnected") expect(current.json.settings).toEqual(before.json.settings);
   } finally {
     finish(carrierStatus === 200 ? Response.json(merchant) : new Response(null, { status: carrierStatus }));
   }
