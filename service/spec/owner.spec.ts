@@ -676,9 +676,10 @@ test("when Pitney Bowes has no record of a lost purchase, the owner decides whet
   pbAnswer = sandbox;
   const ask = await buy();
   expect(ask.status).toBe(409);
-  expect(await ask.text()).toContain('name="buyAgain"');
+  const retryTransactionId = (await ask.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(retryTransactionId).toBe(creates()[0]!.headers.get("x-pb-transactionid"));
   expect(creates()).toHaveLength(1);
-  expect((await buy({ buyAgain: "yes" })).status).toBe(303);
+  expect((await buy({ buyAgain: retryTransactionId! })).status).toBe(303);
   expect(creates()).toHaveLength(2);
   expect(creates()[1]!.headers.get("x-pb-transactionid")).not.toBe(creates()[0]!.headers.get("x-pb-transactionid"));
   expect(await labels()).toHaveLength(1);
@@ -895,7 +896,12 @@ test("an answer Ship cannot read as a label says which part was missing, in plai
   ];
   for (const [answer, expected] of answers) {
     pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? Response.json(answer) : sandbox(call);
-    const page = await buy({ buyAgain: "yes" });
+    let page = await buy();
+    if (page.status === 409) {
+      const retry = (await page.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+      expect(retry).toBeTruthy();
+      page = await buy({ buyAgain: retry! });
+    }
     expect(page.status).toBe(502);
     const text = await page.text();
     expect(text).toContain(expected);

@@ -145,9 +145,13 @@ export async function quoteAdminLabel(store: Store, orderId: string, input: unkn
 }
 
 export async function buyAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {
-  const fields = labelFields(body(input), ["version", "boxId", "weightOz", "service", "kind"]);
-  if (body(input).buyAgain === true) fields.buyAgain = "yes";
-  const outcome = await outcomeOf(store.buyLabel({ orderId, fields, uid: actor(body(input)) }));
+  const payload = body(input);
+  const fields = labelFields(payload, ["version", "boxId", "weightOz", "service", "kind", "retryTransactionId"]);
+  // Refuse confirmations from older plugins rather than treating them as a fresh buy.
+  if (payload.buyAgain !== undefined && payload.buyAgain !== false) {
+    fields.buyAgain = typeof payload.buyAgain === "string" && /^shp[a-z0-9]{22}$/.test(payload.buyAgain) ? payload.buyAgain : "legacy";
+  }
+  const outcome = await outcomeOf(store.buyLabel({ orderId, fields, uid: actor(payload) }));
   return outcome.ok ? ok({ label: outcome.body }, 201) : outcome;
 }
 

@@ -30,12 +30,13 @@ function interaction(input: unknown): Interaction | null {
   return null;
 }
 
-/** `verb:<version>:<encoded order id>` from a form's submit action. */
-function target(actionId: string): { version: number; orderId: string } | null {
-  const [, version, encoded] = actionId.split(":", 3);
-  if (!version || !encoded || !/^\d{1,15}$/.test(version)) return null;
+/** `verb:<version>:<encoded order id>[:<replacement transaction>]` from a form. */
+function target(actionId: string): { version: number; orderId: string; transactionId?: string } | null {
+  const [verb, version, encoded, transactionId, extra] = actionId.split(":", 5);
+  if (!version || !encoded || !/^\d{1,15}$/.test(version) || extra !== undefined ||
+      transactionId !== undefined && (verb !== "buy" || !/^shp[a-z0-9]{22}$/.test(transactionId))) return null;
   try {
-    return { version: Number(version), orderId: decodeURIComponent(encoded) };
+    return { version: Number(version), orderId: decodeURIComponent(encoded), transactionId };
   } catch {
     return null;
   }
@@ -50,17 +51,17 @@ function labelDraft(values: Record<string, unknown>): NonNullable<OrderView["typ
   const weight = typeof values.weightOz === "number" ? values.weightOz : typeof values.weightOz === "string" ? Number(values.weightOz.trim().replace(/\s*oz\.?$/i, "") || NaN) : NaN;
   const weightOz = Math.round(weight * 10) / 10;
   return { boxId: text(values.boxId), weightOz: Number.isFinite(weightOz) ? weightOz : undefined,
-    service: text(values.service), kind: text(values.kind), buyAgain: values.buyAgain === true };
+    service: text(values.service), kind: text(values.kind) };
 }
 
 /** Check the draft before asking Ship for prices or a label. */
 function labelRequest(version: number, typed: NonNullable<OrderView["typed"]>, by: string): LabelRequest {
-  const { boxId, weightOz, service, kind, buyAgain } = typed;
+  const { boxId, weightOz, service, kind } = typed;
   if (!boxId) throw new ShipError("INPUT", "Pick a box.");
   if (weightOz === undefined || weightOz < 0.1 || weightOz > MAX_WEIGHT_OZ) throw new ShipError("INPUT", `Enter the package weight in ounces, from 0.1 to ${MAX_WEIGHT_OZ} (70 lb).`);
   if (service !== undefined && !(service in SERVICES)) throw new ShipError("INPUT", "Pick a USPS service.");
   return { version, boxId, weightOz, by, ...(service ? { service: service as LabelRequest["service"] } : {}),
-    ...(kind === "practice" ? { kind: "practice" as const } : {}), ...(buyAgain ? { buyAgain: true as const } : {}) };
+    ...(kind === "practice" ? { kind: "practice" as const } : {}) };
 }
 
 /** The order as Ship has it right now, with a fresh five-minute print link when it has a live label. */
@@ -75,11 +76,14 @@ async function openOrder(hosted: Ship, orderId: string, extra: Partial<OrderView
 }
 
 /** A refusal while on an order's page keeps the page, with Ship's reason and what was typed. */
-async function refused(hosted: Ship, orderId: string, error: ShipError, typed: OrderView["typed"], historyFrom: OrderView["historyFrom"], labelInputError?: OrderView["labelInputError"]): Promise<BlockResponse> {
+async function refused(hosted: Ship, orderId: string, error: ShipError, typed: OrderView["typed"], historyFrom: OrderView["historyFrom"], labelInputError?: OrderView["labelInputError"], version?: number): Promise<BlockResponse> {
   if (error.code === "RECONNECT") throw error;
   if (error.code === "NOT_FOUND") return problemPage(hosted.siteId, "Order not at Ship", error.message);
   try {
-    return await openOrder(hosted, orderId, { failure: error.message, typed, labelInputError, askBuyAgain: error.code === "CHECK_PITNEY_BOWES", historyFrom });
+    const replacement = error.retryTransactionId && version !== undefined ? { transactionId: error.retryTransactionId, version } : undefined;
+    const failure = error.code === "CHECK_PITNEY_BOWES" && !replacement
+      ? "Open in Ship to check the last label and confirm a replacement there." : error.message;
+    return await openOrder(hosted, orderId, { failure, typed, labelInputError, replacement, historyFrom });
   } catch (again) {
     return problemPage(hosted.siteId, "Ship could not be used", again instanceof ShipError ? again.message : error.message);
   }
@@ -154,6 +158,9 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       const quote = input.action_id.startsWith("prices:");
       const buy = input.action_id.startsWith("buy:");
       if (!quote && !buy) return { blocks: [] };
+      if (buy && input.values.buyAgain === true && !found.transactionId) {
+        return await refused(hosted, found.orderId, new ShipError("LABEL_ATTEMPT_CHANGED", "This confirmation no longer applies. Check the label again, or open Ship to confirm a replacement there."), typed, historyFrom);
+      }
       let request: LabelRequest;
       try {
         request = labelRequest(found.version, typed, by);
@@ -173,11 +180,15 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
           const prices = await hosted.prices(found.orderId, request);
           return await openOrder(hosted, found.orderId, { prices, typed, historyFrom });
         }
+        if (found.transactionId && request.kind !== "practice") {
+          if (input.values.buyAgain === true) request.buyAgain = found.transactionId;
+          else request.retryTransactionId = found.transactionId;
+        }
         const label = await hosted.buy(found.orderId, request);
         const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
         return await openOrder(hosted, found.orderId, { historyFrom }, { type: "success", message });
       } catch (error) {
-        if (error instanceof ShipError) return await refused(hosted, found.orderId, error, typed, historyFrom);
+        if (error instanceof ShipError) return await refused(hosted, found.orderId, error, typed, historyFrom, undefined, found.version);
         throw error;
       }
     }

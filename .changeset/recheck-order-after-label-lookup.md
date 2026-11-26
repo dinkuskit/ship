@@ -1,4 +1,5 @@
 ---
+"@dinkuskit/ship": patch
 ---
 
-Hosted Ship: recheck the order before replacing a label after an unconfirmed purchase.
+Recheck the order and bind **Buy a new label** to the attempt Ship checked, so a delayed confirmation can't buy postage for a later attempt.

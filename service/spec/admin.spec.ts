@@ -157,7 +157,7 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
 test("the confirmed retry does not buy for a superseded address while the carrier lookup is in flight", async () => {
   await sendOrder();
   const boxId = await setUp();
-  const buy = (version: number, buyAgain = false) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+  const buy = (version: number, buyAgain?: string) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
     body: { version, boxId, weightOz: 28, service: "GA", buyAgain, by: "staff@example.test" },
   });
   const creates = () => pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments");
@@ -169,13 +169,14 @@ test("the confirmed retry does not buy for a superseded address while the carrie
   shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : undefined;
   expect((await buy(1)).json.error.code).toBe("PITNEY_BOWES_NO_ANSWER");
   shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
-  expect((await buy(1)).json.error.code).toBe("CHECK_PITNEY_BOWES");
+  const first = (await buy(1)).json.error;
+  expect(first).toMatchObject({ code: "CHECK_PITNEY_BOWES", retryTransactionId: expect.stringMatching(/^shp[a-z0-9]{22}$/) });
   shipmentAnswer = method => {
     if (method !== "GET") return;
     started();
     return lookup;
   };
-  const retry = buy(1, true);
+  const retry = buy(1, first.retryTransactionId);
   await looking;
   try {
     await sendOrder({ version: 2, shipTo: {
@@ -192,8 +193,9 @@ test("the confirmed retry does not buy for a superseded address while the carrie
   expect((await call("GET", "/v1/admin/orders/order%3Aabc")).json.order.labels).toEqual([]);
 
   shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
-  expect((await buy(2)).json.error.code).toBe("CHECK_PITNEY_BOWES");
-  expect((await buy(2, true)).status).toBe(201);
+  const second = (await buy(2)).json.error;
+  expect(second).toMatchObject({ code: "CHECK_PITNEY_BOWES", retryTransactionId: first.retryTransactionId });
+  expect((await buy(2, second.retryTransactionId)).status).toBe(201);
   expect(creates()).toHaveLength(2);
   expect(creates()[1]!.body.toAddress.addressLines).toEqual(["2 Example Way"]);
   expect((await events()).json).toMatchObject([{ orderId: "order:abc", version: 2, tracking: "SANDBOX-TRACKING-A" }]);
@@ -202,11 +204,14 @@ test("the confirmed retry does not buy for a superseded address while the carrie
 test.each([400, 504])("overlapping confirmations of one missing purchase cannot start two replacements (carrier HTTP %i)", async status => {
   await sendOrder();
   const boxId = await setUp();
-  const buy = (buyAgain = false) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
-    body: { version: 1, boxId, weightOz: 28, service: "GA", buyAgain, by: "staff@example.test" },
+  const buy = (extra: { buyAgain?: string | boolean; retryTransactionId?: string } = {}) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version: 1, boxId, weightOz: 28, service: "GA", by: "staff@example.test", ...extra },
   });
-  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : undefined;
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : new Response(null, { status: 404 });
   expect((await buy()).json.error.code).toBe("PITNEY_BOWES_NO_ANSWER");
+  const prompt = (await buy()).json.error;
+  expect(prompt.code).toBe("CHECK_PITNEY_BOWES");
+  const retryTransactionId: string = prompt.retryTransactionId;
 
   function deferred<T>() {
     let resolve!: (value: T) => void;
@@ -222,9 +227,10 @@ test.each([400, 504])("overlapping confirmations of one missing purchase cannot 
     held[index]!.resolve();
     return replies[index]!.promise;
   };
-  const first = buy(true);
+  const first = buy({ buyAgain: retryTransactionId });
   await held[0]!.promise;
-  const second = buy(true);
+  // An unticked form in another tab must not get a prompt based on the stale lookup.
+  const second = buy({ retryTransactionId });
   await held[1]!.promise;
   replies[0]!.resolve(new Response(null, { status: 404 }));
   const attempted = await first;
@@ -234,7 +240,57 @@ test.each([400, 504])("overlapping confirmations of one missing purchase cannot 
   expect(attempted.status).toBe(status === 400 ? 422 : 502);
   expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(2);
   expect(duplicate.status).toBe(409);
-  expect(duplicate.json.error.code).toBe("LABEL_IN_PROGRESS");
+  expect(duplicate.json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
+  expect(duplicate.json.error.retryTransactionId).toBeUndefined();
+  // Another copy of the original confirmation only reaches Ship after the replacement ended.
+  for (const stale of [{ buyAgain: retryTransactionId }, { retryTransactionId }, { buyAgain: true }]) {
+    expect((await buy(stale)).json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
+  }
+  expect(lookups).toBe(2);
+  const creates = () => pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments");
+  expect(creates()).toHaveLength(2);
+  if (status === 504) {
+    shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+    const fresh = (await buy()).json.error;
+    expect(fresh).toMatchObject({ code: "CHECK_PITNEY_BOWES", retryTransactionId: expect.stringMatching(/^shp[a-z0-9]{22}$/) });
+    expect(fresh.retryTransactionId).not.toBe(retryTransactionId);
+    expect((await buy({ buyAgain: fresh.retryTransactionId })).status).toBe(201);
+    expect(creates()).toHaveLength(3);
+  }
+});
+
+test("a delayed unconfirmed lookup cannot prompt to buy after a replacement succeeds", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const buy = (buyAgain?: string) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version: 1, boxId, weightOz: 28, service: "GA", buyAgain, by: "staff@example.test" },
+  });
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : new Response(null, { status: 404 });
+  expect((await buy()).status).toBe(502);
+  const { retryTransactionId } = (await buy()).json.error;
+  let held!: () => void;
+  const started = new Promise<void>(resolve => { held = resolve; });
+  let reply!: (response: Response) => void;
+  const response = new Promise<Response>(resolve => { reply = resolve; });
+  let lookupCount = 0;
+  shipmentAnswer = method => {
+    if (method !== "GET") return;
+    if (++lookupCount > 1) return new Response(null, { status: 404 });
+    held();
+    return response;
+  };
+  const checking = buy();
+  await started;
+  try {
+    expect((await buy(retryTransactionId)).status).toBe(201);
+  } finally {
+    reply(new Response(null, { status: 404 }));
+  }
+  const late = await checking;
+  expect(late.status).toBe(409);
+  expect(late.json.error).toMatchObject({ code: "ALREADY_LABELED" });
+  expect(late.json.error.retryTransactionId).toBeUndefined();
+  expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(2);
 });
 
 test("orders, labels and settings stored before item options keep working, and options sent later come through the real routes (commerce#264)", async () => {

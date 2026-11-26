@@ -625,25 +625,31 @@ test("the live label's tracking number links to USPS, and every label's number s
   assert.match(text(page), /\$9\.35 from your Pitney Bowes postage account/);
 });
 
+const retryTransactionId = `shp${"a".repeat(22)}`;
+
 test("after \"tick Buy a new label\" the form stays on the buy step and the next buy carries the confirmation", async () => {
   const sent = [];
   let answers = 0;
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false }), settings },
-    "POST /v1/admin/orders/order%3Aabc/labels": body => { sent.push(body); return answers++ === 0
-      ? Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer the last time." } }, { status: 409 })
+    "POST /v1/admin/orders/order%3Aabc/labels": body => { sent.push(body); return answers++ < 2
+      ? Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer the last time.", retryTransactionId } }, { status: 409 })
       : Response.json({ label: label({ test: false, service: body.service, tracking: "9400100000000000000003" }) }, { status: 201 }); },
     "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig", expiresAt: "2026-10-19T22:05:00.000Z" },
   } });
   const refused = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31, service: "PM" } });
   const form = refused.blocks.find(block => block.type === "form");
-  assert.equal(form.submit.action_id, "buy:1:order%3Aabc");
+  assert.equal(form.submit.action_id, `buy:1:order%3Aabc:${retryTransactionId}`);
   assert.equal(form.submit.label, "Buy label");
   assert.equal(form.fields.find(field => field.action_id === "service").initial_value, "PM");
   const toggle = form.fields.find(field => field.action_id === "buyAgain");
   assert.equal(toggle.initial_value, false);
-  const bought = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31, service: "PM", buyAgain: true } });
-  assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 31, service: "PM", buyAgain: true, by: "staff@example.test" });
+  const submit = buyAgain => h.page({ type: "form_submit", action_id: form.submit.action_id, values: { boxId: "box_small", weightOz: 31, service: "PM", buyAgain } });
+  await submit(false);
+  assert.equal(sent[1].retryTransactionId, retryTransactionId);
+  assert.equal(sent[1].buyAgain, undefined);
+  const bought = await submit(true);
+  assert.deepEqual(sent[2], { version: 1, boxId: "box_small", weightOz: 31, service: "PM", buyAgain: retryTransactionId, by: "staff@example.test" });
   assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 0);
   assert.match(bought.toast.message, /Label bought, \$9\.35\. Tracking 9400100000000000000003/);
 });
@@ -655,7 +661,7 @@ test("an invalid replacement label weight returns to prices without carrying pur
       "GET /v1/admin/orders/order%3Aabc": { order: order({ test: isTest }), settings },
       "POST /v1/admin/orders/order%3Aabc/labels": body => {
         sent.push({ route: "labels", body });
-        return Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes has no record of the last label." } }, { status: 409 });
+        return Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes has no record of the last label.", retryTransactionId } }, { status: 409 });
       },
       "POST /v1/admin/orders/order%3Aabc/prices": body => {
         sent.push({ route: "prices", body });
@@ -665,8 +671,9 @@ test("an invalid replacement label weight returns to prices without carrying pur
     const replacement = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
       boxId: "box_small", weightOz: 31, service: "PM",
     } });
-    assert.equal(replacement.blocks.find(block => block.type === "form").fields.find(field => field.action_id === "buyAgain").initial_value, false);
-    const refused = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: {
+    const form = replacement.blocks.find(block => block.type === "form");
+    assert.equal(form.fields.find(field => field.action_id === "buyAgain").initial_value, false);
+    const refused = await h.page({ type: "form_submit", action_id: form.submit.action_id, values: {
       boxId: "box_small", weightOz: "31x", service: "PM", buyAgain: true,
     } });
     const retry = refused.blocks.find(block => block.type === "form");
@@ -758,10 +765,28 @@ test("a Completed order keeps its label's Print and Cancel, and gets no form", a
   assert.doesNotMatch(text(page), /Ship makes no label for it/);
 });
 
+test("an unbound or out-of-date replacement form never carries purchase approval forward", async () => {
+  for (const [version, id] of [[1, undefined], [2, retryTransactionId]]) {
+    const purchases = [];
+    const h = host({ ship: {
+      "GET /v1/admin/orders/order%3Aabc": { order: order({ version, test: false }), settings },
+      "POST /v1/admin/orders/order%3Aabc/labels": body => {
+        purchases.push(body);
+        return Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer.", retryTransactionId: id } }, { status: 409 });
+      },
+    } });
+    const values = { boxId: "box_small", weightOz: 31, service: "PM" };
+    const press = extra => h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { ...values, ...extra } });
+    assert.equal((await press({})).blocks.find(block => block.type === "form").fields.some(field => field.action_id === "buyAgain"), false);
+    assert.match(text(await press({ buyAgain: true })), /confirmation no longer applies/);
+    assert.equal(purchases.length, 1);
+  }
+});
+
 test("Ship's refusals keep the order page, with the reason and what was typed", async () => {
   const h = host({ ship: {
-    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
-    "POST /v1/admin/orders/order%3Aabc/labels": () => Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer the last time." } }, { status: 409 }),
+    "GET /v1/admin/orders/order%3Aabc": { order: order({ test: false }), settings },
+    "POST /v1/admin/orders/order%3Aabc/labels": () => Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Pitney Bowes did not answer the last time.", retryTransactionId } }, { status: 409 }),
     "POST /v1/admin/orders/order%3Aabc/prices": () => Response.json({ error: { code: "ORDER_CHANGED", message: "The order changed in Commerce since this page opened." } }, { status: 409 }),
   } });
   const refused = await h.page({ type: "form_submit", action_id: "buy:1:order%3Aabc", values: { boxId: "box_small", weightOz: 31, service: "GA" } });

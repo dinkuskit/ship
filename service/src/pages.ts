@@ -33,6 +33,10 @@ table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:8px 6px;
 .test{background:var(--warnbg);color:var(--warn);border-color:var(--warn)}.notice{background:var(--warnbg);color:var(--warn);padding:10px 12px;border-radius:6px;margin:12px 0}
 .error{color:var(--bad);font-weight:600}form.inline{display:inline}label{display:block;margin:8px 0 2px;font-weight:600}
 input,select{font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);width:100%;max-width:420px}
+.label-purchase #weightOz{width:10rem}
+.label-purchase .replacement{display:flex;align-items:center;gap:8px;min-height:44px}
+.label-purchase .replacement input{width:auto}
+@media (max-width:600px){.label-purchase select,.label-purchase #weightOz{min-height:44px;font-size:16px}}
 .row{display:flex;gap:8px;flex-wrap:wrap}.row>div{flex:1;min-width:90px}
 button{font:inherit;min-height:44px;padding:7px 14px;border-radius:6px;border:1px solid var(--accent);background:var(--accent);color:var(--button-text);cursor:pointer;margin-top:12px}
 button.secondary{background:transparent;color:var(--accent)}button:disabled{opacity:.5;cursor:not-allowed}
@@ -106,7 +110,7 @@ function labelRow(site: string, label: Label, current: boolean): string {
 
 /** What the label form shows besides the order: an error, the owner's last choices, prices. */
 export interface LabelForm {
-  error?: string; fields?: Record<string, string>; quotes?: Quotes; askBuyAgain?: boolean;
+  error?: string; fields?: Record<string, string>; quotes?: Quotes; retryTransactionId?: string;
   /** The latest completion's shipped email. */
   shippedEmail?: { state: string; sentAt: number | null } | null;
 }
@@ -153,7 +157,7 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
     ? `<p>This order is Completed in Commerce${order.completed?.tracking ? ` with tracking ${esc(order.completed.tracking)}` : ""}.</p>${
       options.shippedEmail && EMAIL_STATES[options.shippedEmail.state] ? `<p class="muted">${esc(EMAIL_STATES[options.shippedEmail.state])}${order.test ? " TEST orders email you, never the shopper." : ""}</p>` : ""}`
     : label ? `<p>This order has a label. Commerce marks it Completed with the tracking number on its next check.</p>`
-    : `<form method="post" action="${base}/labels">
+    : `<form class="label-purchase" method="post" action="${base}/labels">
       <input type="hidden" name="version" value="${order.version}">
       <label for="boxId">Box</label><select id="boxId" name="boxId" required>${settings.boxes.map(box =>
         `<option value="${esc(box.boxId)}"${box === chosenBox ? " selected" : ""}>${esc(box.name)}: ${box.lengthIn} × ${box.widthIn} × ${box.heightIn} in, ${box.weightOz} oz empty</option>`).join("")}</select>
@@ -162,7 +166,7 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
       <p class="muted">Items ${Math.round(knownWeight * 10) / 10} oz plus the empty box. Change it if your scale says otherwise.</p>
       <label for="service">Service</label><select id="service" name="service">${Object.entries(SERVICES).map(([code, name]) =>
         `<option value="${code}"${code === chosenService ? " selected" : ""}>${esc(name)}${esc(price(code as ServiceCode))}</option>`).join("")}</select>
-      ${options.askBuyAgain ? '<label><input type="checkbox" name="buyAgain" value="yes" style="width:auto"> Buy a new label (Pitney Bowes has no record of the last one)</label>' : ""}
+      ${options.retryTransactionId ? `<input type="hidden" name="retryTransactionId" value="${esc(options.retryTransactionId)}"><label class="replacement"><input type="checkbox" name="buyAgain" value="${esc(options.retryTransactionId)}"> Buy a new label (Pitney Bowes has no record of the last one)</label>` : ""}
       ${sandbox ? `<p class="muted">Sandbox prices come from Pitney Bowes's test system. Nothing is charged to any postage account.</p>
       <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> <button${blocked ? " disabled" : ""}>Make sandbox label</button>
       <button class="secondary" name="kind" value="practice"${blocked ? " disabled" : ""}>Make practice label instead</button>`

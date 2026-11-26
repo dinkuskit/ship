@@ -654,6 +654,12 @@ export class StoreShipping extends DurableObject<Env> {
     if (order.test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "TEST orders get practice labels while Ship is not on the Pitney Bowes sandbox.", 409);
     const config = this.postageConfig(order.test);
     const earlier = this.openPurchase(order.orderId);
+    const confirmation = input.fields.buyAgain;
+    const changed = () => refuse("LABEL_ATTEMPT_CHANGED", confirmation === "legacy"
+      ? "This confirmation uses an older form. Open Ship to check the label and confirm a replacement there."
+      : "This confirmation no longer applies. Check the label again before confirming a replacement.", 409);
+    const retry = confirmation || input.fields.retryTransactionId;
+    if (retry && retry !== earlier?.transaction_id) changed();
     if (earlier) {
       if (earlier.state === "pending" && Date.now() - earlier.created_at < IN_FLIGHT_MS) {
         refuse("LABEL_IN_PROGRESS", "Ship is buying a label for this order right now. Reload the page in a moment.", 409);
@@ -665,15 +671,14 @@ export class StoreShipping extends DurableObject<Env> {
       const current = this.readOrder(order.orderId);
       if (!current) refuse("NOT_FOUND", "Ship has not received this order.", 404);
       this.requireLabelVersion(current, order.version);
-      if (input.fields.buyAgain !== "yes") {
-        refuse("CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", 409);
+      this.refuseIfLabeled(order.orderId, order.version);
+      if (this.openPurchase(order.orderId)?.transaction_id !== earlier.transaction_id) changed();
+      if (!confirmation) {
+        throw new ServiceError(409, "CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", { retryTransactionId: earlier.transaction_id });
       }
-      // This answer is about that transaction only. Claim it before buying, even if
-      // another request already tried a replacement and the carrier refused it.
-      const claimed = this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? AND state = ? RETURNING transaction_id", earlier.transaction_id, earlier.state);
-      if (claimed.toArray().length === 0) {
-        refuse("LABEL_IN_PROGRESS", "Another request handled this label attempt while Ship checked it. Reload the order before trying again.", 409);
-      }
+      // Claim this exact transaction before starting its replacement in the same turn.
+      const claimed = this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? RETURNING transaction_id", earlier.transaction_id);
+      if (claimed.toArray().length === 0) changed();
     }
     // Nothing above may have changed while Ship waited on Pitney Bowes.
     this.refuseIfLabeled(order.orderId, order.version);
