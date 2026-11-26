@@ -18,6 +18,7 @@ let issuer: string;
 let privateKey: CryptoKey;
 let sessionKey: string;
 let pbCalls: { method: string; path: string; body: any }[];
+let shipmentAnswer: (method: string) => Response | Promise<Response> | undefined;
 
 const configured = () => ({
   ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: `${issuer}/jwks`,
@@ -32,6 +33,7 @@ beforeEach(async () => {
   privateKey = keys.privateKey;
   const jwk = { ...await exportJWK(keys.publicKey), kid: "synthetic", alg: "ES256", use: "sig" };
   pbCalls = [];
+  shipmentAnswer = () => undefined;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new Request(input, init).url;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
@@ -42,6 +44,10 @@ beforeEach(async () => {
     pbCalls.push({ method, path, body });
     if (path === "/oauth/token") return Response.json({ access_token: "synthetic-pb-pass", tokenType: "BearerToken", expiresIn: 36000 });
     if (path === "/shippingservices/v1/rates") return Response.json({ rates: [{ ...body.rates[0], totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }] });
+    if (path === "/shippingservices/v1/shipments") {
+      const answer = shipmentAnswer(method);
+      if (answer) return answer;
+    }
     if (path === "/shippingservices/v1/shipments" && method === "POST") return Response.json({
       shipmentId: "SANDBOX-SHIPMENT-A", parcelTrackingNumber: "SANDBOX-TRACKING-A",
       rates: [{ carrier: "USPS", serviceId: body.rates[0].serviceId, parcelType: "PKG", totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }],
@@ -146,6 +152,51 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   expect(after.json.order.labels).toMatchObject([{ status: "cancelled", refund: "INITIATED" }]);
   expect((await call("GET", "/v1/admin/orders")).json.orders[0].labelStatus).toBe("cancelled");
   expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).json.error.code).toBe("NOT_FOUND");
+});
+
+test("the confirmed retry does not buy for a superseded address while the carrier lookup is in flight", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const buy = (version: number, buyAgain = false) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version, boxId, weightOz: 28, service: "GA", buyAgain, by: "staff@example.test" },
+  });
+  const creates = () => pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments");
+  const events = () => call("GET", "/v1/labels", { scope: "ship:orders" });
+  let started!: () => void;
+  const looking = new Promise<void>(resolve => { started = resolve; });
+  let reply!: (response: Response) => void;
+  const lookup = new Promise<Response>(resolve => { reply = resolve; });
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : undefined;
+  expect((await buy(1)).json.error.code).toBe("PITNEY_BOWES_NO_ANSWER");
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  expect((await buy(1)).json.error.code).toBe("CHECK_PITNEY_BOWES");
+  shipmentAnswer = method => {
+    if (method !== "GET") return;
+    started();
+    return lookup;
+  };
+  const retry = buy(1, true);
+  await looking;
+  try {
+    await sendOrder({ version: 2, shipTo: {
+      name: "Demo Shopper", line1: "2 Example Way", city: "Testville", region: "CA", postalCode: "90000", country: "US",
+    } });
+  } finally {
+    reply(new Response(null, { status: 404 }));
+  }
+  const stale = await retry;
+  expect(stale.status).toBe(409);
+  expect(stale.json.error.code).toBe("ORDER_CHANGED");
+  expect(creates()).toHaveLength(1);
+  expect((await events()).json).toEqual([]);
+  expect((await call("GET", "/v1/admin/orders/order%3Aabc")).json.order.labels).toEqual([]);
+
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  expect((await buy(2)).json.error.code).toBe("CHECK_PITNEY_BOWES");
+  expect((await buy(2, true)).status).toBe(201);
+  expect(creates()).toHaveLength(2);
+  expect(creates()[1]!.body.toAddress.addressLines).toEqual(["2 Example Way"]);
+  expect((await events()).json).toMatchObject([{ orderId: "order:abc", version: 2, tracking: "SANDBOX-TRACKING-A" }]);
 });
 
 test("orders, labels and settings stored before item options keep working, and options sent later come through the real routes (commerce#264)", async () => {

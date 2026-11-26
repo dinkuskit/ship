@@ -542,10 +542,7 @@ export class StoreShipping extends DurableObject<Env> {
     if (!summary) refuse("NOT_FOUND", "Ship has not received this order.", 404);
     const { order } = summary;
     this.admitStoredOrder(order);
-    if (formNumber(fields, "version", "Order version", 1, Number.MAX_SAFE_INTEGER) !== order.version) {
-      refuse("ORDER_CHANGED", "The order changed in Commerce since this page opened. Reload to see the latest.", 409);
-    }
-    if (order.status !== "processing") refuse("ALREADY_COMPLETED", "This order is already Completed in Commerce.", 409);
+    this.requireLabelVersion(order, formNumber(fields, "version", "Order version", 1, Number.MAX_SAFE_INTEGER));
     this.refuseIfLabeled(order.orderId, order.version);
     if (!summary.address.ok) refuse("ADDRESS_PROBLEM", summary.address.problem, 409);
     const settings = await this.getSettings();
@@ -563,6 +560,13 @@ export class StoreShipping extends DurableObject<Env> {
       service: code, weightOz, lengthIn: box.lengthIn, widthIn: box.widthIn, heightIn: box.heightIn,
     });
     return { order, settings, from, to, box, weightOz, service: service as ServiceCode, shipment };
+  }
+
+  private requireLabelVersion(order: ShipOrder, version: number): void {
+    if (order.version !== version) {
+      refuse("ORDER_CHANGED", "The order changed in Commerce since this page opened. Reload to see the latest.", 409);
+    }
+    if (order.status !== "processing") refuse("ALREADY_COMPLETED", "This order is already Completed in Commerce.", 409);
   }
 
   /** One live label per order version; a purchase still in flight counts too. */
@@ -656,6 +660,11 @@ export class StoreShipping extends DurableObject<Env> {
       }
       const found = await findPurchase(config, earlier.transaction_id);
       if (found) return ok(await this.finishPurchase(earlier, found), 201);
+      // An order update can land during the lookup. Keep the earlier attempt
+      // and require confirmation on the current order before buying anything new.
+      const current = this.readOrder(order.orderId);
+      if (!current) refuse("NOT_FOUND", "Ship has not received this order.", 404);
+      this.requireLabelVersion(current, order.version);
       if (input.fields.buyAgain !== "yes") {
         refuse("CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", 409);
       }
@@ -1088,6 +1097,10 @@ export class StoreShipping extends DurableObject<Env> {
 
   /** The order as Ship last received it, or null. */
   async getOrder(orderId: string): Promise<ShipOrder | null> {
+    return this.readOrder(orderId);
+  }
+
+  private readOrder(orderId: string): ShipOrder | null {
     this.checkIsolation();
     const row = this.sql.exec<{ record: string }>("SELECT record FROM orders WHERE order_id = ?", orderId).toArray()[0];
     const order = row ? JSON.parse(row.record) as ShipOrder : null;
