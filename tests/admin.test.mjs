@@ -863,6 +863,26 @@ test("a locally rejected weight keeps the label draft without advancing or reque
   assert.ok(h.calls.filter(call => call.url.startsWith("https://ship.dinkuskit.com")).every(call => call.method === "GET"));
 });
 
+test("correcting a practice package weight keeps the previously reviewed sandbox service", async () => {
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },
+    "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ GA: 510, PM: 950 }),
+  } });
+  const pack = { boxId: "box_small", weightOz: "30", kind: "sandbox" };
+  const prices = await submit(h, await open(h), pack);
+  const editable = await pick(h, prices, "PM", "prices");
+  const invalid = await submit(h, editable, { ...pack, weightOz: "29x", kind: "practice" });
+  assert.match(text(invalid), /Check label details/);
+  assert.equal(formOn(invalid).fields.find(field => field.action_id === "kind").initial_value, "practice");
+  const practice = await submit(h, invalid, { ...pack, kind: "practice" });
+  assert.equal(servicePicker(practice).initial_value, "GA", "the sandbox choice is not a practice choice");
+  const sandbox = await press(h, button(practice, "Back to sandbox pricing"));
+  const repriced = await submit(h, sandbox, pack);
+  assert.equal(servicePicker(repriced).initial_value, "PM");
+  assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 2);
+  assert.equal(h.calls.filter(call => call.url.endsWith("/labels")).length, 0);
+});
+
 test("invalid pasted weights do not turn into a calculated weight or reuse a sandbox quote", async () => {
   const h = host({ ship: { "GET /v1/admin/orders/order%3Aabc": { order: order(), settings } } });
   const pasted = "weight copied from the packing slip: 29 ounces";

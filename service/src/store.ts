@@ -163,7 +163,7 @@ const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "T
 /** Columns purchases gained when TEST orders got Pitney Bowes sandbox labels. */
 const PURCHASE_COLUMNS = { test: "INTEGER NOT NULL DEFAULT 0" } as const;
 
-function addColumns(sql: SqlStorage, table: "labels" | "purchases", columns: Record<string, string>): void {
+function addColumns(sql: SqlStorage, table: "labels" | "purchases" | "label_quotes", columns: Record<string, string>): void {
   const present = new Set(sql.exec<{ name: string }>(`SELECT name FROM pragma_table_info('${table}')`).toArray().map(row => row.name));
   for (const [column, type] of Object.entries(columns)) {
     if (!present.has(column)) sql.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
@@ -245,6 +245,8 @@ export class StoreShipping extends DurableObject<Env> {
       quote_id TEXT PRIMARY KEY, order_id TEXT NOT NULL, version INTEGER NOT NULL,
       box_id TEXT NOT NULL, dimensions TEXT NOT NULL, weight_oz REAL NOT NULL, services TEXT NOT NULL,
       shipper_id TEXT NOT NULL, test INTEGER NOT NULL, expires_at INTEGER NOT NULL)`);
+    // Receipts written before origin binding have NULL and cannot authorize postage.
+    addColumns(this.sql, "label_quotes", { origin_revision: "TEXT" });
     this.sql.exec("CREATE INDEX IF NOT EXISTS label_quotes_expiry ON label_quotes (expires_at)");
     this.sql.exec("CREATE INDEX IF NOT EXISTS labels_by_order ON labels (order_id, created_at)");
     this.sql.exec(`CREATE TABLE IF NOT EXISTS shipped_emails (
@@ -364,6 +366,10 @@ export class StoreShipping extends DurableObject<Env> {
     };
   }
 
+  private shipFromRevision(): string {
+    return this.meta("ship_from_revision") ?? "initial";
+  }
+
   /** The one US address this store ships from, printed as the label's return address. */
   async saveShipFrom(fields: Fields): Promise<Outcome> {
     try {
@@ -378,7 +384,13 @@ export class StoreShipping extends DurableObject<Env> {
       };
       const checked = labelAddress(shipFrom);
       if (!checked.ok) refuse("INVALID_INPUT", checked.problem.replace(/ (Add|Fix) .*$/, ""));
-      this.setMeta("ship_from", JSON.stringify({ ...shipFrom, region: checked.state, postalCode: checked.zip }));
+      const saved = JSON.stringify({ ...shipFrom, region: checked.state, postalCode: checked.zip });
+      if (this.meta("ship_from") !== saved) {
+        this.ctx.storage.transactionSync(() => {
+          this.setMeta("ship_from", saved);
+          this.setMeta("ship_from_revision", crypto.randomUUID());
+        });
+      }
       return ok(await this.getSettings());
     } catch (error) {
       return toOutcome(error);
@@ -557,6 +569,8 @@ export class StoreShipping extends DurableObject<Env> {
     if (order.status !== "processing") refuse("ALREADY_COMPLETED", "This order is already Completed in Commerce.", 409);
     this.refuseIfLabeled(order.orderId, order.version);
     if (!summary.address.ok) refuse("ADDRESS_PROBLEM", summary.address.problem, 409);
+    // Capture the revision and settings in the same turn; getSettings reads SQLite synchronously.
+    const originRevision = this.shipFromRevision();
     const settings = await this.getSettings();
     if (!settings.shipFrom) refuse("NO_SHIP_FROM", "Add your ship-from address in Settings first.", 409);
     const service = fields.service;
@@ -574,7 +588,7 @@ export class StoreShipping extends DurableObject<Env> {
       to: { name: to.name, lines: to.lines, city: to.city, state: to.state, zip: to.zip },
       service: code, weightOz, lengthIn: box.lengthIn, widthIn: box.widthIn, heightIn: box.heightIn,
     });
-    return { order, settings, from, to, box, weightOz, service: service as ServiceCode, shipment };
+    return { order, settings, from, to, box, weightOz, service: service as ServiceCode, shipment, originRevision };
   }
 
   /** One live label per order version; a purchase still in flight counts too. */
@@ -589,9 +603,9 @@ export class StoreShipping extends DurableObject<Env> {
 
   /** Compare the reviewed package and eligible service at the point of purchase, not on a separate HTTP read. */
   private checkQuote(request: Awaited<ReturnType<StoreShipping["labelRequest"]>>, id: unknown): void {
-    const { box, order, weightOz, service } = request;
+    const { box, order, weightOz, service, originRevision } = request;
     const stale = () => refuse("QUOTE_CHANGED", "The reviewed rates no longer apply. Check prices again before buying a label.", 409);
-    if (typeof id !== "string" || !id) return stale();
+    if (typeof id !== "string" || !id || originRevision !== this.shipFromRevision()) return stale();
     const currentBox = this.sql.exec<QuoteBox>("SELECT length_in, width_in, height_in FROM boxes WHERE box_id = ?", box.boxId).toArray()[0];
     const dimensions = quoteDimensions(box);
     if (!currentBox || `${currentBox.length_in}:${currentBox.width_in}:${currentBox.height_in}` !== dimensions) return stale();
@@ -600,8 +614,8 @@ export class StoreShipping extends DurableObject<Env> {
     if (!latest || latest.status !== "processing" || latest.test !== order.test || JSON.stringify(latest.shipTo) !== JSON.stringify(order.shipTo)) return stale();
     const reviewed = this.sql.exec<{ services: string }>(`SELECT services FROM label_quotes
       WHERE quote_id = ? AND order_id = ? AND version = ? AND box_id = ? AND dimensions = ? AND weight_oz = ?
-      AND shipper_id = ? AND test = ? AND expires_at > ?`, id, order.orderId, order.version, box.boxId,
-      dimensions, weightOz, this.postageConfig(order.test).shipperId, order.test ? 1 : 0, Date.now()).toArray()[0];
+      AND shipper_id = ? AND test = ? AND origin_revision = ? AND expires_at > ?`, id, order.orderId, order.version, box.boxId,
+      dimensions, weightOz, this.postageConfig(order.test).shipperId, order.test ? 1 : 0, originRevision, Date.now()).toArray()[0];
     if (!reviewed?.services.split(",").includes(service)) return stale();
   }
 
@@ -622,12 +636,15 @@ export class StoreShipping extends DurableObject<Env> {
       });
       const result: LabelQuote = { prices: quotes };
       if (input.review) {
+        if (request.originRevision !== this.shipFromRevision()) {
+          refuse("QUOTE_CHANGED", "The ship-from address changed. Check prices again before buying a label.", 409);
+        }
         const now = Date.now(), quoteId = crypto.randomUUID();
         this.sql.exec("DELETE FROM label_quotes WHERE expires_at <= ?", now);
-        this.sql.exec(`INSERT INTO label_quotes (quote_id, order_id, version, box_id, dimensions, weight_oz, services, shipper_id, test, expires_at)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, quoteId, request.order.orderId, request.order.version, request.box.boxId,
+        this.sql.exec(`INSERT INTO label_quotes (quote_id, order_id, version, box_id, dimensions, weight_oz, services, shipper_id, test, origin_revision, expires_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, quoteId, request.order.orderId, request.order.version, request.box.boxId,
           quoteDimensions(request.box), request.weightOz, codes.filter(code => quotes[code] != null).join(","),
-          config.shipperId, request.order.test ? 1 : 0, now + QUOTE_LIFETIME_MS);
+          config.shipperId, request.order.test ? 1 : 0, request.originRevision, now + QUOTE_LIFETIME_MS);
         result.quoteId = quoteId;
       }
       return ok(result);
@@ -692,19 +709,21 @@ export class StoreShipping extends DurableObject<Env> {
     const config = this.postageConfig(order.test);
     const earlier = this.openPurchase(order.orderId);
     const quoteId = input.fields.quoteId;
-    if (quoteId !== undefined) this.checkQuote(request, quoteId);
     if (earlier) {
       if (earlier.state === "pending" && Date.now() - earlier.created_at < IN_FLIGHT_MS) {
         refuse("LABEL_IN_PROGRESS", "Ship is buying a label for this order right now. Reload the page in a moment.", 409);
       }
+      // A lookup concerns postage already bought. Rates matter only if we might buy again.
       const found = await findPurchase(config, earlier.transaction_id);
       if (found) return ok(await this.finishPurchase(earlier, found), 201);
+    }
+    // Validate against the current settings after any carrier lookup. A refused
+    // quote must leave the original attempt available for another lookup.
+    if (quoteId !== undefined) this.checkQuote(request, quoteId);
+    if (earlier) {
       if (input.fields.buyAgain !== "yes") {
         refuse("CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", 409);
       }
-      // A box can be removed while the carrier lookup is in flight. Leave the
-      // original purchase intact if the reviewed package can no longer be used.
-      if (quoteId !== undefined) this.checkQuote(request, quoteId);
       this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? AND state = ?", earlier.transaction_id, earlier.state);
     }
     // Nothing above may have changed while Ship waited on Pitney Bowes.

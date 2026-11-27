@@ -20,6 +20,7 @@ let sessionKey: string;
 let pbCalls: { method: string; path: string; body: any }[];
 let shipmentAnswer: ((method: string) => Promise<Response> | Response | undefined) | undefined;
 let unavailable: string | undefined;
+let beforeRate: ((service: string) => Promise<void>) | undefined;
 
 const configured = () => ({
   ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: `${issuer}/jwks`,
@@ -36,6 +37,7 @@ beforeEach(async () => {
   pbCalls = [];
   shipmentAnswer = undefined;
   unavailable = undefined;
+  beforeRate = undefined;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new Request(input, init).url;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
@@ -45,9 +47,12 @@ beforeEach(async () => {
     const path = new URL(url).pathname, method = init?.method ?? "GET";
     pbCalls.push({ method, path, body });
     if (path === "/oauth/token") return Response.json({ access_token: "synthetic-pb-pass", tokenType: "BearerToken", expiresIn: 36000 });
-    if (path === "/shippingservices/v1/rates") return unavailable === body.rates[0].serviceId
-      ? new Response(null, { status: 400 })
-      : Response.json({ rates: [{ ...body.rates[0], totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }] });
+    if (path === "/shippingservices/v1/rates") {
+      const service = body.rates[0].serviceId;
+      await beforeRate?.(service);
+      return unavailable === service ? new Response(null, { status: 400 })
+        : Response.json({ rates: [{ ...body.rates[0], totalCarrierCharge: PB_PRICES[service], currencyCode: "USD" }] });
+    }
     if (path === "/shippingservices/v1/shipments") {
       const override = shipmentAnswer?.(method);
       if (override) return override;
@@ -178,6 +183,88 @@ test("a quote only applies to its eligible services, package and expiry", async 
   expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
   const fresh = (await call("POST", `${path}/prices`, { body: form })).json.quoteId;
   expect((await buy({ quoteId: fresh })).status).toBe(201);
+});
+
+const labelPath = "/v1/admin/orders/order%3Aabc";
+const carrierShipments = () => pbCalls.filter(c => c.path === "/shippingservices/v1/shipments");
+const labelEvents = async () => (await call("GET", "/v1/labels", { scope: "ship:orders" })).json;
+const saveOrigin = (postalCode: string, city = "Shiptown", region = "NY") => call("POST", "/v1/admin/settings/ship-from", {
+  body: { name: "Demo Store", line1: "2 Warehouse Rd", city, region, postalCode },
+});
+
+async function quotedPackage() {
+  await sendOrder();
+  const form = { version: 1, boxId: await setUp(), weightOz: 28 };
+  const prices = () => call("POST", `${labelPath}/prices`, { body: form });
+  const buy = (quoteId: string, buyAgain?: boolean) => call("POST", `${labelPath}/labels`, {
+    body: { ...form, service: "PM", quoteId, buyAgain, by: "staff@example.test" },
+  });
+  return { prices, buy };
+}
+
+test("changing the ship-from address invalidates a receipt, including after reverting the address", async () => {
+  const { prices, buy } = await quotedPackage();
+  const { quoteId } = (await prices()).json;
+  expect((await saveOrigin("78701", "Austin", "TX")).status).toBe(200);
+  expect(await buy(quoteId)).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect((await saveOrigin("10001")).status).toBe(200);
+  expect((await buy(quoteId)).json.error.code).toBe("QUOTE_CHANGED");
+  expect(carrierShipments()).toEqual([]);
+  expect(await labelEvents()).toEqual([]);
+  const fresh = (await prices()).json.quoteId;
+  // An identical, normalized save has no effect on the route or quote.
+  expect((await saveOrigin("10001", "Shiptown", "ny")).status).toBe(200);
+  expect((await buy(fresh)).status).toBe(201);
+  expect(carrierShipments().map(c => c.body.fromAddress.postalCode)).toEqual(["10001"]);
+  expect(await labelEvents()).toHaveLength(1);
+});
+
+test("an in-flight rates response cannot issue a receipt for a changed ship-from address", async () => {
+  const { prices } = await quotedPackage();
+  beforeRate = async service => {
+    if (service === "PM") expect((await saveOrigin("78701", "Austin", "TX")).status).toBe(200);
+  };
+  expect(await prices()).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT quote_id FROM label_quotes").toArray()).toEqual([]);
+  });
+});
+
+test("an expired receipt can recover the existing label without another shipment POST", async () => {
+  const { prices, buy } = await quotedPackage();
+  const { quoteId } = (await prices()).json;
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING",
+    rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  });
+  expect((await buy(quoteId)).status).toBe(502);
+  await runInDurableObject(shipStore(), async (_, state) => state.storage.sql.exec("UPDATE label_quotes SET expires_at = 0"));
+  expect(await buy(quoteId)).toMatchObject({ status: 201, json: { label: { test: true, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toMatchObject([{ version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" }]);
+});
+
+test("an expired retry receipt cannot replace an unconfirmed purchase, even with approval", async () => {
+  const { prices, buy } = await quotedPackage();
+  const { quoteId } = (await prices()).json;
+  shipmentAnswer = method => new Response(null, { status: method === "POST" ? 504 : 404 });
+  expect((await buy(quoteId)).status).toBe(502);
+  await runInDurableObject(shipStore(), async (_, state) => state.storage.sql.exec("UPDATE label_quotes SET expires_at = 0"));
+  expect(await buy(quoteId, true)).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toEqual([]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT state FROM purchases").toArray()).toEqual([{ state: "unknown" }]);
+  });
+  const fresh = (await prices()).json.quoteId;
+  expect((await buy(fresh)).json.error.code).toBe("CHECK_PITNEY_BOWES");
+  expect(await labelEvents()).toEqual([]);
+  expect(carrierShipments().filter(c => c.method === "POST")).toHaveLength(1);
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  expect((await buy(fresh, true)).status).toBe(201);
+  expect(carrierShipments().filter(c => c.method === "POST")).toHaveLength(2);
+  expect(await labelEvents()).toHaveLength(1);
 });
 
 test("removing the reviewed box during carrier lookup keeps the unresolved purchase and buys nothing new", async () => {

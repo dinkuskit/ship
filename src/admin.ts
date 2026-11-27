@@ -206,8 +206,12 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       const openedForPractice = options.includes("practice");
       if (quote) {
         typed.replace = options.includes("replace");
-        typed.service = options.find(option => Object.hasOwn(SERVICES, option));
+        const preferred = options.find(option => Object.hasOwn(SERVICES, option));
+        // Keep the sandbox choice even if we must redisplay an invalid practice draft.
         if (openedForPractice) typed.kind = "practice";
+        const switchedToPractice = typed.kind === "practice" && !openedForPractice;
+        typed.service = switchedToPractice ? undefined : preferred;
+        if (switchedToPractice) typed.sandboxService = preferred;
       }
       const approveReplacement = buy && typed.replace === true && typed.kind !== "practice"
         && input.type === "form_submit" && input.values.buyAgain === true;
@@ -238,8 +242,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
         if (order.version !== found.version || !box) return stale();
         if (quote) {
           if (practice) {
-            return orderPage({ order, settings, siteId: hosted.siteId, ...review, typed: { ...typed, kind: "practice",
-              ...(practiceOnly || openedForPractice ? {} : { service: undefined, sandboxService: typed.service }) } });
+            return orderPage({ order, settings, siteId: hosted.siteId, ...review, typed: { ...typed, kind: "practice" } });
           }
           const { prices, quoteId } = await hosted.prices(found.orderId, request);
           const issued = quoteIdFrom(quoteId);

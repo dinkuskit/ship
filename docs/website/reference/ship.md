@@ -69,7 +69,7 @@ If any item has no weight in Commerce, the plugin shows its weight as **Not set*
 
 On Ship's own order page, **Labels** keeps the full tracking number, package, postage and **Open PDF to print** / **Cancel label** actions together. On phones each label's fields stack rather than pushing its actions offscreen. Printing reopens the label already bought; it does not buy another one.
 
-If a label purchase's answer is lost, Ship reconciles the original purchase before allowing a new one. If Pitney Bowes has no record of it, check prices for the replacement package, then review the service and price. Tick **Buy a new label** on that review before confirming. If the saved box dimensions change after pricing, check prices again before buying. When sandbox pricing is unavailable, TEST orders use **Choose a service** to review a free practice label without checking prices.
+If a label purchase's answer is lost, Ship checks the original purchase before allowing a new one. Retrying from an open review can recover the label even after its rates expired. If Pitney Bowes has no record of it, check prices for the replacement package, review the service and price, and tick **Buy a new label** before confirming. Check prices again before buying if the saved box dimensions or ship-from address changed after pricing. When sandbox pricing is unavailable, TEST orders use **Choose a service** to review a free practice label without checking prices.
 
 ## Sandbox and practice labels
 
