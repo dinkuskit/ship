@@ -579,6 +579,44 @@ test("opening an order shows the form with the items plus box weight, then price
   assert.ok(bought.blocks.some(block => block.type === "form"));
 });
 
+test("Shipments offers a check-only action after an ambiguous purchase, with an older Worker fallback", async () => {
+  for (const available of [true, false]) {
+    const sent = [];
+    let saved = null;
+    const h = host({ ship: {
+      "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order({ label: saved }), settings }),
+      "POST /v1/admin/orders/order%3Aabc/prices": () => { sent.push("price"); return Response.json(reviewed({ PM: 935 })); },
+      "POST /v1/admin/orders/order%3Aabc/labels": () => {
+        sent.push("buy");
+        return Response.json({ error: { code: "PITNEY_BOWES_NO_ANSWER", message: "Pitney Bowes did not confirm the purchase." } }, { status: 502 });
+      },
+      "POST /v1/admin/orders/order%3Aabc/labels/check": body => {
+        sent.push(["check", body]);
+        if (!available) return Response.json({ error: { code: "NOT_FOUND", message: "No such route" } }, { status: 404 });
+        saved = label();
+        return Response.json({ label: saved });
+      },
+      "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig" },
+    } });
+    const opened = await h.page({ type: "block_action", action_id: "history-order::open", value: "order:abc" });
+    const rated = await submit(h, opened, { boxId: "box_small", weightOz: "30", kind: "sandbox" });
+    const lost = await press(h, button(await pick(h, rated, "PM"), "Create TEST label"));
+    const check = button(lost, "Check last label");
+    assert.equal(check?.action_id, "history-order::check-label:1:order%3Aabc");
+    assert.equal(formOn(lost), undefined);
+    const checked = await press(h, check);
+    assert.deepEqual(sent, ["price", "buy", ["check", { version: 1 }]]);
+    assert.equal(formOn(checked), undefined);
+    assert(button(checked, "Back to Label history"));
+    if (available) assert.match(checked.toast?.message, /Label found/);
+    else {
+      assert.equal(button(checked, "Check last label"), undefined);
+      assert.match(text(checked), /Open in Ship to check the purchase/);
+      assert.equal(controls(checked).find(e => e.type === "link" && e.label === "Open in Ship")?.appearance, "primary");
+    }
+  }
+});
+
 test("Shipments falls back to a quoted service when Ground Advantage is unavailable", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },

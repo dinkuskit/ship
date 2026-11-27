@@ -152,6 +152,11 @@ export async function buyAdminLabel(store: Store, orderId: string, input: unknow
   return outcome.ok ? ok({ label: outcome.body }, 201) : outcome;
 }
 
+export async function checkAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {
+  const outcome = await outcomeOf(store.checkLabel({ orderId, fields: labelFields(body(input), ["version"]) }));
+  return outcome.ok ? ok({ label: outcome.body }) : outcome;
+}
+
 export async function cancelAdminLabel(store: Store, labelId: string): Promise<Outcome> {
   return outcomeOf(store.cancelLabel(labelId));
 }

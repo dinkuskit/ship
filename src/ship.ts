@@ -169,6 +169,7 @@ export interface Ship {
   order(orderId: string): Promise<{ order: ShipOrder; settings: ShipSettings }>;
   prices(orderId: string, request: LabelRequest): Promise<LabelQuote>;
   buy(orderId: string, request: LabelRequest): Promise<Label>;
+  checkLabel(orderId: string, version: number): Promise<Label>;
   cancel(labelId: string): Promise<{ labelId: string; refund: string | null }>;
   printLink(labelId: string): Promise<{ url: string; expiresAt: string }>;
   settings(): Promise<ShipSettingsPage>;
@@ -275,6 +276,7 @@ export function ship(ctx: PluginContext, siteId: string, key: string, adminPage:
     order: id => call("GET", `/v1/admin/orders/${segment(id)}`) as Promise<{ order: ShipOrder; settings: ShipSettings }>,
     prices: (id, request) => call("POST", `/v1/admin/orders/${segment(id)}/prices`, request) as Promise<LabelQuote>,
     buy: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels`, request)) as { label: Label }).label,
+    checkLabel: async (id, version) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels/check`, { version })) as { label: Label }).label,
     cancel: id => call("POST", `/v1/admin/labels/${segment(id)}/cancel`) as Promise<{ labelId: string; refund: string | null }>,
     printLink: id => call("POST", `/v1/admin/labels/${segment(id)}/print-link`) as Promise<{ url: string; expiresAt: string }>,
     settings: async () => ((await call("GET", "/v1/admin/settings")) as { settings: ShipSettingsPage }).settings,

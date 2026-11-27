@@ -123,7 +123,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
   if (parsed.page === SETTINGS_PATH) return settingsAdmin(parsed, isAdmin, route, ctx);
   let input = parsed, historyFrom: OrderView["historyFrom"];
   if (parsed.type !== "page_load" && parsed.action_id.startsWith("history-order:")) {
-    const wrapped = /^history-order:([^:]*):(open|(?:prices|buy|cancel|package|review):.+)$/.exec(parsed.action_id);
+    const wrapped = /^history-order:([^:]*):(open|(?:prices|buy|cancel|package|review|check-label):.+)$/.exec(parsed.action_id);
     if (!wrapped) return { blocks: [] };
     try { historyFrom = decodeURIComponent(wrapped[1]!) || null; } catch { return { blocks: [] }; }
     if (historyFrom !== null && historyCursor({ cursor: historyFrom }) === null) return { blocks: [] };
@@ -168,6 +168,28 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       } catch (error) {
         if (error instanceof ShipError) return await refused(hosted, orderId, error, undefined, historyFrom);
         throw error;
+      }
+    }
+    if (input.type === "block_action" && input.action_id.startsWith("check-label:")) {
+      const found = target(input.action_id);
+      if (!found) return { blocks: [] };
+      const typed = labelDraft(fields(input.value) ?? {});
+      try {
+        const label = await hosted.checkLabel(found.orderId, found.version);
+        return await openOrder(hosted, found.orderId, { historyFrom }, { type: "success", message: `Label found. Tracking ${label.tracking}.` });
+      } catch (error) {
+        if (!(error instanceof ShipError) || error.code === "RECONNECT") throw error;
+        const current = await hosted.order(found.orderId);
+        if (current.order.version !== found.version || error.code === "LABEL_ATTEMPT_CHANGED") {
+          return await showOrder(hosted, current, { failure: current.order.version !== found.version ? "The order changed in Commerce. Review the current details." : error.message, historyFrom });
+        }
+        if (error.code === "CHECK_PITNEY_BOWES") {
+          return await showOrder(hosted, current, { failure: error.message, typed: { ...typed, replace: true }, historyFrom });
+        }
+        return await showOrder(hosted, current, {
+          failure: error.status === 404 ? "Ship cannot check labels from this screen yet. Open in Ship to check the purchase." : error.message,
+          checkLabel: error.status === 404 ? "hosted" : "available", typed, historyFrom,
+        });
       }
     }
     if (input.type === "block_action" && input.action_id.startsWith("package:")) {
@@ -262,6 +284,13 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
         const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
         return await openOrder(hosted, found.orderId, { historyFrom }, { type: "success", message });
       } catch (error) {
+        if (error instanceof ShipError && buy && error.code === "PITNEY_BOWES_NO_ANSWER") {
+          const current = await hosted.order(found.orderId);
+          return await showOrder(hosted, current, {
+            failure: "Pitney Bowes did not confirm the purchase. Check whether it made the label before buying another.",
+            checkLabel: current.order.version === found.version ? "available" : "hosted", typed, historyFrom,
+          });
+        }
         if (error instanceof ShipError) return await refused(hosted, found.orderId, error, typed, historyFrom);
         throw error;
       }

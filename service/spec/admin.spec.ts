@@ -245,6 +245,35 @@ test("an expired receipt can recover the existing label without another shipment
   expect(await labelEvents()).toMatchObject([{ version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" }]);
 });
 
+test("check-only recovery never starts postage and can record a prior purchase without its quote or box", async () => {
+  const { prices, buy } = await quotedPackage();
+  const check = (scope?: string, version = 1) => call("POST", `${labelPath}/labels/check`, { body: { version }, scope });
+  expect((await check("ship:orders")).status).toBe(403);
+  expect(await check()).toMatchObject({ status: 409, json: { error: { code: "LABEL_ATTEMPT_CHANGED" } } });
+  expect(carrierShipments()).toEqual([]);
+  const { quoteId } = (await prices()).json;
+  shipmentAnswer = method => new Response(null, { status: method === "POST" ? 504 : 404 });
+  expect((await buy(quoteId)).status).toBe(502);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    state.storage.sql.exec("UPDATE label_quotes SET expires_at = 0");
+    state.storage.sql.exec("DELETE FROM boxes");
+  });
+  const rates = pbCalls.filter(call => call.path.endsWith("/rates")).length;
+  expect((await check(undefined, 2)).json.error.code).toBe("ORDER_CHANGED");
+  expect((await check()).json.error.code).toBe("CHECK_PITNEY_BOWES");
+  expect(await labelEvents()).toEqual([]);
+  shipmentAnswer = method => method === "GET" ? Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING", rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  }) : new Response(null, { status: 500 });
+  const recovered = await check();
+  expect(recovered).toMatchObject({ status: 200, json: { label: { test: true, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
+  expect((await check()).json.label.labelId).toBe(recovered.json.label.labelId);
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET", "GET"]);
+  expect(pbCalls.filter(call => call.path.endsWith("/rates"))).toHaveLength(rates);
+  expect(await labelEvents()).toHaveLength(1);
+});
+
 test("an expired retry receipt cannot replace an unconfirmed purchase, even with approval", async () => {
   const { prices, buy } = await quotedPackage();
   const { quoteId } = (await prices()).json;
