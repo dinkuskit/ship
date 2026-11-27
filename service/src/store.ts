@@ -665,7 +665,9 @@ export class StoreShipping extends DurableObject<Env> {
   async buyLabel(input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
     try {
       const request = await this.labelRequest(input.orderId, input.fields, true);
-      const practice = request.order.test && (!testUsesSandbox(this.env) || input.fields.kind === "practice");
+      const practiceRequested = input.fields.kind === "practice";
+      if (practiceRequested && !request.order.test) refuse("TEST_ORDER", "Practice labels are only for TEST orders.", 409);
+      const practice = request.order.test && (!testUsesSandbox(this.env) || practiceRequested);
       if (!practice) return await this.postageLabel(request, input);
       if (input.fields.quoteId !== undefined) refuse("QUOTE_CHANGED", "That quote was for postage. Choose a practice label from the current label options.", 409);
       return this.practiceLabel(request, input.uid);
@@ -716,6 +718,11 @@ export class StoreShipping extends DurableObject<Env> {
       // A lookup concerns postage already bought. Rates matter only if we might buy again.
       const found = await findPurchase(config, earlier.transaction_id);
       if (found) return ok(await this.finishPurchase(earlier, found), 201);
+      // A miss only applies to the account we checked. Never discard the original
+      // attempt or buy under the old account if the connection changed meanwhile.
+      if (this.postageConfig(order.test).shipperId !== config.shipperId) {
+        refuse("QUOTE_CHANGED", "The postage account changed. Open the order and check the label options again.", 409);
+      }
     }
     // Validate against the current settings after any carrier lookup. A refused
     // quote must leave the original attempt available for another lookup.

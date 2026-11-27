@@ -297,6 +297,46 @@ test("removing the reviewed box during carrier lookup keeps the unresolved purch
   });
 });
 
+async function fixturePostageAccount(shipperId: string) {
+  await runInDurableObject(shipStore(), async (_, state) => {
+    state.storage.sql.exec("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('pb_account', ?)", JSON.stringify({ shipperId }));
+  });
+}
+
+test("a replacement cannot use a postage account that changed during the lookup", async () => {
+  // A live-marked order tests intent handling; the fetch mock allows only the simulated sandbox carrier.
+  await sendOrder({ test: false });
+  await fixturePostageAccount("fixture-reviewed-account");
+  const form = { version: 1, boxId: await setUp(), weightOz: 28 };
+  const { quoteId } = (await call("POST", `${labelPath}/prices`, { body: form })).json;
+  const buy = (buyAgain?: boolean) => call("POST", `${labelPath}/labels`, {
+    body: { ...form, service: "PM", quoteId, buyAgain, by: "staff@example.test" },
+  });
+  shipmentAnswer = () => new Response(null, { status: 504 });
+  expect((await buy()).status).toBe(502);
+  await fixturePostageAccount("fixture-interim-account");
+  shipmentAnswer = method => method === "GET"
+    ? fixturePostageAccount("fixture-reviewed-account").then(() => new Response(null, { status: 404 }))
+    : undefined;
+  expect(await buy(true)).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toEqual([]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT state FROM purchases").toArray()).toEqual([{ state: "unknown" }]);
+  });
+});
+
+test("an explicit practice request never buys postage for a live-marked order", async () => {
+  await sendOrder({ test: false });
+  await fixturePostageAccount("fixture-reviewed-account");
+  const result = await call("POST", `${labelPath}/labels`, {
+    body: { version: 1, boxId: await setUp(), weightOz: 28, service: "GA", kind: "practice", by: "staff@example.test" },
+  });
+  expect(result).toMatchObject({ status: 409, json: { error: { code: "TEST_ORDER" } } });
+  expect(carrierShipments()).toEqual([]);
+  expect(await labelEvents()).toEqual([]);
+});
+
 test("orders, labels and settings stored before item options keep working, and options sent later come through the real routes (commerce#264)", async () => {
   // A store as it stands before this change: an order without options, a bought label, ship-from and a box.
   await sendOrder();
