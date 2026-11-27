@@ -122,6 +122,8 @@ the forward below is for.
 
 Shipments sends the `quoteId` for new or replacement postage. It is valid for 15 minutes for the same store, ship-from revision, order revision, postage account, box dimensions and package weight, and only the services the carrier returned. It does not approve a replacement or guarantee the carrier's final price. After an ambiguous purchase, **Check last label** uses the check-only route even if the quote expired or the package settings changed. It cannot approve a replacement. A retry first checks whether the carrier already bought the label. If Ship would need fresh postage, a stale or mismatched quote returns `409 QUOTE_CHANGED`; ask for new rates before confirming. For a practice label Shipments sends `reviewedDimensions` as `length:width:height` in inches instead, with no quote. Changed dimensions return `409 BOX_CHANGED`. Older plugins and Ship's own pages can still use their existing label requests; the updated plugin uses **Open in Ship** when the service has not issued a quote ID.
 
+Ship records the postage account and carrier environment on each new pending purchase. A different account or environment returns `409 LABEL_ACCOUNT_CHANGED` rather than looking up or replacing that attempt. The service checks the account again after a carrier miss. For older purchases without an account binding, a positive lookup still recovers the label, but a miss returns `409 LABEL_ACCOUNT_UNVERIFIED`. In both cases the unresolved purchase is kept, and Ship does not offer or start a replacement.
+
 Every settings route refuses a field the form does not have (`400 INVALID_INPUT`)
 and takes each value as a string of at most 300 characters or a number.
 

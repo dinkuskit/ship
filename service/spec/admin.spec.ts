@@ -343,16 +343,77 @@ test("a replacement cannot use a postage account that changed during the lookup"
   });
   shipmentAnswer = () => new Response(null, { status: 504 });
   expect((await buy()).status).toBe(502);
-  await fixturePostageAccount("fixture-interim-account");
   shipmentAnswer = method => method === "GET"
-    ? fixturePostageAccount("fixture-reviewed-account").then(() => new Response(null, { status: 404 }))
+    ? fixturePostageAccount("fixture-other-account").then(() => new Response(null, { status: 404 }))
     : undefined;
-  expect(await buy(true)).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect(await buy(true)).toMatchObject({ status: 409, json: { error: { code: "LABEL_ACCOUNT_CHANGED" } } });
   expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
   expect(await labelEvents()).toEqual([]);
   await runInDurableObject(shipStore(), async (_, state) => {
     expect(state.storage.sql.exec("SELECT state FROM purchases").toArray()).toEqual([{ state: "unknown" }]);
   });
+});
+
+test("a quote on another account cannot replace an unresolved purchase", async () => {
+  // No live carrier is involved; the admin fixture rejects network outside its sandbox double.
+  await sendOrder({ test: false });
+  await fixturePostageAccount("fixture-original-account");
+  const form = { version: 1, boxId: await setUp(), weightOz: 28 };
+  const price = async () => (await call("POST", `${labelPath}/prices`, { body: form })).json.quoteId;
+  const buy = (quoteId: string, buyAgain = false) => call("POST", `${labelPath}/labels`, {
+    body: { ...form, service: "PM", quoteId, buyAgain, by: "staff@example.test" },
+  });
+  const check = () => call("POST", `${labelPath}/labels/check`, { body: { version: 1 } });
+  shipmentAnswer = () => new Response(null, { status: 504 });
+  expect((await buy(await price())).status).toBe(502);
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  expect(carrierShipments()[0]?.body.shipmentOptions).toContainEqual({ name: "SHIPPER_ID", value: "fixture-original-account" });
+  await fixturePostageAccount("fixture-other-account");
+  const freshQuote = await price();
+  expect(freshQuote).toBeTruthy();
+  const checked = await check();
+  const tried = await buy(freshQuote, true);
+  expect([checked.status, checked.json.error?.code, tried.status, tried.json.error?.code, carrierShipments().map(c => c.method), (await labelEvents()).length])
+    .toEqual([409, "LABEL_ACCOUNT_CHANGED", 409, "LABEL_ACCOUNT_CHANGED", ["POST"], 0]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT shipper_id, carrier_origin, state FROM purchases").one())
+      .toEqual({ shipper_id: "fixture-original-account", carrier_origin: PB, state: "unknown" });
+  });
+
+  await fixturePostageAccount("fixture-original-account");
+  shipmentAnswer = method => method === "GET" ? Response.json({
+    shipmentId: "SANDBOX-ORIGINAL", parcelTrackingNumber: "SANDBOX-ORIGINAL-TRACKING", rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  }) : undefined;
+  expect(await check()).toMatchObject({ status: 200, json: { label: { tracking: "SANDBOX-ORIGINAL-TRACKING" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toHaveLength(1);
+});
+
+test("a legacy unresolved purchase permits recovery but not replacement", async () => {
+  await sendOrder();
+  const form = { version: 1, boxId: await setUp(), weightOz: 28 };
+  const { quoteId } = (await call("POST", `${labelPath}/prices`, { body: form })).json;
+  await runInDurableObject(shipStore(), async (_, state) => {
+    state.storage.sql.exec(`INSERT INTO purchases (transaction_id, order_id, version, test, service, box, weight_oz, state, created_by, created_at)
+      VALUES ('shp-legacy', 'order:abc', 1, 1, 'PM', '{}', 28, 'unknown', 'synthetic', 0)`);
+  });
+  const check = () => call("POST", `${labelPath}/labels/check`, { body: { version: 1 } });
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  const checked = await check();
+  const tried = await call("POST", `${labelPath}/labels`, { body: { ...form, service: "PM", quoteId, buyAgain: true, by: "staff@example.test" } });
+  expect([checked.status, checked.json.error?.code, tried.status, tried.json.error?.code, carrierShipments().map(c => c.method), (await labelEvents()).length])
+    .toEqual([409, "LABEL_ACCOUNT_UNVERIFIED", 409, "LABEL_ACCOUNT_UNVERIFIED", ["GET", "GET"], 0]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT transaction_id, state FROM purchases").one()).toEqual({ transaction_id: "shp-legacy", state: "unknown" });
+  });
+  shipmentAnswer = method => method === "GET" ? Response.json({
+    shipmentId: "SANDBOX-LEGACY", parcelTrackingNumber: "SANDBOX-LEGACY-TRACKING", rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  }) : undefined;
+  expect(await check()).toMatchObject({ status: 200, json: { label: { tracking: "SANDBOX-LEGACY-TRACKING", test: true } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["GET", "GET", "GET"]);
+  expect(await labelEvents()).toHaveLength(1);
 });
 
 test("an explicit practice request never buys postage for a live-marked order", async () => {

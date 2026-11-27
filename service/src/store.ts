@@ -63,7 +63,7 @@ export interface PostageAccount {
 
 /** A Pitney Bowes purchase Ship sent and has not finished recording. */
 export type PurchaseState = "pending" | "unknown";
-type Purchase = { transaction_id: string; order_id: string; version: number; test: number; service: string; box: string; weight_oz: number; state: PurchaseState; created_by: string; created_at: number };
+type Purchase = { transaction_id: string; order_id: string; version: number; test: number; service: string; box: string; weight_oz: number; state: PurchaseState; created_by: string; created_at: number; shipper_id: string | null; carrier_origin: string | null };
 
 /** Explicit legal state transitions for labels and in-flight Pitney Bowes purchases. */
 export const LABEL_STATE_TRANSITIONS: Readonly<Record<Label["status"], readonly Label["status"][]>> = {
@@ -160,8 +160,8 @@ function historyCursor(value: string): { createdAt: string; labelId: string } {
 /** Columns labels gained with Pitney Bowes postage; a store made before then gets them added once. */
 const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT", delivery_state: "TEXT", delivery_at: "TEXT", delivery_note: "TEXT" } as const;
 
-/** Columns purchases gained when TEST orders got Pitney Bowes sandbox labels. */
-const PURCHASE_COLUMNS = { test: "INTEGER NOT NULL DEFAULT 0" } as const;
+/** Older attempts keep null provenance; never assign them the currently connected account. */
+const PURCHASE_COLUMNS = { test: "INTEGER NOT NULL DEFAULT 0", shipper_id: "TEXT", carrier_origin: "TEXT" } as const;
 
 function addColumns(sql: SqlStorage, table: "labels" | "purchases" | "label_quotes", columns: Record<string, string>): void {
   const present = new Set(sql.exec<{ name: string }>(`SELECT name FROM pragma_table_info('${table}')`).toArray().map(row => row.name));
@@ -616,6 +616,22 @@ export class StoreShipping extends DurableObject<Env> {
     this.purchaseLookups.add(id);
   }
 
+  private requireLookupAccount(earlier: Purchase, config: PbConfig, test: boolean): void {
+    if (earlier.test !== Number(test) ||
+        earlier.shipper_id !== null && earlier.shipper_id !== config.shipperId ||
+        earlier.carrier_origin !== null && earlier.carrier_origin !== config.origin) {
+      refuse("LABEL_ACCOUNT_CHANGED", "This purchase used a different postage account or mode. Check the original purchase in Pitney Bowes before buying another label.", 409);
+    }
+  }
+
+  private requireReplacementAccount(earlier: Purchase, test: boolean): void {
+    // A legacy transaction can still recover a positive lookup, but a miss cannot prove it is safe to replace.
+    if (earlier.shipper_id === null || earlier.carrier_origin === null) {
+      refuse("LABEL_ACCOUNT_UNVERIFIED", "Ship cannot verify which postage account bought the last label. Check the purchase in Pitney Bowes before buying another label.", 409);
+    }
+    this.requireLookupAccount(earlier, this.postageConfig(test), test);
+  }
+
   /** Recover an existing purchase without ever quoting or creating a shipment. */
   async checkLabel(input: { orderId: string; fields: Fields }): Promise<Outcome> {
     try {
@@ -627,9 +643,10 @@ export class StoreShipping extends DurableObject<Env> {
       if (kept) return ok(kept);
       const earlier = this.openPurchase(order.orderId);
       if (!earlier) refuse("LABEL_ATTEMPT_CHANGED", "No label purchase is waiting to be checked. Open the order to see its current label options.", 409);
-      const test = earlier.test === 1;
+      const test = order.test;
       if (test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "Sandbox postage is unavailable, so Ship cannot check that TEST label now.", 409);
       const config = this.postageConfig(test);
+      this.requireLookupAccount(earlier, config, test);
       this.beginLabelLookup(earlier);
       try {
         const found = await findPurchase(config, earlier.transaction_id);
@@ -637,9 +654,7 @@ export class StoreShipping extends DurableObject<Env> {
         const current = this.readOrder(order.orderId);
         if (!current) refuse("NOT_FOUND", "Ship has not received this order.", 404);
         this.requireLabelVersion(current, order.version);
-        if (this.postageConfig(test).shipperId !== config.shipperId) {
-          refuse("QUOTE_CHANGED", "The postage account changed while Ship checked the label. Open the order and check again.", 409);
-        }
+        this.requireReplacementAccount(earlier, current.test);
         refuse("CHECK_PITNEY_BOWES", "Pitney Bowes has no record of the last label. Review fresh prices before approving another purchase.", 409);
       } finally {
         this.purchaseLookups.delete(earlier.transaction_id);
@@ -760,21 +775,20 @@ export class StoreShipping extends DurableObject<Env> {
     const earlier = this.openPurchase(order.orderId);
     const quoteId = input.fields.quoteId;
     if (earlier) {
+      this.requireLookupAccount(earlier, config, order.test);
       this.beginLabelLookup(earlier);
       try {
         // Rates matter only if we might buy again, not for postage already bought.
         const found = await findPurchase(config, earlier.transaction_id);
         if (found) return ok(await this.finishPurchase(earlier, found), 201);
-        if (this.postageConfig(order.test).shipperId !== config.shipperId) {
-          refuse("QUOTE_CHANGED", "The postage account changed. Open the order and check the label options again.", 409);
-        }
+        const current = this.readOrder(order.orderId);
+        if (!current) refuse("NOT_FOUND", "Ship has not received this order.", 404);
+        this.requireLabelVersion(current, order.version);
+        this.requireReplacementAccount(earlier, current.test);
         if (quoteId !== undefined) this.checkQuote(request, quoteId);
         if (input.fields.buyAgain !== "yes") {
           refuse("CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", 409);
         }
-        const current = this.readOrder(order.orderId);
-        if (!current) refuse("NOT_FOUND", "Ship has not received this order.", 404);
-        this.requireLabelVersion(current, order.version);
         const claimed = this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? AND state = ? RETURNING transaction_id", earlier.transaction_id, earlier.state);
         if (!claimed.toArray().length) refuse("LABEL_ATTEMPT_CHANGED", "The label purchase changed. Open the order again before continuing.", 409);
       } finally {
@@ -789,9 +803,11 @@ export class StoreShipping extends DurableObject<Env> {
     const purchase: Purchase = {
       transaction_id: newTransactionId(), order_id: order.orderId, version: order.version, test: order.test ? 1 : 0, service: request.service,
       box: JSON.stringify(request.box), weight_oz: request.weightOz, state: "pending", created_by: input.uid, created_at: Date.now(),
+      shipper_id: config.shipperId, carrier_origin: config.origin,
     };
-    this.sql.exec(`INSERT INTO purchases (transaction_id, order_id, version, test, service, box, weight_oz, state, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      purchase.transaction_id, purchase.order_id, purchase.version, purchase.test, purchase.service, purchase.box, purchase.weight_oz, purchase.state, purchase.created_by, purchase.created_at);
+    this.sql.exec(`INSERT INTO purchases (transaction_id, order_id, version, test, service, box, weight_oz, state, created_by, created_at, shipper_id, carrier_origin)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, purchase.transaction_id, purchase.order_id, purchase.version, purchase.test, purchase.service,
+      purchase.box, purchase.weight_oz, purchase.state, purchase.created_by, purchase.created_at, purchase.shipper_id, purchase.carrier_origin);
     this.purchaseWrites.add(purchase.transaction_id);
     try {
       let bought: PbLabel;
