@@ -364,6 +364,64 @@ test("a TEST order never reaches Pitney Bowes unless Ship runs on its sandbox wi
   expect(pbCalls).toEqual([]);
 });
 
+test("the hosted practice-only button stays practice if the sandbox becomes available before submit", async () => {
+  const store = shipStore();
+  const sandboxEnabled = (available: boolean) => runInDurableObject(store, instance => {
+    const target = instance as unknown as { env: Env };
+    target.env = { ...target.env, PB_ENVIRONMENT: available ? "sandbox" : "production" };
+  });
+  await sandboxEnabled(false);
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  const page = await (await request("GET", orderPath, { cookie })).text();
+  const button = page.match(/<button([^>]*)>Make practice label<\/button>/)?.[1];
+  expect(button).toBeDefined();
+  const kind = button?.match(/name="kind" value="([a-z]+)"/)?.[1];
+  await sandboxEnabled(true);
+  const form = { version: "1", boxId, weightOz: "28", service: "GA", intent: "buy", ...(kind ? { kind } : {}) };
+  expect((await request("POST", `${orderPath}/labels`, { cookie, form })).status).toBe(303);
+  expect((await store.orderSummary("order:abc"))!.labels[0]).toMatchObject({ test: true, practice: true, priceCents: null });
+  expect(pbCalls).toEqual([]);
+});
+
+test("a busy hosted retry only links back, even if the other tab's replacement is then refused", async () => {
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  const buy = (extra: Record<string, string>) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA", ...extra } });
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy({ intent: "buy" })).status).toBe(502);
+  const ask = await buy({});
+  const approval = (await ask.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(approval).toBeDefined();
+  let enter!: () => void, unblock!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const released = new Promise<void>(resolve => { unblock = resolve; });
+  pbAnswer = async call => {
+    if (call.url.pathname !== "/shippingservices/v1/shipments") return sandbox(call);
+    if (call.method === "POST") return new Response(null, { status: 400 });
+    enter();
+    await released;
+    return sandbox(call);
+  };
+  const checked = buy({ retryTransactionId: approval!, buyAgain: approval! });
+  try {
+    await Promise.race([entered, checked.then(() => { throw new Error("expected a carrier lookup"); })]);
+    const busy = await buy({ retryTransactionId: approval! });
+    expect(busy.status).toBe(409);
+    const html = await busy.text();
+    expect(html).toContain(`href="${orderPath}">Reopen label options</a>`);
+    expect(html).not.toContain('name="intent"');
+    expect(html).not.toContain("label-purchase\" method=");
+  } finally { unblock(); await checked; }
+  expect((await checked).status).toBe(422);
+  expect(creates()).toHaveLength(2);
+  expect(await labels()).toEqual([]);
+});
+
 test("labels are refused for a changed, unaddressable or completed order", async () => {
   const cookie = await signedIn();
   const boxId = await setUp(cookie);
@@ -530,6 +588,16 @@ async function liveOrder() {
   const buy = (form: Record<string, string> = {}) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy", ...form } });
   return { cookie, boxId, orderPath, buy };
 }
+
+test("explicit practice on a live order is refused without a postage call", async () => {
+  const { buy } = await liveOrder();
+  pbCalls.length = 0; // Ignore the synthetic account-connect call.
+  const refused = await buy({ kind: "practice" });
+  expect(refused.status).toBe(409);
+  expect(await refused.text()).toContain("Practice labels are only for TEST orders.");
+  expect(pbCalls).toEqual([]);
+  expect(await labels()).toEqual([]);
+});
 
 test("two cancels of one label at once void it at Pitney Bowes once and both get the same answer", async () => {
   const { buy } = await liveOrder();

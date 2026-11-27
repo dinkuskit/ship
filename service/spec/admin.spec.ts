@@ -303,6 +303,34 @@ test("a pending carrier lookup that finds the original prevents a concurrent rep
   expect(events.json).toHaveLength(1);
 });
 
+test("an open carrier purchase is not looked up while its handler is still running, even after the recovery window", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const buy = (extra: Record<string, string> = {}) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version: 1, boxId, weightOz: 28, service: "GA", by: "staff@example.test", ...extra },
+  });
+  const entered = barrier(), release = barrier();
+  shipmentAnswer = async method => {
+    if (method === "GET") return new Response(null, { status: 404 });
+    entered.resolve();
+    await release.promise;
+    return new Response(null, { status: 504 });
+  };
+  const pending = buy({ intent: "buy" });
+  try {
+    await Promise.race([entered.promise, pending.then(() => { throw new Error("expected a carrier purchase"); })]);
+    // Age the record without advancing timers or stopping the live handler.
+    await runInDurableObject(shipStore(), (_store, state) => {
+      state.storage.sql.exec("UPDATE purchases SET created_at = ?", Date.now() - 61_000);
+    });
+    expect(await buy()).toMatchObject({ status: 409, json: { error: { code: "LABEL_IN_PROGRESS" } } });
+    expect(pbCalls.filter(c => c.path === "/shippingservices/v1/shipments").map(c => c.method)).toEqual(["POST"]);
+  } finally { release.resolve(); await pending; }
+  // As soon as the handler releases its attempt, normal recovery is possible.
+  expect((await buy()).json.error.code).toBe("CHECK_PITNEY_BOWES");
+  expect(pbCalls.filter(c => c.path === "/shippingservices/v1/shipments").map(c => c.method)).toEqual(["POST", "GET"]);
+});
+
 test("an explicitly invalid or unbound retry never becomes a fresh label purchase", async () => {
   await sendOrder();
   const boxId = await setUp();

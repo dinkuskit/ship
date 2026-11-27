@@ -172,7 +172,7 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
       ${sandbox ? `<p class="muted">Sandbox prices come from Pitney Bowes's test system. Nothing is charged to any postage account.</p>
       <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> <button${blocked ? " disabled" : ""}>Make sandbox label</button>
       ${options.retryTransactionId ? `<a class="label-options" href="${base}">Back to label options</a>` : `<button class="secondary" name="kind" value="practice"${blocked ? " disabled" : ""}>Make practice label instead</button>`}`
-      : order.test ? `<button${blocked ? " disabled" : ""}>Make practice label</button>`
+      : order.test ? `<button name="kind" value="practice"${blocked ? " disabled" : ""}>Make practice label</button>`
       : `<p class="muted">${quotes ? "Prices come from your Pitney Bowes postage account." : "Check prices before buying, or buy at the price Pitney Bowes charges."} Postage is paid from your Pitney Bowes postage account.</p>
       <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> <button${blocked ? " disabled" : ""}>Buy label</button>`}</form>`;
   const labels = summary.labels.length
