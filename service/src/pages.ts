@@ -111,7 +111,7 @@ function labelRow(site: string, label: Label, current: boolean): string {
 
 /** What the label form shows besides the order: an error, the owner's last choices, prices. */
 export interface LabelForm {
-  error?: string; fields?: Record<string, string>; quotes?: Quotes; retryTransactionId?: string; reopenLabel?: boolean;
+  error?: string; fields?: Record<string, string>; quotes?: Quotes; retryTransactionId?: string; reopenLabel?: boolean; lookupLabel?: boolean;
   /** The latest completion's shipped email. */
   shippedEmail?: { state: string; sentAt: number | null } | null;
 }
@@ -126,7 +126,7 @@ const EMAIL_STATES: Record<string, string> = {
 
 export function orderPage(site: string, email: string, summary: OrderSummary, settings: Settings, options: LabelForm = {}): string {
   const { order } = summary;
-  const { error, fields = {}, quotes } = options;
+  const { error, fields = {}, quotes, retryTransactionId, lookupLabel } = options;
   const label = liveLabel(summary);
   const knownWeight = order.lines.reduce((sum, line) => sum + (line.weightOz ?? 0) * line.quantity, 0);
   const missingWeight = order.lines.some(line => line.weightOz === undefined);
@@ -154,11 +154,24 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
     const cents = quotes[code];
     return cents === null || cents === undefined ? " (not available for this package)" : `: ${money(cents)}`;
   };
+  const recovering = Boolean(retryTransactionId || lookupLabel);
+  const disabled = blocked ? " disabled" : "";
+  const postageButton = sandbox
+    ? `<button name="kind" value="sandbox"${disabled}>Make sandbox label</button>`
+    : `<button${disabled}>Buy label</button>`;
+  const actions = lookupLabel
+    ? `<button${disabled}>Check last label</button>`
+    : retryTransactionId
+      ? postageButton
+      : order.test && !sandbox
+        ? `<button name="kind" value="practice"${disabled}>Make practice label</button>`
+        : `<button class="secondary" formaction="${base}/prices"${disabled}>See prices</button> ${postageButton}${sandbox
+          ? ` <button class="secondary" name="kind" value="practice"${disabled}>Make practice label instead</button>` : ""}`;
   const form = order.status === "completed"
     ? `<p>This order is Completed in Commerce${order.completed?.tracking ? ` with tracking ${esc(order.completed.tracking)}` : ""}.</p>${
       options.shippedEmail && EMAIL_STATES[options.shippedEmail.state] ? `<p class="muted">${esc(EMAIL_STATES[options.shippedEmail.state])}${order.test ? " TEST orders email you, never the shopper." : ""}</p>` : ""}`
     : label ? `<p>This order has a label. Commerce marks it Completed with the tracking number on its next check.</p>`
-    : options.reopenLabel ? `<p><a class="label-options" href="${base}">Reopen label options</a></p>`
+    : options.reopenLabel || recovering && order.test && !sandbox ? `<p><a class="label-options" href="${base}">Reopen label options</a></p>`
     : `<form class="label-purchase" method="post" action="${base}/labels">
       <input type="hidden" name="version" value="${order.version}">
       <label for="boxId">Box</label><select id="boxId" name="boxId" required>${settings.boxes.map(box =>
@@ -168,13 +181,10 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
       <p class="muted">Items ${Math.round(knownWeight * 10) / 10} oz plus the empty box. Change it if your scale says otherwise.</p>
       <label for="service">Service</label><select id="service" name="service">${Object.entries(SERVICES).map(([code, name]) =>
         `<option value="${code}"${code === chosenService ? " selected" : ""}>${esc(name)}${esc(price(code as ServiceCode))}</option>`).join("")}</select>
-      ${options.retryTransactionId ? `<input type="hidden" name="retryTransactionId" value="${esc(options.retryTransactionId)}"><label class="replacement"><input type="checkbox" name="buyAgain" value="${esc(options.retryTransactionId)}"> Buy a new label (Pitney Bowes has no record of the last one)</label>` : '<input type="hidden" name="intent" value="buy">'}
-      ${sandbox ? `<p class="muted">Sandbox prices come from Pitney Bowes's test system. Nothing is charged to any postage account.</p>
-      <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> <button${blocked ? " disabled" : ""}>Make sandbox label</button>
-      ${options.retryTransactionId ? `<a class="label-options" href="${base}">Back to label options</a>` : `<button class="secondary" name="kind" value="practice"${blocked ? " disabled" : ""}>Make practice label instead</button>`}`
-      : order.test ? `<button name="kind" value="practice"${blocked ? " disabled" : ""}>Make practice label</button>`
-      : `<p class="muted">${quotes ? "Prices come from your Pitney Bowes postage account." : "Check prices before buying, or buy at the price Pitney Bowes charges."} Postage is paid from your Pitney Bowes postage account.</p>
-      <button class="secondary" formaction="${base}/prices"${blocked ? " disabled" : ""}>See prices</button> <button${blocked ? " disabled" : ""}>Buy label</button>`}</form>`;
+      ${retryTransactionId ? `<input type="hidden" name="retryTransactionId" value="${esc(retryTransactionId)}"><label class="replacement"><input type="checkbox" name="buyAgain" value="${esc(retryTransactionId)}"> Buy a new label (Pitney Bowes has no record of the last one)</label>` : `<input type="hidden" name="intent" value="${lookupLabel ? "lookup" : "buy"}">`}
+      ${!recovering && sandbox ? `<p class="muted">Sandbox prices come from Pitney Bowes's test system. Nothing is charged to any postage account.</p>`
+      : !recovering && !order.test ? `<p class="muted">${quotes ? "Prices come from your Pitney Bowes postage account." : "Check prices before buying, or buy at the price Pitney Bowes charges."} Postage is paid from your Pitney Bowes postage account.</p>` : ""}
+      ${actions}${recovering ? `<a class="label-options" href="${base}">Back to label options</a>` : ""}</form>`;
   const labels = summary.labels.length
     ? `<h2 id="labels-heading">Labels</h2><table class="label-history" role="table" aria-labelledby="labels-heading"><thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Service</th><th role="columnheader" scope="col">Tracking</th><th role="columnheader" scope="col">Package</th><th role="columnheader" scope="col">Postage</th><th role="columnheader" scope="col">Actions</th></tr></thead><tbody role="rowgroup">${summary.labels.map(item => labelRow(site, item, item.version === order.version)).join("")}</tbody></table>`
     : "";

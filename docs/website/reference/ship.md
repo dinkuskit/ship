@@ -69,7 +69,7 @@ If any item has no weight in Commerce, the plugin shows its weight as **Not set*
 
 On Ship's own order page, **Labels** keeps the full tracking number, package, postage and **Open PDF to print** / **Cancel label** actions together. On phones each label's fields stack rather than pushing its actions offscreen. Printing reopens the label already bought; it does not buy another one.
 
-If a label purchase's answer is lost, Ship checks whether Pitney Bowes made the original label before allowing a new one. **Buy a new label** confirms only the attempt and order details Ship just checked. If someone is already buying or checking a label, Ship asks you to reopen the order in a moment. The busy page cannot start a purchase. If someone else already retried or the order changed, review the current order and check the label again; don't reuse the old confirmation. To switch from a sandbox retry to a practice label, go back to the label options first.
+If a label purchase's answer is lost, **Check last label** on Ship's own order page looks for the original without buying postage. If Pitney Bowes has no record, **Buy a new label** confirms only the attempt and order details Ship just checked. To see prices or switch to practice, go back to the label options first. If someone already retried, a check is still in progress, or the order or postage account changed, reopen the order and review the current details rather than reusing the old confirmation.
 
 ## Sandbox and practice labels
 
@@ -77,7 +77,7 @@ Ship runs on the Pitney Bowes sandbox. Live postage is not available yet. A sand
 
 | TEST-order label | Behavior |
 | --- | --- |
-| Pitney Bowes sandbox label | Available when the sandbox configuration is complete. Uses sandbox rates, shipment creation, PDF, and tracking; it charges no real postage. The page marks it TEST SANDBOX. |
+| Pitney Bowes sandbox label | Available when the sandbox configuration is complete. Uses sandbox rates, shipment creation, PDF, and tracking; it charges no real postage. The page marks it TEST SANDBOX. If the sandbox goes offline after you open the form on Ship's own page, reopen the form to choose practice; Ship will not substitute it. |
 | Practice label | Made without calling Pitney Bowes when the owner presses **Make practice label** or **Make practice label instead** on a TEST order. That choice stays practice if the sandbox becomes available before the form is submitted. The PDF says TEST - NOT POSTAGE and PRACTICE LABEL - DO NOT MAIL. |
 
 A TEST order stays TEST everywhere and never gets live postage. A real order needs the owner's own Pitney Bowes postage account connected in **Shipping settings** (or Ship's own Settings page); until one is connected, prices and labels for real orders are refused.

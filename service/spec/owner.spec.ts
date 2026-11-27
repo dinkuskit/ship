@@ -386,6 +386,27 @@ test("the hosted practice-only button stays practice if the sandbox becomes avai
   expect(pbCalls).toEqual([]);
 });
 
+test("a hosted sandbox choice is refused, not replaced by practice, if the sandbox goes offline", async () => {
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  const page = await (await request("GET", orderPath, { cookie })).text();
+  const kind = page.match(/<button name="kind" value="([a-z]+)">Make sandbox label<\/button>/)?.[1];
+  await runInDurableObject(shipStore(), instance => {
+    const target = instance as unknown as { env: Env };
+    target.env = { ...target.env, PB_ENVIRONMENT: "production" };
+  });
+  const form = { version: "1", boxId, weightOz: "28", service: "GA", intent: "buy", ...(kind ? { kind } : {}) };
+  const refused = await request("POST", `${orderPath}/labels`, { cookie, form });
+  expect(refused.status).toBe(409);
+  expect(await refused.text()).toContain("Reopen label options");
+  expect(await labels()).toEqual([]);
+  expect(pbCalls).toEqual([]);
+  expect((await request("POST", `${orderPath}/labels`, { cookie, form: { ...form, kind: "practice" } })).status).toBe(303);
+  expect((await shipStore().orderSummary("order:abc"))!.labels[0]).toMatchObject({ test: true, practice: true });
+});
+
 test("a busy hosted retry only links back, even if the other tab's replacement is then refused", async () => {
   await sendOrder();
   const cookie = await signedIn();
@@ -753,6 +774,74 @@ test("when Pitney Bowes has no record of a lost purchase, the owner decides whet
   expect(creates()).toHaveLength(2);
   expect(creates()[1]!.headers.get("x-pb-transactionid")).not.toBe(creates()[0]!.headers.get("x-pb-transactionid"));
   expect(await labels()).toHaveLength(1);
+});
+
+test("the lost-answer form checks only, and a stale retry cannot come back from prices as a fresh purchase", async () => {
+  const { buy, cookie, orderPath, boxId } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  const lost = await buy();
+  expect(lost.status).toBe(502);
+  const page = await lost.text();
+  const intent = page.match(/name="intent" value="([a-z]+)"/)?.[1];
+  const check = () => buy(intent ? { intent } : {});
+  const prompt = await check();
+  expect(prompt.status).toBe(409);
+  const review = await prompt.text();
+  const id = review.match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(id).toBeDefined();
+  const priced = await request("POST", `${orderPath}/prices`, { cookie, form: {
+    version: "1", boxId, weightOz: "28", service: "PM", retryTransactionId: id!,
+  } });
+  expect(priced.status).toBe(409);
+  expect(await priced.text()).not.toContain('name="intent" value="buy"');
+  expect(review).not.toContain("See prices");
+  expect(page).toContain("Check last label");
+  expect(intent).toBe("lookup");
+
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 400 }) : sandbox(call);
+  expect((await buy({ retryTransactionId: id!, buyAgain: id! })).status).toBe(422);
+  pbAnswer = sandbox;
+  for (const stale of [await check(), await buy({ retryTransactionId: id! })]) {
+    expect(stale.status).toBe(409);
+    const error = await stale.text();
+    expect(error).toContain("Reopen label options");
+    expect(error).not.toContain('name="intent" value="buy"');
+  }
+  expect(creates()).toHaveLength(2);
+  expect(await labels()).toEqual([]);
+});
+
+test("an approved replacement does not use the account that was disconnected during lookup", async () => {
+  const { buy, cookie, boxId } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  const prompt = await buy();
+  const id = (await prompt.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(id).toBeDefined();
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  pbAnswer = async call => {
+    if (call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments") {
+      enter();
+      await released;
+    }
+    return sandbox(call);
+  };
+  const retry = (async () => await shipStore().buyLabel({ orderId: "order:abc", uid: "user-1", fields: {
+    version: 1, boxId, weightOz: 28, service: "PM", retryTransactionId: id!, buyAgain: id!,
+  } }))();
+  try {
+    await Promise.race([entered, retry.then(() => { throw new Error("expected a carrier lookup"); })]);
+    const disconnected = await request("POST", `/stores/${site}/settings/postage/disconnect`, { cookie });
+    expect(disconnected.status).toBe(303);
+  } finally { release(); }
+  expect(await retry).toMatchObject({ ok: false, status: 409, code: "NO_POSTAGE_ACCOUNT" });
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+  const purchase = await runInDurableObject(shipStore(), (_store, state) =>
+    state.storage.sql.exec("SELECT state, retry_id FROM purchases").toArray());
+  expect(purchase).toEqual([{ state: "unknown", retry_id: id }]);
 });
 
 test("a label whose PDF Pitney Bowes could not hand over yet is fetched when opened", async () => {

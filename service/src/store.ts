@@ -620,9 +620,15 @@ export class StoreShipping extends DurableObject<Env> {
       }
       const request = await this.labelRequest(input.orderId, input.fields, true);
       const practiceRequested = input.fields.kind === "practice";
+      const sandboxRequested = input.fields.kind === "sandbox";
       if (practiceRequested && !request.order.test) refuse("TEST_ORDER", "Practice labels are only for TEST orders.", 409);
-      const practice = request.order.test && (!testUsesSandbox(this.env) || practiceRequested);
-      if (practice && (retry !== undefined || input.fields.buyAgain !== undefined)) {
+      if (sandboxRequested && !request.order.test) refuse("TEST_ORDER", "Sandbox labels are only for TEST orders.", 409);
+      const checking = input.fields.intent === "lookup";
+      if (request.order.test && (sandboxRequested || checking) && !testUsesSandbox(this.env)) {
+        refuse("SANDBOX_UNAVAILABLE", "Sandbox postage is no longer available. Reopen the order to see the available label options.", 409);
+      }
+      const practice = request.order.test && (practiceRequested || !testUsesSandbox(this.env));
+      if (practice && (checking || retry !== undefined || input.fields.buyAgain !== undefined)) {
         refuse("LABEL_ATTEMPT_CHANGED", "This confirmation does not apply to a practice label. Open the order and check the label options again.", 409);
       }
       return practice ? this.practiceLabel(request, input.uid) : await this.postageLabel(request, input);
@@ -669,6 +675,7 @@ export class StoreShipping extends DurableObject<Env> {
     const changed = () => refuse("LABEL_ATTEMPT_CHANGED", confirmation === "legacy"
       ? "This confirmation uses an older form. Open Ship to check the label and confirm a replacement there."
       : "This confirmation no longer applies. Check the label again before confirming a replacement.", 409);
+    if (input.fields.intent === "lookup" && (!earlier || confirmation !== undefined || retry !== undefined)) changed();
     if (confirmation !== undefined || retry !== undefined) {
       if (earlier?.retry_version !== order.version ||
           confirmation !== undefined && confirmation !== earlier.retry_id ||
@@ -699,6 +706,10 @@ export class StoreShipping extends DurableObject<Env> {
         this.requireLabelVersion(current, order.version);
         this.refuseIfLabeled(order.orderId, order.version);
         if (this.openPurchase(order.orderId)?.transaction_id !== id) changed();
+        const currentConfig = this.postageConfig(order.test);
+        if (currentConfig.origin !== config.origin || currentConfig.shipperId !== config.shipperId) {
+          refuse("POSTAGE_ACCOUNT_CHANGED", "The postage account changed while Ship checked the last label. Reopen the order before continuing.", 409);
+        }
         if (!confirmation) {
           // The carrier's ID survives order edits. Issue a separate approval ID
           // for the revision checked here, and reuse it for this revision only.
@@ -732,7 +743,7 @@ export class StoreShipping extends DurableObject<Env> {
         if (error instanceof PitneyError && error.kind === "unknown") {
           assertPurchaseStateTransition(purchase.state, "unknown");
           this.sql.exec("UPDATE purchases SET state = 'unknown' WHERE transaction_id = ? AND state = 'pending'", purchase.transaction_id);
-          refuse("PITNEY_BOWES_NO_ANSWER", `Pitney Bowes did not confirm the label${error.detail ? ` (${error.detail})` : ""}, so Ship does not know yet whether it was bought. Press Buy label again: Ship checks with Pitney Bowes first and does not buy a second label without asking.`, 502);
+          refuse("PITNEY_BOWES_NO_ANSWER", `Pitney Bowes did not confirm the label${error.detail ? ` (${error.detail})` : ""}, so Ship does not know yet whether it was bought. Check the last label first. Ship does not buy a second label without asking.`, 502);
         }
         this.sql.exec("DELETE FROM purchases WHERE transaction_id = ?", purchase.transaction_id);
         throw error;
