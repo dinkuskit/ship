@@ -645,6 +645,53 @@ test("Shipments reopens an unconfirmed purchase on the current revision, without
   }
 });
 
+test("a replacement review that recovers the original revision sends staff to label history", async () => {
+  let buying = false;
+  const saved = label({ version: 1 });
+  const writes = [];
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order({ version: 2,
+      labels: buying ? [saved] : [], labelCheckRequired: !buying }), settings }),
+    "POST /v1/admin/orders/order%3Aabc/labels/check": () => Response.json({ error: {
+      code: "CHECK_PITNEY_BOWES", message: "Review fresh prices before approving another purchase.",
+    } }, { status: 409 }),
+    "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ PM: 935 }),
+    "POST /v1/admin/orders/order%3Aabc/labels": body => {
+      writes.push(body);
+      buying = true;
+      return Response.json({ label: saved }, { status: 201 });
+    },
+  } });
+  const recovery = await press(h, button(await open(h), "Check last label"));
+  const priced = await submit(h, recovery, { boxId: "box_small", weightOz: "30", kind: "sandbox" });
+  const response = await submit(h, await pick(h, priced, "PM"), { buyAgain: true });
+  assert.deepEqual(writes.map(({ version, buyAgain }) => [version, buyAgain]), [[2, true]]);
+  assert.match(response.toast?.message, /Label found for an earlier order revision.*label history/);
+  assert.doesNotMatch(response.toast?.message, /Label bought/);
+  assert.match(text(response), /SANDBOX-TRACKING-A/);
+});
+
+for (const code of ["LABEL_ACCOUNT_CHANGED", "LABEL_ACCOUNT_UNVERIFIED", "LABEL_ATTEMPT_CHANGED"]) {
+  test(`a replacement refused with ${code} returns to check-only controls`, async () => {
+    const h = host({ ship: {
+      "GET /v1/admin/orders/order%3Aabc": { order: order({ labelCheckRequired: true }), settings },
+      "POST /v1/admin/orders/order%3Aabc/labels/check": () => Response.json({ error: {
+        code: "CHECK_PITNEY_BOWES", message: "Review fresh prices before approving another purchase.",
+      } }, { status: 409 }),
+      "POST /v1/admin/orders/order%3Aabc/prices": reviewed({ PM: 935 }),
+      "POST /v1/admin/orders/order%3Aabc/labels": () => Response.json({ error: {
+        code, message: "The last purchase could not be verified.",
+      } }, { status: 409 }),
+    } });
+    const recovery = await press(h, button(await open(h), "Check last label"));
+    const priced = await submit(h, recovery, { boxId: "box_small", weightOz: "30", kind: "sandbox" });
+    const response = await submit(h, await pick(h, priced, "PM"), { buyAgain: true });
+    assert.match(text(response), /The last purchase could not be verified/);
+    assert.ok(button(response, "Check last label"));
+    assert.equal(formOn(response), undefined);
+  });
+}
+
 test("Shipments falls back to a quoted service when Ground Advantage is unavailable", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },

@@ -296,12 +296,37 @@ test.each(["processing", "completed"])("reopening a %s order can recover an earl
   }) : new Response(null, { status: 500 });
   const recovered = await check(2);
   expect(recovered).toMatchObject({ status: 200, json: { label: { version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
-  expect(await check(2)).toEqual(recovered);
+  expect(await check(2)).toMatchObject({ status: 409, json: { error: { code: "LABEL_ATTEMPT_CHANGED" } } });
   const final = (await show()).json.order;
   expect(final).not.toHaveProperty("labelCheckRequired");
   expect(final.labels).toEqual([recovered.json.label]);
   expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET", "GET"]);
   expect(await labelEvents()).toMatchObject([{ version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" }]);
+});
+
+test("rechecking a cancelled recovery never returns a different historical label", async () => {
+  const { prices, buy } = await quotedPackage();
+  const unrelated = await buy((await prices()).json.quoteId);
+  expect(unrelated.status).toBe(201);
+  await sendOrder({ version: 2 });
+  const form = { version: 2, boxId: unrelated.json.label.box.boxId, weightOz: 28 };
+  const quote = await call("POST", `${labelPath}/prices`, { body: form });
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING",
+    rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  });
+  expect((await buy(quote.json.quoteId, false, form)).status).toBe(502);
+  await sendOrder({ version: 3 });
+  const check = () => call("POST", `${labelPath}/labels/check`, { body: { version: 3 } });
+  const recovered = await check();
+  expect(recovered).toMatchObject({ status: 200, json: { label: { version: 2, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
+  expect((await call("POST", `/v1/admin/labels/${recovered.json.label.labelId}/cancel`)).status).toBe(200);
+  expect(await check()).toMatchObject({ status: 409, json: { error: { code: "LABEL_ATTEMPT_CHANGED" } } });
+  expect((await call("GET", labelPath)).json.order.labels).toMatchObject([
+    { labelId: unrelated.json.label.labelId, status: "bought" }, { labelId: recovered.json.label.labelId, status: "cancelled" },
+  ]);
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "POST", "GET"]);
 });
 
 test("an expired retry receipt cannot replace an unconfirmed purchase, even with approval", async () => {
@@ -437,12 +462,15 @@ test("a legacy unresolved purchase permits recovery but not replacement", async 
   await runInDurableObject(shipStore(), async (_, state) => {
     expect(state.storage.sql.exec("SELECT transaction_id, state FROM purchases").one()).toEqual({ transaction_id: "shp-legacy", state: "unknown" });
   });
+  await sendOrder({ version: 2, status: "completed", completed: { at: "2026-10-19T23:59:00.000Z", carrier: null, tracking: null } });
+  const checkCompleted = () => call("POST", `${labelPath}/labels/check`, { body: { version: 2 } });
+  expect(await checkCompleted()).toMatchObject({ status: 409, json: { error: { code: "LABEL_ACCOUNT_UNVERIFIED" } } });
   shipmentAnswer = method => method === "GET" ? Response.json({
     shipmentId: "SANDBOX-LEGACY", parcelTrackingNumber: "SANDBOX-LEGACY-TRACKING", rates: [{ totalCarrierCharge: 9.35 }],
     documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
   }) : undefined;
-  expect(await check()).toMatchObject({ status: 200, json: { label: { tracking: "SANDBOX-LEGACY-TRACKING", test: true } } });
-  expect(carrierShipments().map(c => c.method)).toEqual(["GET", "GET", "GET"]);
+  expect(await checkCompleted()).toMatchObject({ status: 200, json: { label: { version: 1, tracking: "SANDBOX-LEGACY-TRACKING", test: true } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["GET", "GET", "GET", "GET"]);
   expect(await labelEvents()).toHaveLength(1);
 });
 

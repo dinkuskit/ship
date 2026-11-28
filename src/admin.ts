@@ -6,7 +6,7 @@ import {
 } from "./pages.js";
 import { settingsAdmin } from "./settings.js";
 import { cancelConnect, connectedTo, connectionState, finishSetup, startConnect, type ConnectView } from "./connect.js";
-import { adminPageFrom, adminUserFrom, quoteIdFrom, ship, ShipError, type LabelRequest, type Prices, type Ship, type ShipOrder } from "./ship.js";
+import { adminPageFrom, adminUserFrom, quoteIdFrom, ship, ShipError, type Label, type LabelRequest, type Prices, type Ship, type ShipOrder } from "./ship.js";
 
 /** EmDash's Editor role; Administrators are above it. Lower roles never see Shipping. */
 const EDITOR = 40;
@@ -97,12 +97,21 @@ async function showOrder(hosted: Ship, { order, settings }: Awaited<ReturnType<S
   return orderPage({ order, settings, siteId: hosted.siteId, printUrl, ...extra }, toast);
 }
 
+function foundLabelMessage(label: Label, version: number): string {
+  return label.version !== version
+    ? `Label found for ${label.version < version ? "an earlier" : "a different"} order revision. Check the label history before shipping. Tracking ${label.tracking}.`
+    : `Label found. Tracking ${label.tracking}.`;
+}
+
 /** A refusal while on an order's page keeps the page, with Ship's reason and what was typed. */
 async function refused(hosted: Ship, orderId: string, error: ShipError, typed: OrderView["typed"], historyFrom: OrderView["historyFrom"], labelInputError?: OrderView["labelInputError"]): Promise<BlockResponse> {
   if (error.code === "RECONNECT") throw error;
   if (error.code === "NOT_FOUND") return problemPage(hosted.siteId, "Order not at Ship", error.message);
   try {
-    return await openOrder(hosted, orderId, { failure: error.message, typed: error.code === "CHECK_PITNEY_BOWES" ? { ...typed, replace: true } : typed, labelInputError, historyFrom });
+    const recheck = error.code === "LABEL_ACCOUNT_CHANGED" || error.code === "LABEL_ACCOUNT_UNVERIFIED" || error.code === "LABEL_ATTEMPT_CHANGED";
+    const draft = error.code === "CHECK_PITNEY_BOWES" ? { ...typed, replace: true }
+      : recheck && typed?.replace ? { ...typed, replace: false } : typed;
+    return await openOrder(hosted, orderId, { failure: error.message, typed: draft, labelInputError, historyFrom });
   } catch (again) {
     return problemPage(hosted.siteId, "Ship could not be used", again instanceof ShipError ? again.message : error.message);
   }
@@ -176,9 +185,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       const typed = labelDraft(fields(input.value) ?? {});
       try {
         const label = await hosted.checkLabel(found.orderId, found.version);
-        return await openOrder(hosted, found.orderId, { historyFrom }, current => ({ type: "success", message: label.version !== current.version
-          ? `Label found for an earlier order revision. Check the label history before shipping. Tracking ${label.tracking}.`
-          : `Label found. Tracking ${label.tracking}.` }));
+        return await openOrder(hosted, found.orderId, { historyFrom }, current => ({ type: "success", message: foundLabelMessage(label, current.version) }));
       } catch (error) {
         if (!(error instanceof ShipError) || error.code === "RECONNECT") throw error;
         const current = await hosted.order(found.orderId);
@@ -285,8 +292,13 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
             failure: "Tick Buy a new label to approve the replacement." });
         }
         const label = await hosted.buy(found.orderId, request);
-        const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
-        return await openOrder(hosted, found.orderId, { historyFrom }, { type: "success", message });
+        return await openOrder(hosted, found.orderId, { historyFrom }, latest => {
+          // A replacement can resolve to the original purchase, not newly bought postage.
+          const version = label.version !== latest.version ? latest.version : found.version;
+          const message = label.version !== version ? foundLabelMessage(label, version) : label.practice ? "Practice label made."
+            : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
+          return { type: "success", message };
+        });
       } catch (error) {
         if (error instanceof ShipError && buy && error.code === "PITNEY_BOWES_NO_ANSWER") {
           const current = await hosted.order(found.orderId);
