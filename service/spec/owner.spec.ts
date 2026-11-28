@@ -868,17 +868,19 @@ test("a legacy unresolved purchase can still be found, but a miss cannot approve
   expect(await labels()).toHaveLength(1);
 });
 
-test("an unchecked legacy form never returns purchase controls after a failed lookup or price request", async () => {
+test("a failed lookup stays lookup-only, even if the original submission was a buy form", async () => {
   const { buy, cookie, orderPath, boxId } = await liveOrder();
   pbAnswer = call => call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: call.method === "POST" ? 504 : 503 }) : sandbox(call);
   expect((await buy()).status).toBe(502);
   const form = { version: "1", boxId, weightOz: "28", service: "PM" };
-  const retry = await request("POST", `${orderPath}/labels`, { cookie, form });
-  expect(retry.status).toBe(503);
-  const checked = await retry.text();
-  expect(checked).toContain('name="intent" value="lookup"');
-  expect(checked).toContain("Check last label");
-  expect(checked).not.toContain("See prices");
+  for (const posted of [form, { ...form, intent: "buy" }]) {
+    const retry = await request("POST", `${orderPath}/labels`, { cookie, form: posted });
+    expect(retry.status).toBe(503);
+    const checked = await retry.text();
+    expect(checked).toContain('name="intent" value="lookup"');
+    expect(checked).toContain("Check last label");
+    expect(checked).not.toContain("See prices");
+  }
   const price = await request("POST", `${orderPath}/prices`, { cookie, form });
   expect(price.status).toBe(409);
   const rejected = await price.text();
@@ -886,6 +888,20 @@ test("an unchecked legacy form never returns purchase controls after a failed lo
   expect(rejected).not.toContain('name="intent" value="buy"');
   expect(pbCalls.filter(call => call.url.pathname.endsWith("/rates"))).toEqual([]);
   expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+
+  // Another tab checks the original and its expressly approved replacement is refused.
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 400 }) : sandbox(call);
+  const approval = await buy({ intent: "lookup" });
+  const id = (await approval.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(approval.status).toBe(409);
+  expect(id).toBeDefined();
+  expect((await buy({ retryTransactionId: id!, buyAgain: id! })).status).toBe(422);
+  pbAnswer = sandbox;
+  const stale = await request("POST", `${orderPath}/labels`, { cookie, form: { ...form, intent: "lookup" } });
+  expect(stale.status).toBe(409);
+  expect(await stale.text()).not.toContain('name="intent" value="buy"');
+  expect(creates()).toHaveLength(2);
   expect(await labels()).toEqual([]);
 });
 

@@ -703,7 +703,11 @@ export class StoreShipping extends DurableObject<Env> {
       }
       this.purchaseLookups.add(id);
       try {
-        const found = await findPurchase(config, id);
+        const found = await findPurchase(config, id).catch(error => {
+          if (!(error instanceof PitneyError)) throw error;
+          // A buy-shaped form can reach this lookup. Tell the caller what actually failed.
+          throw new ServiceError(503, "PITNEY_BOWES_UNAVAILABLE", error.message, { labelLookup: true });
+        });
         if (found) return ok(await this.finishPurchase(earlier, found), 201);
         // An order update can land during the lookup. Keep the earlier attempt
         // and require confirmation on the current order before buying anything new.

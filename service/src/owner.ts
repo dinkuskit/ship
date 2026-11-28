@@ -48,7 +48,7 @@ const ROUTES: PageRoute[] = [
       const retry = outcome.detail?.retryTransactionId;
       // A pre-upgrade form without intent may enter lookup, never come back as a new buy.
       const recovering = fields.intent !== "buy" || fields.retryTransactionId !== undefined || fields.buyAgain !== undefined ||
-        outcome.code === "PITNEY_BOWES_NO_ANSWER" || outcome.code === "CHECK_PITNEY_BOWES";
+        outcome.detail?.labelLookup === true || outcome.code === "PITNEY_BOWES_NO_ANSWER" || outcome.code === "CHECK_PITNEY_BOWES";
       const changedOrder = recovering && Number(fields.version) !== summary.order.version;
       const retryTransactionId = outcome.code === "CHECK_PITNEY_BOWES" && !changedOrder && typeof retry === "string" ? retry : undefined;
       const lookupLabel = !changedOrder && (outcome.code === "PITNEY_BOWES_NO_ANSWER" ||
