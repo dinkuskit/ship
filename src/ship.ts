@@ -49,6 +49,7 @@ export interface ShipOrder {
   itemsWeightOz: number;
   label: Label | null;
   labels: Label[];
+  labelCheckRequired?: true;
 }
 /** One row of the Shipping list: short on purpose, the items and labels come with the one order. */
 export interface ShipOrderRow {
@@ -81,7 +82,9 @@ export type SettingsForm = "ship-from" | "reply-to" | "boxes" | "postage";
 export type HistoryLabel = Label & { number: number | null };
 /** Fifty labels, newest first; `next` asks for the fifty after them. */
 export interface LabelHistory { labels: HistoryLabel[]; next: string | null }
-export interface LabelRequest { version: number; boxId: string; weightOz: number; service?: ServiceCode; kind?: "practice"; buyAgain?: true; by?: string }
+export interface LabelRequest { version: number; boxId: string; weightOz: number; service?: ServiceCode; kind?: "practice"; buyAgain?: true; by?: string; quoteId?: string; reviewedDimensions?: string }
+export interface LabelQuote { prices: Prices; quoteId?: string }
+export const quoteIdFrom = (value: unknown) => typeof value === "string" && /^[0-9a-f-]{36}$/.test(value) ? value : undefined;
 
 /** A refusal with a message the page can show as it is. */
 export class ShipError extends Error {
@@ -161,12 +164,15 @@ export async function tradeStoreKey(ctx: PluginContext, siteId: string, key: str
   return admitPass((body as { access_token?: unknown }).access_token, siteId);
 }
 
+interface LabelPurchase { label: Label; disposition: "created" | "recovered" }
+
 export interface Ship {
   siteId: string;
   orders(): Promise<ShipList>;
   order(orderId: string): Promise<{ order: ShipOrder; settings: ShipSettings }>;
-  prices(orderId: string, request: LabelRequest): Promise<Prices>;
-  buy(orderId: string, request: LabelRequest): Promise<Label>;
+  prices(orderId: string, request: LabelRequest): Promise<LabelQuote>;
+  buy(orderId: string, request: LabelRequest): Promise<LabelPurchase>;
+  checkLabel(orderId: string, version: number): Promise<Label>;
   cancel(labelId: string): Promise<{ labelId: string; refund: string | null }>;
   printLink(labelId: string): Promise<{ url: string; expiresAt: string }>;
   settings(): Promise<ShipSettingsPage>;
@@ -271,8 +277,24 @@ export function ship(ctx: PluginContext, siteId: string, key: string, adminPage:
       return { orders: list.orders, settings: list.settings, open: typeof list.open === "string" && list.open ? list.open : null };
     },
     order: id => call("GET", `/v1/admin/orders/${segment(id)}`) as Promise<{ order: ShipOrder; settings: ShipSettings }>,
-    prices: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/prices`, request)) as { prices: Prices }).prices,
-    buy: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels`, request)) as { label: Label }).label,
+    prices: (id, request) => call("POST", `/v1/admin/orders/${segment(id)}/prices`, request) as Promise<LabelQuote>,
+    buy: async (id, request) => {
+      const path = `/v1/admin/orders/${segment(id)}/labels`;
+      if (request.kind === "practice") {
+        const { label } = (await call("POST", path, request)) as { label: Label };
+        return { label, disposition: "created" };
+      }
+      // An older Worker ignores receipts on /labels. Never retry a reviewed buy there.
+      try {
+        return await call("POST", `${path}/reviewed`, request) as LabelPurchase;
+      } catch (error) {
+        if (error instanceof ShipError && error.status === 404) {
+          throw new ShipError("QUOTE_UNAVAILABLE", "Ship could not use this review. Open in Ship to review and buy a label.");
+        }
+        throw error;
+      }
+    },
+    checkLabel: async (id, version) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels/check`, { version })) as { label: Label }).label,
     cancel: id => call("POST", `/v1/admin/labels/${segment(id)}/cancel`) as Promise<{ labelId: string; refund: string | null }>,
     printLink: id => call("POST", `/v1/admin/labels/${segment(id)}/print-link`) as Promise<{ url: string; expiresAt: string }>,
     settings: async () => ((await call("GET", "/v1/admin/settings")) as { settings: ShipSettingsPage }).settings,

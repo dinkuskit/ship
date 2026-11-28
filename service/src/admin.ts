@@ -38,6 +38,8 @@ export interface AdminOrder {
   label: Label | null;
   /** Every label this order ever had, oldest first. */
   labels: Label[];
+  /** An unresolved purchase can be checked; no carrier transaction details are exposed. */
+  labelCheckRequired?: true;
 }
 /**
  * One row of the plugin's Shipping list. The list is bounded on purpose: at most 200
@@ -80,6 +82,7 @@ function adminOrder(summary: OrderSummary): AdminOrder {
     itemsWeightOz: order.lines.reduce((total, line) => total + (line.weightOz ?? 0) * line.quantity, 0),
     label: orderLabel(order, labels),
     labels,
+    ...(summary.labelCheckRequired ? { labelCheckRequired: true } : {}),
   };
 }
 
@@ -140,15 +143,26 @@ export async function showAdminOrder(store: Store, orderId: string): Promise<Out
 }
 
 export async function quoteAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {
-  const outcome = await outcomeOf(store.quoteLabel({ orderId, fields: labelFields(body(input), ["version", "boxId", "weightOz"]) }));
-  return outcome.ok ? ok({ prices: outcome.body }) : outcome;
+  return outcomeOf(store.quoteLabel({ orderId, review: true, fields: labelFields(body(input), ["version", "boxId", "weightOz"]) }));
 }
 
-export async function buyAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {
-  const fields = labelFields(body(input), ["version", "boxId", "weightOz", "service", "kind"]);
-  if (body(input).buyAgain === true) fields.buyAgain = "yes";
-  const outcome = await outcomeOf(store.buyLabel({ orderId, fields, uid: actor(body(input)) }));
-  return outcome.ok ? ok({ label: outcome.body }, 201) : outcome;
+export async function buyAdminLabel(store: Store, orderId: string, input: unknown, reviewed = false): Promise<Outcome> {
+  const payload = body(input);
+  const fields = labelFields(payload, ["version", "boxId", "weightOz", "service", "kind", "reviewedDimensions"]);
+  if (Object.hasOwn(payload, "quoteId")) fields.quoteId = typeof payload.quoteId === "string" && /^[0-9a-f-]{36}$/.test(payload.quoteId) ? payload.quoteId : "";
+  if (reviewed && (!fields.quoteId || fields.kind === "practice")) {
+    throw new ServiceError(409, "QUOTE_CHANGED", "Check prices again before buying a label.");
+  }
+  if (payload.buyAgain === true) fields.buyAgain = "yes";
+  const outcome = await outcomeOf(store.buyLabel({ orderId, fields, uid: actor(payload) }));
+  if (!outcome.ok) return outcome;
+  if (!reviewed) return ok({ label: outcome.body }, 201); // Existing clients get the original status and shape.
+  return ok({ label: outcome.body, disposition: outcome.status === 200 ? "recovered" : "created" }, outcome.status);
+}
+
+export async function checkAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {
+  const outcome = await outcomeOf(store.checkLabel({ orderId, fields: labelFields(body(input), ["version"]) }));
+  return outcome.ok ? ok({ label: outcome.body }) : outcome;
 }
 
 export async function cancelAdminLabel(store: Store, labelId: string): Promise<Outcome> {

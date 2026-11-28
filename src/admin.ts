@@ -1,12 +1,12 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
 import {
-  connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, unconfirmedPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH,
+  boxDimensions, connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, unconfirmedPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH, weight,
   type OrderView, type Toast,
 } from "./pages.js";
 import { settingsAdmin } from "./settings.js";
 import { cancelConnect, connectedTo, connectionState, finishSetup, startConnect, type ConnectView } from "./connect.js";
-import { adminPageFrom, adminUserFrom, ship, ShipError, type LabelRequest, type Ship, type ShipOrder } from "./ship.js";
+import { adminPageFrom, adminUserFrom, quoteIdFrom, ship, ShipError, type Label, type LabelRequest, type Prices, type Ship, type ShipOrder } from "./ship.js";
 
 /** EmDash's Editor role; Administrators are above it. Lower roles never see Shipping. */
 const EDITOR = 40;
@@ -30,12 +30,12 @@ function interaction(input: unknown): Interaction | null {
   return null;
 }
 
-/** `verb:<version>:<encoded order id>` from a form's submit action. */
-function target(actionId: string): { version: number; orderId: string } | null {
-  const [, version, encoded] = actionId.split(":", 3);
+/** `verb:<version>:<encoded order id>[:<draft>]` from an order action. */
+function target(actionId: string): { version: number; orderId: string; detail?: string } | null {
+  const [, version, encoded, detail] = actionId.split(":", 4);
   if (!version || !encoded || !/^\d{1,15}$/.test(version)) return null;
   try {
-    return { version: Number(version), orderId: decodeURIComponent(encoded) };
+    return { version: Number(version), orderId: decodeURIComponent(encoded), detail };
   } catch {
     return null;
   }
@@ -49,23 +49,46 @@ function text(value: unknown, max = 200): string | undefined {
 function labelDraft(values: Record<string, unknown>): NonNullable<OrderView["typed"]> {
   const weight = typeof values.weightOz === "number" ? values.weightOz : typeof values.weightOz === "string" ? Number(values.weightOz.trim().replace(/\s*oz\.?$/i, "") || NaN) : NaN;
   const weightOz = Math.round(weight * 10) / 10;
+  const kind = text(values.kind);
   return { boxId: text(values.boxId), weightOz: Number.isFinite(weightOz) ? weightOz : undefined,
-    service: text(values.service), kind: text(values.kind), buyAgain: values.buyAgain === true };
+    service: text(values.service), kind, replace: values.replace === true, sandboxService: text(values.sandboxService) };
+}
+
+function fields(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function actionDraft(detail: string | undefined): Record<string, unknown> | null {
+  if (!detail || detail.length > 2400) return null;
+  try { return fields(JSON.parse(decodeURIComponent(detail))); } catch { return null; }
+}
+
+/** Rehydrate the displayed rates for a service selection. These are never purchase prices. */
+function reviewedPrices(value: unknown): OrderView["prices"] {
+  const record = fields(value);
+  if (!record) return undefined;
+  return Object.fromEntries(Object.keys(SERVICES).flatMap(service => {
+    const price = record[service];
+    return typeof price === "number" && Number.isSafeInteger(price) && price >= 0 ? [[service, price]] : [];
+  }));
 }
 
 /** Check the draft before asking Ship for prices or a label. */
-function labelRequest(version: number, typed: NonNullable<OrderView["typed"]>, by: string): LabelRequest {
-  const { boxId, weightOz, service, kind, buyAgain } = typed;
+function labelRequest(version: number, typed: NonNullable<OrderView["typed"]>, by: string, buyAgain = false): LabelRequest {
+  const { boxId, weightOz, service, kind } = typed;
   if (!boxId) throw new ShipError("INPUT", "Pick a box.");
   if (weightOz === undefined || weightOz < 0.1 || weightOz > MAX_WEIGHT_OZ) throw new ShipError("INPUT", `Enter the package weight in ounces, from 0.1 to ${MAX_WEIGHT_OZ} (70 lb).`);
-  if (service !== undefined && !(service in SERVICES)) throw new ShipError("INPUT", "Pick a USPS service.");
+  if (service !== undefined && !Object.hasOwn(SERVICES, service)) throw new ShipError("INPUT", "Pick a USPS service.");
   return { version, boxId, weightOz, by, ...(service ? { service: service as LabelRequest["service"] } : {}),
     ...(kind === "practice" ? { kind: "practice" as const } : {}), ...(buyAgain ? { buyAgain: true as const } : {}) };
 }
 
 /** The order as Ship has it right now, with a fresh five-minute print link when it has a live label. */
 async function openOrder(hosted: Ship, orderId: string, extra: Partial<OrderView> = {}, toast?: Toast | ((order: ShipOrder) => Toast)): Promise<BlockResponse> {
-  const { order, settings } = await hosted.order(orderId);
+  return showOrder(hosted, await hosted.order(orderId), extra, toast);
+}
+
+async function showOrder(hosted: Ship, { order, settings }: Awaited<ReturnType<Ship["order"]>>, extra: Partial<OrderView>, toast?: Toast | ((order: ShipOrder) => Toast)): Promise<BlockResponse> {
   if (typeof toast === "function") toast = toast(order);
   let printUrl: string | undefined;
   if (order.label) {
@@ -74,12 +97,26 @@ async function openOrder(hosted: Ship, orderId: string, extra: Partial<OrderView
   return orderPage({ order, settings, siteId: hosted.siteId, printUrl, ...extra }, toast);
 }
 
+function foundLabelMessage(label: Label, version: number): string {
+  return label.version !== version
+    ? `Label found for ${label.version < version ? "an earlier" : "a different"} order revision. Check the label history before shipping. Tracking ${label.tracking}.`
+    : `Label found. Tracking ${label.tracking}.`;
+}
+
 /** A refusal while on an order's page keeps the page, with Ship's reason and what was typed. */
 async function refused(hosted: Ship, orderId: string, error: ShipError, typed: OrderView["typed"], historyFrom: OrderView["historyFrom"], labelInputError?: OrderView["labelInputError"]): Promise<BlockResponse> {
   if (error.code === "RECONNECT") throw error;
   if (error.code === "NOT_FOUND") return problemPage(hosted.siteId, "Order not at Ship", error.message);
   try {
-    return await openOrder(hosted, orderId, { failure: error.message, typed, labelInputError, askBuyAgain: error.code === "CHECK_PITNEY_BOWES", historyFrom });
+    const recheck = error.code === "LABEL_ACCOUNT_CHANGED" || error.code === "LABEL_ACCOUNT_UNVERIFIED" || error.code === "LABEL_ATTEMPT_CHANGED";
+    const draft = error.code === "CHECK_PITNEY_BOWES" ? { ...typed, replace: true }
+      : recheck && typed?.replace ? { ...typed, replace: false } : typed;
+    const current = await hosted.order(orderId);
+    if (typed?.replace && current.order.labelCheckRequired &&
+        ["NETWORK", "PITNEY_BOWES_UNAVAILABLE", "PITNEY_BOWES_REFUSED", "LABEL_IN_PROGRESS", "QUOTE_UNAVAILABLE"].includes(error.code)) {
+      return await showOrder(hosted, current, { failure: error.message, checkLabel: "available", typed: { ...typed, replace: false }, historyFrom });
+    }
+    return await showOrder(hosted, current, { failure: error.message, typed: draft, labelInputError, historyFrom });
   } catch (again) {
     return problemPage(hosted.siteId, "Ship could not be used", again instanceof ShipError ? again.message : error.message);
   }
@@ -100,7 +137,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
   if (parsed.page === SETTINGS_PATH) return settingsAdmin(parsed, isAdmin, route, ctx);
   let input = parsed, historyFrom: OrderView["historyFrom"];
   if (parsed.type !== "page_load" && parsed.action_id.startsWith("history-order:")) {
-    const wrapped = /^history-order:([^:]*):(open|(?:prices|buy|cancel):.+)$/.exec(parsed.action_id);
+    const wrapped = /^history-order:([^:]*):(open|(?:prices|buy|cancel|package|review|check-label):.+)$/.exec(parsed.action_id);
     if (!wrapped) return { blocks: [] };
     try { historyFrom = decodeURIComponent(wrapped[1]!) || null; } catch { return { blocks: [] }; }
     if (historyFrom !== null && historyCursor({ cursor: historyFrom }) === null) return { blocks: [] };
@@ -147,36 +184,136 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
         throw error;
       }
     }
-    if (input.type === "form_submit") {
+    if (input.type === "block_action" && input.action_id.startsWith("check-label:")) {
       const found = target(input.action_id);
       if (!found) return { blocks: [] };
-      const typed = labelDraft(input.values);
-      const quote = input.action_id.startsWith("prices:");
+      const typed = labelDraft(fields(input.value) ?? {});
+      try {
+        const label = await hosted.checkLabel(found.orderId, found.version);
+        return await openOrder(hosted, found.orderId, { historyFrom }, current => ({ type: "success", message: foundLabelMessage(label, current.version) }));
+      } catch (error) {
+        if (!(error instanceof ShipError) || error.code === "RECONNECT") throw error;
+        const current = await hosted.order(found.orderId);
+        if (current.order.version !== found.version || error.code === "LABEL_ATTEMPT_CHANGED" || error.code === "ALREADY_LABELED") {
+          return await showOrder(hosted, current, { failure: current.order.version !== found.version ? "The order changed in Commerce. Review the current details." : error.message, historyFrom });
+        }
+        if (error.code === "CHECK_PITNEY_BOWES") {
+          return await showOrder(hosted, current, { failure: error.message, typed: { ...typed, replace: true }, historyFrom });
+        }
+        return await showOrder(hosted, current, {
+          failure: error.status === 404 ? "Ship cannot check labels from this screen yet. Open in Ship to check the purchase." : error.message,
+          checkLabel: error.status === 404 ? "hosted" : "available", typed, historyFrom,
+        });
+      }
+    }
+    if (input.type === "block_action" && input.action_id.startsWith("package:")) {
+      const found = target(input.action_id), values = fields(input.value);
+      if (!found || !values) return { blocks: [] };
+      return await openOrder(hosted, found.orderId, { typed: labelDraft(values), historyFrom });
+    }
+    if (input.type !== "page_load" && input.action_id.startsWith("review:")) {
+      const found = target(input.action_id);
+      if (!found) return { blocks: [] };
+      const draft = actionDraft(found.detail);
+      if (!draft) return { blocks: [] };
+      const submitted = input.type === "form_submit" ? input.values : null;
+      const typed = labelDraft(submitted ? { ...draft, service: submitted.service } : draft);
+      const { kind, service } = typed;
+      const next = submitted?.next;
+      if (next === "prices") return await openOrder(hosted, found.orderId, { typed: { ...typed, kind: undefined }, historyFrom });
+      const prices = reviewedPrices(draft.prices);
+      const review = { reviewVersion: found.version, reviewDimensions: text(draft.dimensions), quoteId: quoteIdFrom(draft.quoteId), historyFrom };
+      if (next === "practice") {
+        return await openOrder(hosted, found.orderId, { ...review, typed: { ...typed, kind: "practice", service: undefined, sandboxService: service } });
+      }
+      if (!service || !Object.hasOwn(SERVICES, service) || kind !== "practice" && (!review.quoteId || prices?.[service as keyof Prices] === undefined)) return { blocks: [] };
+      return await openOrder(hosted, found.orderId, { ...review, typed, prices, confirmLabel: submitted !== null });
+    }
+    if (input.type === "form_submit" || input.type === "block_action" && input.action_id.startsWith("buy:")) {
+      const found = target(input.action_id);
+      if (!found) return { blocks: [] };
+      const quote = input.type === "form_submit" && input.action_id.startsWith("prices:");
       const buy = input.action_id.startsWith("buy:");
       if (!quote && !buy) return { blocks: [] };
+      const values = input.type === "block_action" ? fields(input.value) : quote ? input.values : actionDraft(found.detail);
+      if (!values) return buy ? await openOrder(hosted, found.orderId, { historyFrom }) : { blocks: [] };
+      const typed = labelDraft(values);
+      const options = quote ? (found.detail ?? "").split(",") : [];
+      const openedForPractice = options.includes("practice");
+      if (quote) {
+        typed.replace = options.includes("replace");
+        const preferred = options.find(option => Object.hasOwn(SERVICES, option));
+        // Keep the sandbox choice even if we must redisplay an invalid practice draft.
+        if (openedForPractice) typed.kind = "practice";
+        const switchedToPractice = typed.kind === "practice" && !openedForPractice;
+        typed.service = switchedToPractice ? undefined : preferred;
+        if (switchedToPractice) typed.sandboxService = preferred;
+      }
+      const approveReplacement = buy && typed.replace === true && typed.kind !== "practice"
+        && input.type === "form_submit" && input.values.buyAgain === true;
       let request: LabelRequest;
       try {
-        request = labelRequest(found.version, typed, by);
+        request = labelRequest(found.version, typed, by, approveReplacement);
       } catch (error) {
         if (!(error instanceof ShipError)) throw error;
-        const rawWeight = input.values.weightOz;
+        const rawWeight = values.weightOz;
         return await refused(hosted, found.orderId, error, typed, historyFrom, {
           // Text fields have no length cap in Block Kit. Reflect a bounded draft,
           // or leave it blank rather than replacing an oversized paste with a weight.
-          quote, weight: typeof rawWeight === "string" ? text(rawWeight) ?? "" : undefined,
+          weight: typeof rawWeight === "string" ? text(rawWeight) ?? "" : undefined,
         });
       }
       try {
-        if (quote) {
-          // A practice label asks Pitney Bowes nothing, so there is nothing to quote: straight to the buy step.
-          if (request.kind === "practice") return await openOrder(hosted, found.orderId, { typed, historyFrom });
-          const prices = await hosted.prices(found.orderId, request);
-          return await openOrder(hosted, found.orderId, { prices, typed, historyFrom });
+        const current = await hosted.order(found.orderId);
+        const { order, settings } = current;
+        if (order.label || order.status !== "processing" || order.addressProblem || order.labelCheckRequired && !typed.replace) {
+          return await showOrder(hosted, current, { historyFrom });
         }
-        const label = await hosted.buy(found.orderId, request);
-        const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
-        return await openOrder(hosted, found.orderId, { historyFrom }, { type: "success", message });
+        const box = settings.boxes.find(box => box.boxId === request.boxId);
+        const dimensions = box && boxDimensions(box);
+        const practiceOnly = order.test && !settings.testSandbox;
+        const practice = order.test && (practiceOnly || request.kind === "practice");
+        const review = { reviewVersion: found.version, reviewDimensions: dimensions, quoteId: quoteIdFrom(values.quoteId), historyFrom };
+        const stale = () => orderPage({ order, settings, siteId: hosted.siteId, typed, historyFrom, reviewVersion: found.version });
+        // Capture the box before requesting rates, then re-read when displaying them.
+        // Commerce's order revision does not track changes to Ship settings.
+        if (order.version !== found.version || !box) return stale();
+        if (quote) {
+          if (practice) {
+            return orderPage({ order, settings, siteId: hosted.siteId, ...review, typed: { ...typed, kind: "practice" } });
+          }
+          const { prices, quoteId } = await hosted.prices(found.orderId, request);
+          const issued = quoteIdFrom(quoteId);
+          if (!issued) throw new ShipError("QUOTE_UNAVAILABLE", "Ship could not confirm these rates for purchase. Open in Ship to review and buy a label.");
+          return await openOrder(hosted, found.orderId, { ...review, quoteId: issued, prices, typed });
+        }
+        if (dimensions !== text(values.dimensions) || practice !== (request.kind === "practice") || !request.service) return stale();
+        if (!practice && !review.quoteId) throw new ShipError("QUOTE_CHANGED", "Check prices again before buying a label.");
+        if (practice) request.reviewedDimensions = dimensions;
+        else request.quoteId = review.quoteId;
+        if (!practice && typed.replace && !approveReplacement) {
+          const prices = reviewedPrices(values.prices);
+          return orderPage({ order, settings, siteId: hosted.siteId, ...review, typed, prices, confirmLabel: true,
+            failure: "Tick Buy a new label to approve the replacement." });
+        }
+        const { label, disposition } = await hosted.buy(found.orderId, request);
+        return await openOrder(hosted, found.orderId, { historyFrom }, latest => {
+          // A carrier lookup can recover a different package even on the same order revision.
+          const version = label.version !== latest.version ? latest.version : found.version;
+          const message = disposition === "recovered"
+            ? `${foundLabelMessage(label, version)} No new label bought. ${SERVICES[label.service]} · ${label.box.name} · ${weight(label.weightOz)}.`
+            : label.version !== version ? foundLabelMessage(label, version) : label.practice ? "Practice label made."
+            : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
+          return { type: "success", message };
+        });
       } catch (error) {
+        if (error instanceof ShipError && buy && error.code === "PITNEY_BOWES_NO_ANSWER") {
+          const current = await hosted.order(found.orderId);
+          return await showOrder(hosted, current, {
+            failure: "Pitney Bowes did not confirm the purchase. Check whether it made the label before buying another.",
+            checkLabel: current.order.labelCheckRequired || current.order.version === found.version ? "available" : "hosted", typed, historyFrom,
+          });
+        }
         if (error instanceof ShipError) return await refused(hosted, found.orderId, error, typed, historyFrom);
         throw error;
       }

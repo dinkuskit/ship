@@ -3,7 +3,7 @@ import { createAuthenticator, type ShipScope } from "./auth.js";
 import { ServiceError, toOutcome, type Outcome } from "./errors.js";
 import { handlePage, handlePrint } from "./owner.js";
 import {
-  ADMIN_SCOPE, addAdminBox, adminLabelHistory, buyAdminLabel, cancelAdminLabel, connectAdminPostage, disconnectAdminPostage, listAdminOrders, printLink,
+  ADMIN_SCOPE, addAdminBox, adminLabelHistory, buyAdminLabel, cancelAdminLabel, checkAdminLabel, connectAdminPostage, disconnectAdminPostage, listAdminOrders, printLink,
   quoteAdminLabel, removeAdminBox, saveAdminReplyTo, saveAdminShipFrom, showAdminOrder, showAdminSettings,
 } from "./admin.js";
 import { checkDeliveries, handleTrackingWebhook, PB_TRACKING_PATH } from "./tracking.js";
@@ -34,6 +34,8 @@ const ROUTES: Route[] = [
   route("GET", "/v1/admin/orders/:id", ADMIN_SCOPE, ({ store, params }) => showAdminOrder(store, params[0]!)),
   route("POST", "/v1/admin/orders/:id/prices", ADMIN_SCOPE, ({ store, params, body }) => quoteAdminLabel(store, params[0]!, body)),
   route("POST", "/v1/admin/orders/:id/labels", ADMIN_SCOPE, ({ store, params, body }) => buyAdminLabel(store, params[0]!, body)),
+  route("POST", "/v1/admin/orders/:id/labels/reviewed", ADMIN_SCOPE, ({ store, params, body }) => buyAdminLabel(store, params[0]!, body, true)),
+  route("POST", "/v1/admin/orders/:id/labels/check", ADMIN_SCOPE, ({ store, params, body }) => checkAdminLabel(store, params[0]!, body)),
   route("POST", "/v1/admin/labels/:id/cancel", ADMIN_SCOPE, ({ store, params }) => cancelAdminLabel(store, params[0]!)),
   route("POST", "/v1/admin/labels/:id/print-link", ADMIN_SCOPE, ({ store, params, env, origin, site }) => printLink(env, origin, store, site, params[0]!)),
   // The plugin's Shipping settings page and label history (ship-settings-in-admin-129).

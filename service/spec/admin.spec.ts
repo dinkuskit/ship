@@ -18,6 +18,9 @@ let issuer: string;
 let privateKey: CryptoKey;
 let sessionKey: string;
 let pbCalls: { method: string; path: string; body: any }[];
+let shipmentAnswer: ((method: string) => Promise<Response> | Response | undefined) | undefined;
+let unavailable: string | undefined;
+let beforeRate: ((service: string) => Promise<void>) | undefined;
 
 const configured = () => ({
   ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: `${issuer}/jwks`,
@@ -32,6 +35,9 @@ beforeEach(async () => {
   privateKey = keys.privateKey;
   const jwk = { ...await exportJWK(keys.publicKey), kid: "synthetic", alg: "ES256", use: "sig" };
   pbCalls = [];
+  shipmentAnswer = undefined;
+  unavailable = undefined;
+  beforeRate = undefined;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new Request(input, init).url;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
@@ -41,7 +47,16 @@ beforeEach(async () => {
     const path = new URL(url).pathname, method = init?.method ?? "GET";
     pbCalls.push({ method, path, body });
     if (path === "/oauth/token") return Response.json({ access_token: "synthetic-pb-pass", tokenType: "BearerToken", expiresIn: 36000 });
-    if (path === "/shippingservices/v1/rates") return Response.json({ rates: [{ ...body.rates[0], totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }] });
+    if (path === "/shippingservices/v1/rates") {
+      const service = body.rates[0].serviceId;
+      await beforeRate?.(service);
+      return unavailable === service ? new Response(null, { status: 400 })
+        : Response.json({ rates: [{ ...body.rates[0], totalCarrierCharge: PB_PRICES[service], currencyCode: "USD" }] });
+    }
+    if (path === "/shippingservices/v1/shipments") {
+      const override = shipmentAnswer?.(method);
+      if (override) return override;
+    }
     if (path === "/shippingservices/v1/shipments" && method === "POST") return Response.json({
       shipmentId: "SANDBOX-SHIPMENT-A", parcelTrackingNumber: "SANDBOX-TRACKING-A",
       rates: [{ carrier: "USPS", serviceId: body.rates[0].serviceId, parcelType: "PKG", totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }],
@@ -114,10 +129,10 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   const form = { version: 1, boxId, weightOz: 28 };
   const prices = await call("POST", "/v1/admin/orders/order%3Aabc/prices", { body: form });
   expect(prices.status).toBe(200);
-  expect(prices.json).toEqual({ prices: { GA: 510, PM: 935, EM: 3120 } });
+  expect(prices.json).toEqual({ prices: { GA: 510, PM: 935, EM: 3120 }, quoteId: expect.stringMatching(/^[0-9a-f-]{36}$/) });
 
   expect((await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { ...form, service: "PM" } })).json.error.code).toBe("INVALID_INPUT");
-  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { ...form, service: "PM", by: "staff@example.test" } });
+  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { ...form, service: "PM", quoteId: prices.json.quoteId, by: "staff@example.test" } });
   expect(bought.status).toBe(201);
   expect(bought.json.label).toMatchObject({ orderId: "order:abc", version: 1, test: true, practice: false, service: "PM", tracking: "SANDBOX-TRACKING-A", status: "bought", priceCents: 935, createdBy: "admin:staff@example.test" });
   expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(1);
@@ -146,6 +161,359 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   expect(after.json.order.labels).toMatchObject([{ status: "cancelled", refund: "INITIATED" }]);
   expect((await call("GET", "/v1/admin/orders")).json.orders[0].labelStatus).toBe("cancelled");
   expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).json.error.code).toBe("NOT_FOUND");
+});
+
+test("a quote only applies to its eligible services, package and expiry", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const path = "/v1/admin/orders/order%3Aabc";
+  const form = { version: 1, boxId, weightOz: 28 };
+  unavailable = "EM";
+  const { quoteId } = (await call("POST", `${path}/prices`, { body: form })).json;
+  const buy = (extra: Record<string, unknown> = {}) => call("POST", `${path}/labels`, {
+    body: { ...form, service: "GA", quoteId, by: "staff@example.test", ...extra },
+  });
+  for (const change of [{ service: "EM" }, { weightOz: 29 }, { quoteId: null }, { quoteId: crypto.randomUUID() }]) {
+    const result = await buy(change);
+    expect(result).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  }
+  await runInDurableObject(shipStore(), async (_, state) => state.storage.sql.exec("UPDATE label_quotes SET expires_at = 0"));
+  expect((await buy()).json.error.code).toBe("QUOTE_CHANGED");
+  expect(pbCalls.filter(c => c.path === "/shippingservices/v1/shipments")).toHaveLength(0);
+  expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
+  const fresh = (await call("POST", `${path}/prices`, { body: form })).json.quoteId;
+  expect((await buy({ quoteId: fresh })).status).toBe(201);
+});
+
+const labelPath = "/v1/admin/orders/order%3Aabc";
+const carrierShipments = () => pbCalls.filter(c => c.path === "/shippingservices/v1/shipments");
+const labelEvents = async () => (await call("GET", "/v1/labels", { scope: "ship:orders" })).json;
+const saveOrigin = (postalCode: string, city = "Shiptown", region = "NY") => call("POST", "/v1/admin/settings/ship-from", {
+  body: { name: "Demo Store", line1: "2 Warehouse Rd", city, region, postalCode },
+});
+
+async function quotedPackage() {
+  await sendOrder();
+  const form = { version: 1, boxId: await setUp(), weightOz: 28 };
+  const prices = () => call("POST", `${labelPath}/prices`, { body: form });
+  const buy = (quoteId: string, buyAgain?: boolean, extra: Record<string, unknown> = {}) => call("POST", `${labelPath}/labels`, {
+    body: { ...form, service: "PM", quoteId, buyAgain, by: "staff@example.test", ...extra },
+  });
+  return { prices, buy, form };
+}
+
+test("changing the ship-from address invalidates a receipt, including after reverting the address", async () => {
+  const { prices, buy } = await quotedPackage();
+  const { quoteId } = (await prices()).json;
+  expect((await saveOrigin("78701", "Austin", "TX")).status).toBe(200);
+  expect(await buy(quoteId)).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect((await saveOrigin("10001")).status).toBe(200);
+  expect((await buy(quoteId)).json.error.code).toBe("QUOTE_CHANGED");
+  expect(carrierShipments()).toEqual([]);
+  expect(await labelEvents()).toEqual([]);
+  const fresh = (await prices()).json.quoteId;
+  // An identical, normalized save has no effect on the route or quote.
+  expect((await saveOrigin("10001", "Shiptown", "ny")).status).toBe(200);
+  expect((await buy(fresh)).status).toBe(201);
+  expect(carrierShipments().map(c => c.body.fromAddress.postalCode)).toEqual(["10001"]);
+  expect(await labelEvents()).toHaveLength(1);
+});
+
+test("an in-flight rates response cannot issue a receipt for a changed ship-from address", async () => {
+  const { prices } = await quotedPackage();
+  beforeRate = async service => {
+    if (service === "PM") expect((await saveOrigin("78701", "Austin", "TX")).status).toBe(200);
+  };
+  expect(await prices()).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT quote_id FROM label_quotes").toArray()).toEqual([]);
+  });
+});
+
+test("an expired receipt can recover the existing label without another shipment POST", async () => {
+  const { prices, buy } = await quotedPackage();
+  const { quoteId } = (await prices()).json;
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING",
+    rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  });
+  expect((await buy(quoteId)).status).toBe(502);
+  await runInDurableObject(shipStore(), async (_, state) => state.storage.sql.exec("UPDATE label_quotes SET expires_at = 0"));
+  expect(await buy(quoteId)).toMatchObject({ status: 201, json: { label: { test: true, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toMatchObject([{ version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" }]);
+});
+
+test("reviewed postage requires a receipt and reports recovering the original package separately from a new purchase", async () => {
+  const { prices, form } = await quotedPackage();
+  const path = `${labelPath}/labels/reviewed`;
+  const buy = (extra = {}) => call("POST", path, { body: { ...form, service: "PM", by: "staff@example.test", ...extra } });
+  const { quoteId } = (await prices()).json;
+  expect(await buy()).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect(await buy({ quoteId, kind: "practice" })).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect(carrierShipments()).toEqual([]);
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING",
+    rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  });
+  expect((await buy({ quoteId })).status).toBe(502);
+  const replacement = { ...form, weightOz: 42 };
+  const rates = await call("POST", `${labelPath}/prices`, { body: replacement });
+  const recovered = await buy({ ...replacement, quoteId: rates.json.quoteId, buyAgain: true });
+  expect(recovered).toMatchObject({ status: 200, json: { disposition: "recovered", label: { version: 1, weightOz: 28, service: "PM" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toMatchObject([{ version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" }]);
+  expect((await call("POST", `/v1/admin/labels/${recovered.json.label.labelId}/cancel`)).status).toBe(200);
+  shipmentAnswer = undefined;
+  const created = await buy({ ...replacement, quoteId: rates.json.quoteId });
+  expect(created).toMatchObject({ status: 201, json: { disposition: "created", label: { version: 1, weightOz: 42 } } });
+  expect(created.json.label.labelId).not.toBe(recovered.json.label.labelId);
+  const calls = carrierShipments().length;
+  expect(await call("POST", `${labelPath}/labels/check`, { body: { version: 1 } }))
+    .toMatchObject({ status: 409, json: { error: { code: "ALREADY_LABELED" } } });
+  expect(carrierShipments()).toHaveLength(calls);
+});
+
+test("check-only recovery never starts postage and can record a prior purchase without its quote or box", async () => {
+  const { prices, buy } = await quotedPackage();
+  const check = (scope?: string, version = 1) => call("POST", `${labelPath}/labels/check`, { body: { version }, scope });
+  expect((await check("ship:orders")).status).toBe(403);
+  expect(await check()).toMatchObject({ status: 409, json: { error: { code: "LABEL_ATTEMPT_CHANGED" } } });
+  expect(carrierShipments()).toEqual([]);
+  const { quoteId } = (await prices()).json;
+  shipmentAnswer = method => new Response(null, { status: method === "POST" ? 504 : 404 });
+  expect((await buy(quoteId)).status).toBe(502);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    state.storage.sql.exec("UPDATE label_quotes SET expires_at = 0");
+    state.storage.sql.exec("DELETE FROM boxes");
+  });
+  const rates = pbCalls.filter(call => call.path.endsWith("/rates")).length;
+  expect((await check(undefined, 2)).json.error.code).toBe("ORDER_CHANGED");
+  expect((await check()).json.error.code).toBe("CHECK_PITNEY_BOWES");
+  expect(await labelEvents()).toEqual([]);
+  shipmentAnswer = method => method === "GET" ? Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING", rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  }) : new Response(null, { status: 500 });
+  const recovered = await check();
+  expect(recovered).toMatchObject({ status: 200, json: { label: { test: true, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
+  expect(await check()).toMatchObject({ status: 409, json: { error: { code: "ALREADY_LABELED" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET", "GET"]);
+  expect(pbCalls.filter(call => call.path.endsWith("/rates"))).toHaveLength(rates);
+  expect(await labelEvents()).toHaveLength(1);
+});
+
+test.each(["processing", "completed"])("reopening a %s order can recover an earlier revision without buying again", async status => {
+  const { prices, buy } = await quotedPackage();
+  const show = () => call("GET", labelPath);
+  const check = (version: number) => call("POST", `${labelPath}/labels/check`, { body: { version } });
+  expect((await show()).json.order).not.toHaveProperty("labelCheckRequired");
+  const { quoteId } = (await prices()).json;
+  shipmentAnswer = method => new Response(null, { status: method === "POST" ? 504 : 404 });
+  expect((await buy(quoteId)).status).toBe(502);
+  expect((await show()).json.order).toMatchObject({ labelCheckRequired: true, label: null });
+  await sendOrder({ version: 2, status, ...(status === "completed" ? { completed: { at: "2026-10-19T23:59:00.000Z", carrier: null, tracking: null } } : {}) });
+  expect((await show()).json.order).toMatchObject({ version: 2, status, labelCheckRequired: true, label: null });
+  expect(await check(1)).toMatchObject({ status: 409, json: { error: { code: "ORDER_CHANGED" } } });
+  expect(await check(2)).toMatchObject({ status: 409, json: { error: { code: status === "completed" ? "NO_LABEL_FOUND" : "CHECK_PITNEY_BOWES" } } });
+  expect((await show()).json.order.labelCheckRequired).toBe(true);
+  if (status === "completed") expect(await buy(quoteId, true, { version: 2 })).toMatchObject({ status: 409, json: { error: { code: "ALREADY_COMPLETED" } } });
+  shipmentAnswer = method => method === "GET" ? Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING",
+    rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  }) : new Response(null, { status: 500 });
+  const recovered = await check(2);
+  expect(recovered).toMatchObject({ status: 200, json: { label: { version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
+  expect(await check(2)).toMatchObject({ status: 409, json: { error: { code: "LABEL_ATTEMPT_CHANGED" } } });
+  const final = (await show()).json.order;
+  expect(final).not.toHaveProperty("labelCheckRequired");
+  expect(final.labels).toEqual([recovered.json.label]);
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET", "GET"]);
+  expect(await labelEvents()).toMatchObject([{ version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" }]);
+});
+
+test("rechecking a cancelled recovery never returns a different historical label", async () => {
+  const { prices, buy } = await quotedPackage();
+  const unrelated = await buy((await prices()).json.quoteId);
+  expect(unrelated.status).toBe(201);
+  await sendOrder({ version: 2 });
+  const form = { version: 2, boxId: unrelated.json.label.box.boxId, weightOz: 28 };
+  const quote = await call("POST", `${labelPath}/prices`, { body: form });
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING",
+    rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  });
+  expect((await buy(quote.json.quoteId, false, form)).status).toBe(502);
+  await sendOrder({ version: 3 });
+  const check = () => call("POST", `${labelPath}/labels/check`, { body: { version: 3 } });
+  const recovered = await check();
+  expect(recovered).toMatchObject({ status: 200, json: { label: { version: 2, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
+  expect((await call("POST", `/v1/admin/labels/${recovered.json.label.labelId}/cancel`)).status).toBe(200);
+  expect(await check()).toMatchObject({ status: 409, json: { error: { code: "LABEL_ATTEMPT_CHANGED" } } });
+  expect((await call("GET", labelPath)).json.order.labels).toMatchObject([
+    { labelId: unrelated.json.label.labelId, status: "bought" }, { labelId: recovered.json.label.labelId, status: "cancelled" },
+  ]);
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "POST", "GET"]);
+});
+
+test("an expired retry receipt cannot replace an unconfirmed purchase, even with approval", async () => {
+  const { prices, buy } = await quotedPackage();
+  const { quoteId } = (await prices()).json;
+  shipmentAnswer = method => new Response(null, { status: method === "POST" ? 504 : 404 });
+  expect((await buy(quoteId)).status).toBe(502);
+  await runInDurableObject(shipStore(), async (_, state) => state.storage.sql.exec("UPDATE label_quotes SET expires_at = 0"));
+  expect(await buy(quoteId, true)).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toEqual([]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT state FROM purchases").toArray()).toEqual([{ state: "unknown" }]);
+  });
+  const fresh = (await prices()).json.quoteId;
+  expect((await buy(fresh)).json.error.code).toBe("CHECK_PITNEY_BOWES");
+  expect(await labelEvents()).toEqual([]);
+  expect(carrierShipments().filter(c => c.method === "POST")).toHaveLength(1);
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  expect((await buy(fresh, true)).status).toBe(201);
+  expect(carrierShipments().filter(c => c.method === "POST")).toHaveLength(2);
+  expect(await labelEvents()).toHaveLength(1);
+});
+
+test("removing the reviewed box during carrier lookup keeps the unresolved purchase and buys nothing new", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const path = "/v1/admin/orders/order%3Aabc";
+  const form = { version: 1, boxId, weightOz: 28 };
+  const { quoteId } = (await call("POST", `${path}/prices`, { body: form })).json;
+  const buy = (buyAgain?: boolean) => call("POST", `${path}/labels`, { body: { ...form, service: "GA", quoteId, buyAgain, by: "staff@example.test" } });
+  shipmentAnswer = () => new Response(null, { status: 504 });
+  expect((await buy()).status).toBe(502);
+  let markEntered!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { markEntered = resolve; });
+  const paused = new Promise<void>(resolve => { release = resolve; });
+  shipmentAnswer = async method => {
+    if (method !== "GET") return new Response(null, { status: 400 });
+    markEntered();
+    await paused;
+    return new Response(null, { status: 404 });
+  };
+  const replacement = buy(true);
+  await entered;
+  try { expect((await call("POST", `/v1/admin/settings/boxes/${boxId}/remove`)).status).toBe(200); }
+  finally { release(); }
+  expect((await replacement).json.error.code).toBe("QUOTE_CHANGED");
+  expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(1);
+  expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT state FROM purchases").toArray()).toEqual([{ state: "unknown" }]);
+  });
+});
+
+async function fixturePostageAccount(shipperId: string) {
+  await runInDurableObject(shipStore(), async (_, state) => {
+    state.storage.sql.exec("INSERT OR REPLACE INTO store_meta (key, value) VALUES ('pb_account', ?)", JSON.stringify({ shipperId }));
+  });
+}
+
+test("a replacement cannot use a postage account that changed during the lookup", async () => {
+  // A live-marked order tests intent handling; the fetch mock allows only the simulated sandbox carrier.
+  await sendOrder({ test: false });
+  await fixturePostageAccount("fixture-reviewed-account");
+  const form = { version: 1, boxId: await setUp(), weightOz: 28 };
+  const { quoteId } = (await call("POST", `${labelPath}/prices`, { body: form })).json;
+  const buy = (buyAgain?: boolean) => call("POST", `${labelPath}/labels`, {
+    body: { ...form, service: "PM", quoteId, buyAgain, by: "staff@example.test" },
+  });
+  shipmentAnswer = () => new Response(null, { status: 504 });
+  expect((await buy()).status).toBe(502);
+  shipmentAnswer = method => method === "GET"
+    ? fixturePostageAccount("fixture-other-account").then(() => new Response(null, { status: 404 }))
+    : undefined;
+  expect(await buy(true)).toMatchObject({ status: 409, json: { error: { code: "LABEL_ACCOUNT_CHANGED" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toEqual([]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT state FROM purchases").toArray()).toEqual([{ state: "unknown" }]);
+  });
+});
+
+test("a quote on another account cannot replace an unresolved purchase", async () => {
+  // No live carrier is involved; the admin fixture rejects network outside its sandbox double.
+  await sendOrder({ test: false });
+  await fixturePostageAccount("fixture-original-account");
+  const form = { version: 1, boxId: await setUp(), weightOz: 28 };
+  const price = async () => (await call("POST", `${labelPath}/prices`, { body: form })).json.quoteId;
+  const buy = (quoteId: string, buyAgain = false) => call("POST", `${labelPath}/labels`, {
+    body: { ...form, service: "PM", quoteId, buyAgain, by: "staff@example.test" },
+  });
+  const check = () => call("POST", `${labelPath}/labels/check`, { body: { version: 1 } });
+  shipmentAnswer = () => new Response(null, { status: 504 });
+  expect((await buy(await price())).status).toBe(502);
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  expect(carrierShipments()[0]?.body.shipmentOptions).toContainEqual({ name: "SHIPPER_ID", value: "fixture-original-account" });
+  await fixturePostageAccount("fixture-other-account");
+  const freshQuote = await price();
+  expect(freshQuote).toBeTruthy();
+  const checked = await check();
+  const tried = await buy(freshQuote, true);
+  expect([checked.status, checked.json.error?.code, tried.status, tried.json.error?.code, carrierShipments().map(c => c.method), (await labelEvents()).length])
+    .toEqual([409, "LABEL_ACCOUNT_CHANGED", 409, "LABEL_ACCOUNT_CHANGED", ["POST"], 0]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT shipper_id, carrier_origin, state FROM purchases").one())
+      .toEqual({ shipper_id: "fixture-original-account", carrier_origin: PB, state: "unknown" });
+  });
+
+  await fixturePostageAccount("fixture-original-account");
+  shipmentAnswer = method => method === "GET" ? Response.json({
+    shipmentId: "SANDBOX-ORIGINAL", parcelTrackingNumber: "SANDBOX-ORIGINAL-TRACKING", rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  }) : undefined;
+  expect(await check()).toMatchObject({ status: 200, json: { label: { tracking: "SANDBOX-ORIGINAL-TRACKING" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toHaveLength(1);
+});
+
+test("a legacy unresolved purchase permits recovery but not replacement", async () => {
+  await sendOrder();
+  const form = { version: 1, boxId: await setUp(), weightOz: 28 };
+  const { quoteId } = (await call("POST", `${labelPath}/prices`, { body: form })).json;
+  await runInDurableObject(shipStore(), async (_, state) => {
+    state.storage.sql.exec(`INSERT INTO purchases (transaction_id, order_id, version, test, service, box, weight_oz, state, created_by, created_at)
+      VALUES ('shp-legacy', 'order:abc', 1, 1, 'PM', '{}', 28, 'unknown', 'synthetic', 0)`);
+  });
+  const check = () => call("POST", `${labelPath}/labels/check`, { body: { version: 1 } });
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  const checked = await check();
+  const tried = await call("POST", `${labelPath}/labels`, { body: { ...form, service: "PM", quoteId, buyAgain: true, by: "staff@example.test" } });
+  expect([checked.status, checked.json.error?.code, tried.status, tried.json.error?.code, carrierShipments().map(c => c.method), (await labelEvents()).length])
+    .toEqual([409, "LABEL_ACCOUNT_UNVERIFIED", 409, "LABEL_ACCOUNT_UNVERIFIED", ["GET", "GET"], 0]);
+  await runInDurableObject(shipStore(), async (_, state) => {
+    expect(state.storage.sql.exec("SELECT transaction_id, state FROM purchases").one()).toEqual({ transaction_id: "shp-legacy", state: "unknown" });
+  });
+  await sendOrder({ version: 2, status: "completed", completed: { at: "2026-10-19T23:59:00.000Z", carrier: null, tracking: null } });
+  const checkCompleted = () => call("POST", `${labelPath}/labels/check`, { body: { version: 2 } });
+  expect(await checkCompleted()).toMatchObject({ status: 409, json: { error: { code: "LABEL_ACCOUNT_UNVERIFIED" } } });
+  shipmentAnswer = method => method === "GET" ? Response.json({
+    shipmentId: "SANDBOX-LEGACY", parcelTrackingNumber: "SANDBOX-LEGACY-TRACKING", rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  }) : undefined;
+  expect(await checkCompleted()).toMatchObject({ status: 200, json: { label: { version: 1, tracking: "SANDBOX-LEGACY-TRACKING", test: true } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["GET", "GET", "GET", "GET"]);
+  expect(await labelEvents()).toHaveLength(1);
+});
+
+test("an explicit practice request never buys postage for a live-marked order", async () => {
+  await sendOrder({ test: false });
+  await fixturePostageAccount("fixture-reviewed-account");
+  const result = await call("POST", `${labelPath}/labels`, {
+    body: { version: 1, boxId: await setUp(), weightOz: 28, service: "GA", kind: "practice", by: "staff@example.test" },
+  });
+  expect(result).toMatchObject({ status: 409, json: { error: { code: "TEST_ORDER" } } });
+  expect(carrierShipments()).toEqual([]);
+  expect(await labelEvents()).toEqual([]);
 });
 
 test("orders, labels and settings stored before item options keep working, and options sent later come through the real routes (commerce#264)", async () => {

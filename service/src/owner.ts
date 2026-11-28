@@ -1,7 +1,7 @@
 import { ServiceError, type Outcome } from "./errors.js";
 import { html, messagePage, orderPage, ordersPage, settingsPage } from "./pages.js";
 import { finishSignIn, openPrintLink, readSession, requireSameOrigin, signInConfigured, signOut, startSignIn, type OwnerSession } from "./session.js";
-import type { Quotes, StoreShipping } from "./store.js";
+import type { LabelQuote, StoreShipping } from "./store.js";
 
 /** Store ids, order ids and record ids as they appear in a path segment. */
 const SEGMENT = "([A-Za-z0-9._:%-]{1,600})";
@@ -55,7 +55,7 @@ const ROUTES: PageRoute[] = [
       const outcome = await outcomeOf(store.quoteLabel({ orderId: params[0]!, fields }));
       const summary = await store.orderSummary(params[0]!);
       if (!summary) return messagePage("Order not found", "Ship has not received this order.", { href: `${storePath(site)}/orders`, text: "Back to orders" }, 404);
-      const form = outcome.ok ? { fields, quotes: outcome.body as Quotes } : { fields, error: outcome.message };
+      const form = outcome.ok ? { fields, quotes: (outcome.body as LabelQuote).prices } : { fields, error: outcome.message };
       return html(orderPage(site, session.email, summary, await store.getSettings(), form), outcome.ok ? 200 : errorStatus(outcome));
     },
   },

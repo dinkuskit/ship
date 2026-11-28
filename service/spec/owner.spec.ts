@@ -705,7 +705,7 @@ test("postage stays off until the Pitney Bowes sandbox keys are all set", () => 
   }
 });
 
-test("a purchase Ship started before TEST orders reached the sandbox finishes as a real order's label", async () => {
+test("an old purchase keeps its default non-TEST mode and unknown account after migration", async () => {
   await runInDurableObject(shipStore(), async (_, state) => {
     const sql = state.storage.sql;
     sql.exec("DROP TABLE purchases");
@@ -715,7 +715,7 @@ test("a purchase Ship started before TEST orders reached the sandbox finishes as
     sql.exec("INSERT INTO purchases VALUES ('shp-old', 'order:abc', 1, 'PM', '{}', 28, 'unknown', 'user-1', 0)");
     addPurchaseColumns(sql);
     addPurchaseColumns(sql);
-    expect(sql.exec("SELECT test FROM purchases").one().test).toBe(0);
+    expect(sql.exec("SELECT test, shipper_id, carrier_origin FROM purchases").one()).toEqual({ test: 0, shipper_id: null, carrier_origin: null });
   });
 });
 
