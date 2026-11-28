@@ -38,6 +38,8 @@ export interface AdminOrder {
   label: Label | null;
   /** Every label this order ever had, oldest first. */
   labels: Label[];
+  /** An unresolved purchase can be checked; no carrier transaction details are exposed. */
+  labelCheckRequired?: true;
 }
 /**
  * One row of the plugin's Shipping list. The list is bounded on purpose: at most 200
@@ -80,6 +82,7 @@ function adminOrder(summary: OrderSummary): AdminOrder {
     itemsWeightOz: order.lines.reduce((total, line) => total + (line.weightOz ?? 0) * line.quantity, 0),
     label: orderLabel(order, labels),
     labels,
+    ...(summary.labelCheckRequired ? { labelCheckRequired: true } : {}),
   };
 }
 

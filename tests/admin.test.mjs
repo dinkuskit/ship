@@ -617,6 +617,34 @@ test("Shipments offers a check-only action after an ambiguous purchase, with an 
   }
 });
 
+test("Shipments reopens an unconfirmed purchase on the current revision, without a price request", async () => {
+  for (const status of ["processing", "completed"]) {
+    const sent = [];
+    let saved;
+    const h = host({ ship: {
+      "GET /v1/admin/orders/order%3Aabc": () => Response.json({
+        order: order({ version: 2, status, label: status === "completed" ? saved ?? null : null,
+          labels: saved ? [saved] : [], ...(!saved ? { labelCheckRequired: true } : {}) }), settings,
+      }),
+      "POST /v1/admin/orders/order%3Aabc/labels/check": body => {
+        sent.push(body);
+        saved = label({ version: 1 });
+        return Response.json({ label: saved });
+      },
+      "POST /v1/admin/labels/label_1/print-link": { url: "https://ship.dinkuskit.com/print/tok.sig" },
+    } });
+    const opened = await h.page({ type: "block_action", action_id: "open", value: "order:abc" });
+    assert.equal(formOn(opened), undefined);
+    const check = button(opened, "Check last label");
+    assert.equal(check?.action_id, "check-label:2:order%3Aabc");
+    const checked = await press(h, check);
+    assert.deepEqual(sent, [{ version: 2 }]);
+    assert.match(checked.toast?.message, /earlier order revision.*label history/);
+    assert.equal(button(checked, "Check last label"), undefined);
+    assert.match(text(checked), /SANDBOX-TRACKING-A/);
+  }
+});
+
 test("Shipments falls back to a quoted service when Ground Advantage is unavailable", async () => {
   const h = host({ ship: {
     "GET /v1/admin/orders/order%3Aabc": { order: order(), settings },

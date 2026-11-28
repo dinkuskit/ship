@@ -176,7 +176,9 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       const typed = labelDraft(fields(input.value) ?? {});
       try {
         const label = await hosted.checkLabel(found.orderId, found.version);
-        return await openOrder(hosted, found.orderId, { historyFrom }, { type: "success", message: `Label found. Tracking ${label.tracking}.` });
+        return await openOrder(hosted, found.orderId, { historyFrom }, current => ({ type: "success", message: label.version !== current.version
+          ? `Label found for an earlier order revision. Check the label history before shipping. Tracking ${label.tracking}.`
+          : `Label found. Tracking ${label.tracking}.` }));
       } catch (error) {
         if (!(error instanceof ShipError) || error.code === "RECONNECT") throw error;
         const current = await hosted.order(found.orderId);
@@ -252,7 +254,9 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       try {
         const current = await hosted.order(found.orderId);
         const { order, settings } = current;
-        if (order.label || order.status !== "processing" || order.addressProblem) return await showOrder(hosted, current, { historyFrom });
+        if (order.label || order.status !== "processing" || order.addressProblem || order.labelCheckRequired && !typed.replace) {
+          return await showOrder(hosted, current, { historyFrom });
+        }
         const box = settings.boxes.find(box => box.boxId === request.boxId);
         const dimensions = box && boxDimensions(box);
         const practiceOnly = order.test && !settings.testSandbox;
@@ -288,7 +292,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
           const current = await hosted.order(found.orderId);
           return await showOrder(hosted, current, {
             failure: "Pitney Bowes did not confirm the purchase. Check whether it made the label before buying another.",
-            checkLabel: current.order.version === found.version ? "available" : "hosted", typed, historyFrom,
+            checkLabel: current.order.labelCheckRequired || current.order.version === found.version ? "available" : "hosted", typed, historyFrom,
           });
         }
         if (error instanceof ShipError) return await refused(hosted, found.orderId, error, typed, historyFrom);

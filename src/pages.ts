@@ -363,20 +363,21 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
   const pages = shipPages(siteId), label = order.label;
   const quantity = order.lines.reduce((sum, line) => sum + line.quantity, 0);
   const missing = order.lines.filter(line => line.weightOz === null).length;
-  const next = label ? status(order) : order.status === "completed" ? "Completed in Commerce"
-    : view.checkLabel ? "Label status unknown" : order.addressProblem ? "Fix address" : "ready to ship · No label yet";
+  const check = view.checkLabel ?? (order.labelCheckRequired && !view.typed?.replace ? "available" : undefined);
+  const next = check ? "Label status unknown" : label ? status(order) : order.status === "completed" ? "Completed in Commerce"
+    : order.addressProblem ? "Fix address" : "ready to ship · No label yet";
   const back = view.historyFrom === undefined
     ? { type: "button" as const, label: "Back to Shipments", action_id: "list" }
     : { type: "button" as const, label: "Back to Label history", action_id: "history", value: { cursor: view.historyFrom } };
   const blocks: Block[] = [header("Shipments"), { type: "actions", elements: [back] },
-    header(`Order ${orderName(order)}`), context(`${count(quantity)}${label || view.checkLabel || order.status === "completed" || order.addressProblem ? " · " : " "}${next}`)];
+    header(`Order ${orderName(order)}`), context(`${count(quantity)}${label || check || order.status === "completed" || order.addressProblem ? " · " : " "}${next}`)];
   if (order.test) blocks.push(banner("alert", "TEST order", "Nothing ships and nothing is charged. A TEST order gets a free Pitney Bowes sandbox label, or a practice label, never live postage."));
   const canEnterLabel = !label && order.status === "processing" && !order.addressProblem && settings.shipFrom
     && settings.boxes.length > 0 && (order.test || settings.postageConnected);
-  if (view.checkLabel && !label && order.status === "processing") {
+  if (check && (!label || order.labelCheckRequired)) {
     blocks.push(banner("default", "Label purchase unconfirmed", view.failure ?? "Check whether Pitney Bowes bought the label."),
       context("Checking the last label does not buy postage."),
-      { type: "actions", elements: [view.checkLabel === "hosted" ? link("Open in Ship", pages.order(order.orderId), "primary")
+      { type: "actions", elements: [check === "hosted" ? link("Open in Ship", pages.order(order.orderId), "primary")
         : { type: "button", label: "Check last label", style: "primary", action_id: orderAction(`check-label:${order.version}:${encodeURIComponent(order.orderId)}`, view.historyFrom), value: view.typed }] });
   } else if (view.failure && !(view.labelInputError && canEnterLabel)) {
     blocks.push(banner("error", label ? "Not done" : "No label bought", view.failure));
@@ -406,7 +407,8 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
       context(view.printUrl ? "Print label opens the PDF in a new tab. The link works for 5 minutes; open the order again for a fresh one."
         : "Ship could not make a print link just now. Open the order again, or print from Ship's own page."));
   } else if (order.status === "completed") {
-    blocks.push(section("This order is Completed in Commerce, so Ship makes no label for it. Move it back to Processing in Commerce's Orders page first."));
+    blocks.push(section(check ? "This order is Completed in Commerce. Ship will not buy another label."
+      : "This order is Completed in Commerce, so Ship makes no label for it. Move it back to Processing in Commerce's Orders page first."));
   }
   blocks.push({ type: "table", page_action_id: "items", columns: [
     { key: "item", label: "Item" }, ...(order.lines.some(line => line.options) ? [{ key: "options", label: "Options" }] : []),
@@ -416,7 +418,7 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
   if (missing && !label && order.status === "processing") {
     blocks.push(banner("alert", "Item weights missing", "Some items have no weight in Commerce. Weigh the whole package and update Package weight before checking prices or buying a label."));
   }
-  if (!view.checkLabel && !label && order.status === "processing" && !order.addressProblem) {
+  if (!check && !label && order.status === "processing" && !order.addressProblem) {
     if (!settings.shipFrom || settings.boxes.length === 0) {
       blocks.push(banner("alert", "Set up Ship first", "Labels need your ship-from address and at least one box size. Add them in Shipping settings, then open this order again."));
     } else if (!order.test && !settings.postageConnected) {
@@ -426,7 +428,7 @@ export function orderPage(view: OrderView, toast?: Toast): BlockResponse {
     }
   }
   if (order.labels.length) blocks.push(header("Labels"), labelsTable(order.labels), ...more(order.labels.length, "label", "labels"));
-  blocks.push({ type: "actions", elements: [...(view.checkLabel === "hosted" && !label && order.status === "processing" ? [] : [link("Open in Ship", pages.order(order.orderId))]), pageLink("Shipping settings", SETTINGS_PATH)] });
+  blocks.push({ type: "actions", elements: [...(check === "hosted" && (!label || order.labelCheckRequired) ? [] : [link("Open in Ship", pages.order(order.orderId))]), pageLink("Shipping settings", SETTINGS_PATH)] });
   return { blocks, ...(toast ? { toast } : {}) };
 }
 

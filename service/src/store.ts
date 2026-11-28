@@ -112,7 +112,7 @@ const EMAILS_PER_ALARM = 25;
 const TRACKING_RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 12 * 3_600_000];
 /** Waiting "open this order" handoffs kept per store, one per admin; the oldest make room. */
 const ADMIN_OPEN_MAX = 50;
-export interface OrderSummary { order: ShipOrder; labels: Label[]; address: LabelAddress }
+export interface OrderSummary { order: ShipOrder; labels: Label[]; address: LabelAddress; labelCheckRequired?: true }
 
 type Fields = Record<string, unknown>;
 
@@ -555,8 +555,11 @@ export class StoreShipping extends DurableObject<Env> {
 
   async orderSummary(orderId: string): Promise<OrderSummary | null> {
     const order = await this.getOrder(orderId);
-    if (order) this.admitStoredOrder(order);
-    return order ? { order, labels: this.labelsFor(orderId), address: labelAddress(order.shipTo) } : null;
+    if (!order) return null;
+    this.admitStoredOrder(order);
+    const labels = this.labelsFor(orderId);
+    const labelCheckRequired = !labels.some(label => label.version === order.version && label.status === "bought") && this.openPurchase(orderId);
+    return { order, labels, address: labelAddress(order.shipTo), ...(labelCheckRequired ? { labelCheckRequired: true } : {}) };
   }
 
   /** Checks a label form against the order's latest version and the store's settings. */
@@ -590,10 +593,14 @@ export class StoreShipping extends DurableObject<Env> {
     return { order, settings, from, to, box, weightOz, service: service as ServiceCode, shipment, originRevision };
   }
 
-  private requireLabelVersion(order: ShipOrder, version: number): void {
+  private requireOrderVersion(order: ShipOrder, version: number): void {
     if (version !== order.version) {
       refuse("ORDER_CHANGED", "The order changed in Commerce since this page opened. Reload to see the latest.", 409);
     }
+  }
+
+  private requireLabelVersion(order: ShipOrder, version: number): void {
+    this.requireOrderVersion(order, version);
     if (order.status !== "processing") refuse("ALREADY_COMPLETED", "This order is already Completed in Commerce.", 409);
   }
 
@@ -638,11 +645,16 @@ export class StoreShipping extends DurableObject<Env> {
       const summary = await this.orderSummary(input.orderId);
       if (!summary) refuse("NOT_FOUND", "Ship has not received this order.", 404);
       const { order } = summary;
-      this.requireLabelVersion(order, formNumber(input.fields, "version", "Order version", 1, Number.MAX_SAFE_INTEGER));
+      this.requireOrderVersion(order, formNumber(input.fields, "version", "Order version", 1, Number.MAX_SAFE_INTEGER));
       const kept = summary.labels.find(label => label.version === order.version && label.status === "bought");
       if (kept) return ok(kept);
       const earlier = this.openPurchase(order.orderId);
-      if (!earlier) refuse("LABEL_ATTEMPT_CHANGED", "No label purchase is waiting to be checked. Open the order to see its current label options.", 409);
+      if (!earlier) {
+        // A replay after recovering an older revision can still find it in Ship's label history.
+        const previous = summary.labels.filter(label => label.status === "bought" && !label.practice).at(-1);
+        if (previous) return ok(previous);
+        refuse("LABEL_ATTEMPT_CHANGED", "No label purchase is waiting to be checked. Open the order to see its current label options.", 409);
+      }
       const test = order.test;
       if (test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "Sandbox postage is unavailable, so Ship cannot check that TEST label now.", 409);
       const config = this.postageConfig(test);
@@ -653,7 +665,10 @@ export class StoreShipping extends DurableObject<Env> {
         if (found) return ok(await this.finishPurchase(earlier, found));
         const current = this.readOrder(order.orderId);
         if (!current) refuse("NOT_FOUND", "Ship has not received this order.", 404);
-        this.requireLabelVersion(current, order.version);
+        this.requireOrderVersion(current, order.version);
+        if (current.status !== "processing") {
+          refuse("NO_LABEL_FOUND", "Pitney Bowes has no record of the last label. This order is already Completed in Commerce, so Ship will not buy a replacement.", 409);
+        }
         this.requireReplacementAccount(earlier, current.test);
         refuse("CHECK_PITNEY_BOWES", "Pitney Bowes has no record of the last label. Review fresh prices before approving another purchase.", 409);
       } finally {

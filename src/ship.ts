@@ -49,6 +49,7 @@ export interface ShipOrder {
   itemsWeightOz: number;
   label: Label | null;
   labels: Label[];
+  labelCheckRequired?: true;
 }
 /** One row of the Shipping list: short on purpose, the items and labels come with the one order. */
 export interface ShipOrderRow {

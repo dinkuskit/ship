@@ -196,8 +196,8 @@ async function quotedPackage() {
   await sendOrder();
   const form = { version: 1, boxId: await setUp(), weightOz: 28 };
   const prices = () => call("POST", `${labelPath}/prices`, { body: form });
-  const buy = (quoteId: string, buyAgain?: boolean) => call("POST", `${labelPath}/labels`, {
-    body: { ...form, service: "PM", quoteId, buyAgain, by: "staff@example.test" },
+  const buy = (quoteId: string, buyAgain?: boolean, extra: Record<string, unknown> = {}) => call("POST", `${labelPath}/labels`, {
+    body: { ...form, service: "PM", quoteId, buyAgain, by: "staff@example.test", ...extra },
   });
   return { prices, buy };
 }
@@ -272,6 +272,36 @@ test("check-only recovery never starts postage and can record a prior purchase w
   expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET", "GET"]);
   expect(pbCalls.filter(call => call.path.endsWith("/rates"))).toHaveLength(rates);
   expect(await labelEvents()).toHaveLength(1);
+});
+
+test.each(["processing", "completed"])("reopening a %s order can recover an earlier revision without buying again", async status => {
+  const { prices, buy } = await quotedPackage();
+  const show = () => call("GET", labelPath);
+  const check = (version: number) => call("POST", `${labelPath}/labels/check`, { body: { version } });
+  expect((await show()).json.order).not.toHaveProperty("labelCheckRequired");
+  const { quoteId } = (await prices()).json;
+  shipmentAnswer = method => new Response(null, { status: method === "POST" ? 504 : 404 });
+  expect((await buy(quoteId)).status).toBe(502);
+  expect((await show()).json.order).toMatchObject({ labelCheckRequired: true, label: null });
+  await sendOrder({ version: 2, status, ...(status === "completed" ? { completed: { at: "2026-10-19T23:59:00.000Z", carrier: null, tracking: null } } : {}) });
+  expect((await show()).json.order).toMatchObject({ version: 2, status, labelCheckRequired: true, label: null });
+  expect(await check(1)).toMatchObject({ status: 409, json: { error: { code: "ORDER_CHANGED" } } });
+  expect(await check(2)).toMatchObject({ status: 409, json: { error: { code: status === "completed" ? "NO_LABEL_FOUND" : "CHECK_PITNEY_BOWES" } } });
+  expect((await show()).json.order.labelCheckRequired).toBe(true);
+  if (status === "completed") expect(await buy(quoteId, true, { version: 2 })).toMatchObject({ status: 409, json: { error: { code: "ALREADY_COMPLETED" } } });
+  shipmentAnswer = method => method === "GET" ? Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING",
+    rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  }) : new Response(null, { status: 500 });
+  const recovered = await check(2);
+  expect(recovered).toMatchObject({ status: 200, json: { label: { version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
+  expect(await check(2)).toEqual(recovered);
+  const final = (await show()).json.order;
+  expect(final).not.toHaveProperty("labelCheckRequired");
+  expect(final.labels).toEqual([recovered.json.label]);
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET", "GET"]);
+  expect(await labelEvents()).toMatchObject([{ version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" }]);
 });
 
 test("an expired retry receipt cannot replace an unconfirmed purchase, even with approval", async () => {

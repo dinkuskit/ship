@@ -107,7 +107,7 @@ the forward below is for.
 | `GET /v1/admin/orders/{orderId}` | `200 { order: Order, settings: Settings }`; `404 NOT_FOUND` when Commerce has not sent the order. |
 | `POST /v1/admin/orders/{orderId}/prices` with `{ version, boxId, weightOz }` | `200 { prices: { GA, PM, EM }, quoteId }` in cents, `null` for a service Pitney Bowes refused for this package. Refusals as on Ship's page: `409 ORDER_CHANGED`, `ALREADY_COMPLETED`, `ALREADY_LABELED`, `ADDRESS_PROBLEM`, `NO_SHIP_FROM`, `TEST_ORDER`; `503 POSTAGE_NOT_CONNECTED`. |
 | `POST /v1/admin/orders/{orderId}/labels` with `{ version, boxId, weightOz, service, by, kind?: "practice", buyAgain?: true, quoteId?: string, reviewedDimensions?: string }` | `201 { label: Label }`. `by` is who pressed the button (the admin's email, kept as `admin:<email>` in `createdBy`). The same refusals as prices, plus `409 LABEL_IN_PROGRESS`, `409 CHECK_PITNEY_BOWES` (send `buyAgain: true` after the owner ticks the box), `502 PITNEY_BOWES_NO_ANSWER`. |
-| `POST /v1/admin/orders/{orderId}/labels/check` with `{ version }` | `200 { label: Label }` for a recovered or already recorded purchase. Never asks for rates or buys a shipment. `409 LABEL_ATTEMPT_CHANGED` when nothing is pending, `409 LABEL_IN_PROGRESS` during a carrier operation, and `409 CHECK_PITNEY_BOWES` when the carrier has no record. The plugin links to **Open in Ship** if the Worker does not have this route. |
+| `POST /v1/admin/orders/{orderId}/labels/check` with `{ version }` | `200 { label: Label }` for a recovered or already recorded purchase; `label.version` may be older than the current order revision. Never asks for rates or buys a shipment. `409 LABEL_ATTEMPT_CHANGED` when nothing is pending or found locally, `409 LABEL_IN_PROGRESS` during a carrier operation, and `409 CHECK_PITNEY_BOWES` when the carrier has no record and the order is still Processing (`409 NO_LABEL_FOUND` if Completed). The plugin links to **Open in Ship** if the Worker does not have this route. |
 | `POST /v1/admin/labels/{labelId}/cancel` | `200 { labelId, refund }`; `404 NOT_FOUND` for no live label; `503 POSTAGE_NOT_CONNECTED`. Cancelling never changes the Commerce order. |
 | `POST /v1/admin/labels/{labelId}/print-link` | `200 { url, expiresAt }`: `https://ship.dinkuskit.com/print/{token}` opens this one label's PDF for 5 minutes with no sign-in. `404 NOT_FOUND` for a label the store does not have. |
 | `GET /print/{token}` (no pass) | The PDF inline (`application/pdf`, `private, no-store`, `referrer-policy: no-referrer`); `410` for an expired, foreign or altered link; `503` while Pitney Bowes's copy cannot be fetched. |
@@ -136,7 +136,11 @@ and `delivery` (the bought label's, below, or null).
 (text to show, or null), `lines[] { name, quantity, weightOz }`, `itemsWeightOz`,
 `label` (the bought label for this version; once Commerce has completed the order,
 which bumps its version, the bought label it completed with, so Print and Cancel
-stay available; else null) and `labels[]` (every label, oldest first). `Label` is Ship's label record without the PDF: `labelId`,
+stay available; else null), `labels[]` (every label, oldest first), and optional
+`labelCheckRequired: true` when a purchase is unresolved and there is no bought
+label for the current revision. Reopening that order offers **Check last label**
+without requiring a quote, even if Commerce completed the order. `Label` is
+Ship's label record without the PDF: `labelId`,
 `orderId`, `version`, `test`, `service` (`GA`, `PM`, `EM`), `box`, `weightOz`,
 `carrier`, `tracking`, `status` (`bought` or `cancelled`), `createdBy`,
 `createdAt`, `cancelledAt`, `practice`, `priceCents`, `refund` and `delivery`
