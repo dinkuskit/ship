@@ -18,6 +18,7 @@ let issuer: string;
 let privateKey: CryptoKey;
 let sessionKey: string;
 let pbCalls: { method: string; path: string; body: any }[];
+let shipmentAnswer: (method: string) => Response | Promise<Response> | undefined;
 
 const configured = () => ({
   ...env, ACCOUNT_ISSUER: issuer, ACCOUNT_AUDIENCE: "dinkus-ship", ACCOUNT_JWKS_URL: `${issuer}/jwks`,
@@ -32,6 +33,7 @@ beforeEach(async () => {
   privateKey = keys.privateKey;
   const jwk = { ...await exportJWK(keys.publicKey), kid: "synthetic", alg: "ES256", use: "sig" };
   pbCalls = [];
+  shipmentAnswer = () => undefined;
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = new Request(input, init).url;
     if (url === `${issuer}/jwks`) return Response.json({ keys: [jwk] });
@@ -42,6 +44,10 @@ beforeEach(async () => {
     pbCalls.push({ method, path, body });
     if (path === "/oauth/token") return Response.json({ access_token: "synthetic-pb-pass", tokenType: "BearerToken", expiresIn: 36000 });
     if (path === "/shippingservices/v1/rates") return Response.json({ rates: [{ ...body.rates[0], totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }] });
+    if (path === "/shippingservices/v1/shipments") {
+      const answer = shipmentAnswer(method);
+      if (answer) return answer;
+    }
     if (path === "/shippingservices/v1/shipments" && method === "POST") return Response.json({
       shipmentId: "SANDBOX-SHIPMENT-A", parcelTrackingNumber: "SANDBOX-TRACKING-A",
       rates: [{ carrier: "USPS", serviceId: body.rates[0].serviceId, parcelType: "PKG", totalCarrierCharge: PB_PRICES[body.rates[0].serviceId], currencyCode: "USD" }],
@@ -68,6 +74,12 @@ async function call(method: string, path: string, options: { body?: unknown; sco
 }
 
 const shipStore = () => env.SHIP_STORES.get(env.SHIP_STORES.idFromName(site));
+
+function barrier() {
+  let resolve!: () => void;
+  const promise = new Promise<void>(done => { resolve = done; });
+  return { promise, resolve };
+}
 
 async function sendOrder(overrides: Record<string, unknown> = {}) {
   const { status } = await call("POST", "/v1/orders", { scope: "ship:orders", body: {
@@ -98,6 +110,17 @@ test("the admin routes take only a ship:admin pass, and Commerce's routes still 
   expect((await call("POST", "/v1/admin/labels/nope/print-link")).json.error.code).toBe("NOT_FOUND");
 });
 
+test("an explicit sandbox purchase on a real order never reaches the carrier", async () => {
+  await sendOrder({ test: false });
+  const boxId = await setUp();
+  const refused = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: {
+    version: 1, boxId, weightOz: 28, service: "PM", kind: "sandbox", intent: "buy", by: "staff@example.test",
+  } });
+  expect(refused).toMatchObject({ status: 409, json: { error: { code: "TEST_ORDER" } } });
+  expect(pbCalls).toEqual([]);
+  expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
+});
+
 test("the plugin sees the order, prices it, buys a sandbox label, prints it through a five-minute link, and cancels it", async () => {
   await sendOrder();
   const before = await call("GET", "/v1/admin/orders");
@@ -111,7 +134,7 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   expect(Object.keys(before.json.settings).sort()).toEqual(["boxes", "postageConnected", "shipFrom", "testSandbox"]);
 
   const boxId = await setUp();
-  const form = { version: 1, boxId, weightOz: 28 };
+  const form = { version: 1, boxId, weightOz: 28, intent: "buy" };
   const prices = await call("POST", "/v1/admin/orders/order%3Aabc/prices", { body: form });
   expect(prices.status).toBe(200);
   expect(prices.json).toEqual({ prices: { GA: 510, PM: 935, EM: 3120 } });
@@ -148,11 +171,200 @@ test("the plugin sees the order, prices it, buys a sandbox label, prints it thro
   expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).json.error.code).toBe("NOT_FOUND");
 });
 
+test("the confirmed retry does not buy for a superseded address while the carrier lookup is in flight", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const buy = (version: number, buyAgain?: string) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version, boxId, weightOz: 28, service: "GA", ...(buyAgain ? { buyAgain } : { intent: "buy" }), by: "staff@example.test" },
+  });
+  const creates = () => pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments");
+  const events = () => call("GET", "/v1/labels", { scope: "ship:orders" });
+  let started!: () => void;
+  const looking = new Promise<void>(resolve => { started = resolve; });
+  let reply!: (response: Response) => void;
+  const lookup = new Promise<Response>(resolve => { reply = resolve; });
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : undefined;
+  expect((await buy(1)).json.error.code).toBe("PITNEY_BOWES_NO_ANSWER");
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  const first = (await buy(1)).json.error;
+  expect(first).toMatchObject({ code: "CHECK_PITNEY_BOWES", retryTransactionId: expect.stringMatching(/^shp[a-z0-9]{22}$/) });
+  shipmentAnswer = method => {
+    if (method !== "GET") return;
+    started();
+    return lookup;
+  };
+  const retry = buy(1, first.retryTransactionId);
+  await looking;
+  try {
+    await sendOrder({ version: 2, shipTo: {
+      name: "Demo Shopper", line1: "2 Example Way", city: "Testville", region: "CA", postalCode: "90000", country: "US",
+    } });
+  } finally {
+    reply(new Response(null, { status: 404 }));
+  }
+  const stale = await retry;
+  expect(stale.status).toBe(409);
+  expect(stale.json.error.code).toBe("ORDER_CHANGED");
+  expect(creates()).toHaveLength(1);
+  expect((await events()).json).toEqual([]);
+  expect((await call("GET", "/v1/admin/orders/order%3Aabc")).json.order.labels).toEqual([]);
+
+  shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+  // Refreshing the version in the old form must not refresh its approval.
+  expect((await buy(2, first.retryTransactionId)).json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
+  const second = (await buy(2)).json.error;
+  expect(second).toMatchObject({ code: "CHECK_PITNEY_BOWES", retryTransactionId: expect.stringMatching(/^shp[a-z0-9]{22}$/) });
+  expect(second.retryTransactionId).not.toBe(first.retryTransactionId);
+  expect((await buy(2, first.retryTransactionId)).json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
+  expect(creates()).toHaveLength(1);
+  expect((await buy(2, second.retryTransactionId)).status).toBe(201);
+  expect(creates()).toHaveLength(2);
+  expect(creates()[1]!.body.toAddress.addressLines).toEqual(["2 Example Way"]);
+  expect((await events()).json).toMatchObject([{ orderId: "order:abc", version: 2, tracking: "SANDBOX-TRACKING-A" }]);
+});
+
+test.each([[400, false], [400, true], [504, false], [504, true]] as const)(
+  "overlapping retries use one lookup and start one replacement (carrier HTTP %i, second checked: %s)", async (status, checked) => {
+  await sendOrder();
+  const boxId = await setUp();
+  const buy = (extra: { intent?: string; buyAgain?: string | boolean; retryTransactionId?: string } = {}) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version: 1, boxId, weightOz: 28, service: "GA", by: "staff@example.test", ...extra },
+  });
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : new Response(null, { status: 404 });
+  expect((await buy({ intent: "buy" })).json.error.code).toBe("PITNEY_BOWES_NO_ANSWER");
+  const prompt = (await buy()).json.error; // An old unchecked submission can still look up the current attempt.
+  expect(prompt.code).toBe("CHECK_PITNEY_BOWES");
+  const retryTransactionId: string = prompt.retryTransactionId;
+
+  const entered = barrier(), reply = barrier();
+  let lookups = 0;
+  shipmentAnswer = async method => {
+    if (method === "POST") return new Response(null, { status });
+    lookups++;
+    entered.resolve();
+    await reply.promise;
+    return new Response(null, { status: 404 });
+  };
+  const first = buy({ buyAgain: retryTransactionId });
+  await entered.promise;
+  try {
+    const duplicate = await buy(checked ? { buyAgain: retryTransactionId } : { retryTransactionId });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.json.error).toMatchObject({ code: "LABEL_IN_PROGRESS", message: expect.stringContaining("already checking") });
+    expect(duplicate.json.error.retryTransactionId).toBeUndefined();
+  } finally { reply.resolve(); }
+  const attempted = await first;
+  expect(attempted.status).toBe(status === 400 ? 422 : 502);
+  expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(2);
+  // Another copy of the original confirmation only reaches Ship after the replacement ended.
+  for (const stale of [{ buyAgain: retryTransactionId }, { retryTransactionId }, { buyAgain: true }]) {
+    expect((await buy(stale)).json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
+  }
+  expect(lookups).toBe(1);
+  const creates = () => pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments");
+  expect(creates()).toHaveLength(2);
+  if (status === 504) {
+    shipmentAnswer = method => method === "GET" ? new Response(null, { status: 404 }) : undefined;
+    const fresh = (await buy()).json.error;
+    expect(fresh).toMatchObject({ code: "CHECK_PITNEY_BOWES", retryTransactionId: expect.stringMatching(/^shp[a-z0-9]{22}$/) });
+    expect(fresh.retryTransactionId).not.toBe(retryTransactionId);
+    expect((await buy({ buyAgain: fresh.retryTransactionId })).status).toBe(201);
+    expect(creates()).toHaveLength(3);
+  } else {
+    // Actual old JSON: no buyAgain property, no retry ID. A refused replacement
+    // left no purchase or label to distinguish this from a brand-new form.
+    const legacy = await buy();
+    expect(legacy).toMatchObject({ status: 409, json: { error: { code: "LABEL_FORM_EXPIRED" } } });
+    expect(creates()).toHaveLength(2);
+    expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
+  }
+});
+
+test("a pending carrier lookup that finds the original prevents a concurrent replacement", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const buy = (extra: Record<string, string> = {}) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version: 1, boxId, weightOz: 28, service: "GA", by: "staff@example.test", ...extra },
+  });
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : new Response(null, { status: 404 });
+  expect((await buy({ intent: "buy" })).status).toBe(502);
+  const { retryTransactionId } = (await buy()).json.error;
+  const entered = barrier(), release = barrier();
+  let lookups = 0;
+  shipmentAnswer = async method => {
+    if (method !== "GET") return new Response(null, { status: 400 });
+    if (++lookups > 1) return new Response(null, { status: 404 });
+    entered.resolve();
+    await release.promise;
+    return Response.json({ shipmentId: "ORIGINAL", parcelTrackingNumber: "ORIGINAL-TRACKING",
+      rates: [{ carrier: "USPS", serviceId: "UGA", parcelType: "PKG", totalCarrierCharge: 5.1 }],
+      documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }] });
+  };
+  const checking = buy({ retryTransactionId });
+  await entered.promise;
+  try {
+    expect((await buy({ buyAgain: retryTransactionId })).json.error.code).toBe("LABEL_IN_PROGRESS");
+  } finally { release.resolve(); }
+  const first = await checking;
+  expect(first).toMatchObject({ status: 201, json: { label: { tracking: "ORIGINAL-TRACKING" } } });
+  expect(lookups).toBe(1);
+  expect(pbCalls.filter(c => c.method === "POST" && c.path === "/shippingservices/v1/shipments")).toHaveLength(1);
+  const events = await call("GET", "/v1/labels", { scope: "ship:orders" });
+  expect(events.json).toMatchObject([{ tracking: "ORIGINAL-TRACKING" }]);
+  expect(events.json).toHaveLength(1);
+});
+
+test("an open carrier purchase is not looked up while its handler is still running, even after the recovery window", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const buy = (extra: Record<string, string> = {}) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version: 1, boxId, weightOz: 28, service: "GA", by: "staff@example.test", ...extra },
+  });
+  const entered = barrier(), release = barrier();
+  shipmentAnswer = async method => {
+    if (method === "GET") return new Response(null, { status: 404 });
+    entered.resolve();
+    await release.promise;
+    return new Response(null, { status: 504 });
+  };
+  const pending = buy({ intent: "buy" });
+  try {
+    await Promise.race([entered.promise, pending.then(() => { throw new Error("expected a carrier purchase"); })]);
+    // Age the record without advancing timers or stopping the live handler.
+    await runInDurableObject(shipStore(), (_store, state) => {
+      state.storage.sql.exec("UPDATE purchases SET created_at = ?", Date.now() - 61_000);
+    });
+    expect(await buy()).toMatchObject({ status: 409, json: { error: { code: "LABEL_IN_PROGRESS" } } });
+    expect(pbCalls.filter(c => c.path === "/shippingservices/v1/shipments").map(c => c.method)).toEqual(["POST"]);
+  } finally { release.resolve(); await pending; }
+  // As soon as the handler releases its attempt, normal recovery is possible.
+  expect((await buy()).json.error.code).toBe("CHECK_PITNEY_BOWES");
+  expect(pbCalls.filter(c => c.path === "/shippingservices/v1/shipments").map(c => c.method)).toEqual(["POST", "GET"]);
+});
+
+test("an explicitly invalid or unbound retry never becomes a fresh label purchase", async () => {
+  await sendOrder();
+  const boxId = await setUp();
+  const buy = (extra: Record<string, unknown>) => call("POST", "/v1/admin/orders/order%3Aabc/labels", {
+    body: { version: 1, boxId, weightOz: 28, service: "GA", by: "staff@example.test", ...extra },
+  });
+  for (const retryTransactionId of ["", "not a purchase", null, false, 123]) {
+    const refused = await buy({ retryTransactionId });
+    expect(refused.status).toBe(400);
+    expect(refused.json.error.code).toBe("INVALID_INPUT");
+  }
+  expect((await buy({ buyAgain: false })).json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
+  expect((await buy({ kind: "practice", retryTransactionId: `shp${"a".repeat(22)}` })).json.error.code).toBe("LABEL_ATTEMPT_CHANGED");
+  expect(pbCalls).toHaveLength(0);
+  expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
+  expect((await buy({ intent: "buy" })).status).toBe(201);
+});
+
 test("orders, labels and settings stored before item options keep working, and options sent later come through the real routes (commerce#264)", async () => {
   // A store as it stands before this change: an order without options, a bought label, ship-from and a box.
   await sendOrder();
   const boxId = await setUp();
-  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" } });
+  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", intent: "buy", by: "staff@example.test" } });
   expect(bought.status).toBe(201);
   // A row exactly as the previous Ship wrote it: the stored record has no options key at all.
   await runInDurableObject(shipStore(), async (_instance, state) => {
@@ -187,7 +399,7 @@ test("orders, labels and settings stored before item options keep working, and o
 test("after Commerce completes the order with the label, the Shipping page can still print and cancel it", async () => {
   await sendOrder();
   const boxId = await setUp();
-  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" } });
+  const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: { version: 1, boxId, weightOz: 28, service: "PM", intent: "buy", by: "staff@example.test" } });
   expect(bought.status).toBe(201);
   // Commerce marks the order Completed at the next version and sends that version to Ship, as it does on every sync.
   await sendOrder({ version: 2, status: "completed", completed: { at: "2026-10-19T23:59:00.000Z", carrier: "USPS", tracking: "SANDBOX-TRACKING-A" } });
@@ -354,7 +566,7 @@ test("the order Ship forwarded the owner from opens once in the store admin, for
 test("cancelling a label before Commerce polls retires its unacknowledged label event and re-buy delivers only the live tracking", async () => {
   await sendOrder();
   const boxId = await setUp();
-  const form = { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" };
+  const form = { version: 1, boxId, weightOz: 28, service: "PM", intent: "buy", by: "staff@example.test" };
 
   const first = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: form });
   expect(first.status).toBe(201);
@@ -390,7 +602,7 @@ test("label events stored before this change keep working: cancelling retires on
   });
   expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json.map((label: { tracking: string }) => label.tracking)).toEqual(["OTHER-WAITING"]);
 
-  const form = { version: 1, boxId, weightOz: 28, service: "PM", by: "staff@example.test" };
+  const form = { version: 1, boxId, weightOz: 28, service: "PM", intent: "buy", by: "staff@example.test" };
   const bought = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: form });
   expect(bought.status).toBe(201);
   expect((await call("POST", `/v1/admin/labels/${bought.json.label.labelId}/cancel`)).status).toBe(200);

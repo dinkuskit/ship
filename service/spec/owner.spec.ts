@@ -284,7 +284,8 @@ test("a TEST order gets a free Pitney Bowes sandbox label that stays TEST, shows
   expect(page).toContain("free Pitney Bowes sandbox label");
   expect(page).toContain("Make sandbox label");
   expect(page).not.toContain("Postage is paid from your Pitney Bowes postage account");
-  const form = { version: "1", boxId, weightOz: "28", service: "PM" };
+  expect(page).toContain('name="intent" value="buy"');
+  const form = { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy" };
   const prices = await request("POST", `${orderPath}/prices`, { cookie, form });
   expect(prices.status).toBe(200);
   expect(await prices.text()).toContain("USPS Priority Mail: $9.35");
@@ -312,7 +313,7 @@ test("Ground Advantage and Priority Mail ask Pitney Bowes for USPS Tracking, whi
   const boxId = await setUp(cookie);
   const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
   // "See prices" asks Pitney Bowes about every service Ship offers.
-  expect((await request("POST", `${orderPath}/prices`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA" } })).status).toBe(200);
+  expect((await request("POST", `${orderPath}/prices`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA", intent: "buy" } })).status).toBe(200);
   // Without a trackable service PB refuses the package ("must be trackable", error 1022026).
   expect(pbCalls.filter(call => call.url.pathname === "/shippingservices/v1/rates").map(call => call.body.rates[0])).toEqual([
     { carrier: "USPS", serviceId: "UGA", parcelType: "PKG", specialServices: [{ specialServiceId: "DelCon" }] },
@@ -325,7 +326,7 @@ test("a TEST order whose sandbox answer was lost stays TEST when Ship finds the 
   await sendOrder();
   const cookie = await signedIn();
   const boxId = await setUp(cookie);
-  const buy = () => request("POST", `/stores/${site}/orders/${encodeURIComponent("order:abc")}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM" } });
+  const buy = () => request("POST", `/stores/${site}/orders/${encodeURIComponent("order:abc")}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy" } });
   pbAnswer = call => {
     if (call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments") throw new Error("connection reset");
     if (call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments") return Response.json(pbLabel("PM"));
@@ -355,12 +356,95 @@ test("a TEST order never reaches Pitney Bowes unless Ship runs on its sandbox wi
     const page = await (await request("GET", orderPath, { cookie })).text();
     expect(page).toContain("Ship makes a practice label");
     expect(page).not.toContain("Make sandbox label");
-    const form = { version: "1", boxId, weightOz: "28", service: "GA" };
+    const form = { version: "1", boxId, weightOz: "28", service: "GA", intent: "buy" };
     expect((await request("POST", `${orderPath}/prices`, { cookie, form })).status).toBe(409);
-    expect((await request("POST", `${orderPath}/labels`, { cookie, form })).status).toBe(303);
+    const omitted = await request("POST", `${orderPath}/labels`, { cookie, form });
+    expect(omitted.status).toBe(409);
+    expect(await omitted.text()).toContain("Sandbox postage is no longer available");
+    expect((await shipStore().orderSummary("order:abc"))!.labels).toEqual([]);
+    expect((await request("POST", `${orderPath}/labels`, { cookie, form: { ...form, kind: "practice" } })).status).toBe(303);
     expect((await shipStore().orderSummary("order:abc"))!.labels).toMatchObject([{ test: true, practice: true }]);
   }
   expect(pbCalls).toEqual([]);
+});
+
+test("the hosted practice-only button stays practice if the sandbox becomes available before submit", async () => {
+  const store = shipStore();
+  const sandboxEnabled = (available: boolean) => runInDurableObject(store, instance => {
+    const target = instance as unknown as { env: Env };
+    target.env = { ...target.env, PB_ENVIRONMENT: available ? "sandbox" : "production" };
+  });
+  await sandboxEnabled(false);
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  const page = await (await request("GET", orderPath, { cookie })).text();
+  const button = page.match(/<button([^>]*)>Make practice label<\/button>/)?.[1];
+  expect(button).toBeDefined();
+  const kind = button?.match(/name="kind" value="([a-z]+)"/)?.[1];
+  await sandboxEnabled(true);
+  const form = { version: "1", boxId, weightOz: "28", service: "GA", intent: "buy", ...(kind ? { kind } : {}) };
+  expect((await request("POST", `${orderPath}/labels`, { cookie, form })).status).toBe(303);
+  expect((await store.orderSummary("order:abc"))!.labels[0]).toMatchObject({ test: true, practice: true, priceCents: null });
+  expect(pbCalls).toEqual([]);
+});
+
+test("a hosted sandbox choice is refused, not replaced by practice, if the sandbox goes offline", async () => {
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  const page = await (await request("GET", orderPath, { cookie })).text();
+  const kind = page.match(/<button name="kind" value="([a-z]+)">Make sandbox label<\/button>/)?.[1];
+  await runInDurableObject(shipStore(), instance => {
+    const target = instance as unknown as { env: Env };
+    target.env = { ...target.env, PB_ENVIRONMENT: "production" };
+  });
+  const form = { version: "1", boxId, weightOz: "28", service: "GA", intent: "buy", ...(kind ? { kind } : {}) };
+  const refused = await request("POST", `${orderPath}/labels`, { cookie, form });
+  expect(refused.status).toBe(409);
+  expect(await refused.text()).toContain("Reopen label options");
+  expect(await labels()).toEqual([]);
+  expect(pbCalls).toEqual([]);
+  expect((await request("POST", `${orderPath}/labels`, { cookie, form: { ...form, kind: "practice" } })).status).toBe(303);
+  expect((await shipStore().orderSummary("order:abc"))!.labels[0]).toMatchObject({ test: true, practice: true });
+});
+
+test("a busy hosted retry only links back, even if the other tab's replacement is then refused", async () => {
+  await sendOrder();
+  const cookie = await signedIn();
+  const boxId = await setUp(cookie);
+  const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
+  const buy = (extra: Record<string, string>) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "GA", ...extra } });
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy({ intent: "buy" })).status).toBe(502);
+  const ask = await buy({});
+  const approval = (await ask.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(approval).toBeDefined();
+  let enter!: () => void, unblock!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const released = new Promise<void>(resolve => { unblock = resolve; });
+  pbAnswer = async call => {
+    if (call.url.pathname !== "/shippingservices/v1/shipments") return sandbox(call);
+    if (call.method === "POST") return new Response(null, { status: 400 });
+    enter();
+    await released;
+    return sandbox(call);
+  };
+  const checked = buy({ retryTransactionId: approval!, buyAgain: approval! });
+  try {
+    await Promise.race([entered, checked.then(() => { throw new Error("expected a carrier lookup"); })]);
+    const busy = await buy({ retryTransactionId: approval! });
+    expect(busy.status).toBe(409);
+    const html = await busy.text();
+    expect(html).toContain(`href="${orderPath}">Reopen label options</a>`);
+    expect(html).not.toContain('name="intent"');
+    expect(html).not.toContain("label-purchase\" method=");
+  } finally { unblock(); await checked; }
+  expect((await checked).status).toBe(422);
+  expect(creates()).toHaveLength(2);
+  expect(await labels()).toEqual([]);
 });
 
 test("labels are refused for a changed, unaddressable or completed order", async () => {
@@ -526,9 +610,19 @@ async function liveOrder() {
   const boxId = await setUp(cookie);
   expect((await connect(cookie)).status).toBe(303);
   const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
-  const buy = (form: Record<string, string> = {}) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", ...form } });
+  const buy = (form: Record<string, string> = {}) => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy", ...form } });
   return { cookie, boxId, orderPath, buy };
 }
+
+test("explicit practice on a live order is refused without a postage call", async () => {
+  const { buy } = await liveOrder();
+  pbCalls.length = 0; // Ignore the synthetic account-connect call.
+  const refused = await buy({ kind: "practice" });
+  expect(refused.status).toBe(409);
+  expect(await refused.text()).toContain("Practice labels are only for TEST orders.");
+  expect(pbCalls).toEqual([]);
+  expect(await labels()).toEqual([]);
+});
 
 test("two cancels of one label at once void it at Pitney Bowes once and both get the same answer", async () => {
   const { buy } = await liveOrder();
@@ -546,7 +640,7 @@ test("two cancels of one label at once void it at Pitney Bowes once and both get
 
 test("a real order's label is bought from the store's Pitney Bowes postage account and can be cancelled for a refund", async () => {
   const { cookie, boxId, orderPath, buy } = await liveOrder();
-  const prices = await request("POST", `${orderPath}/prices`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM" } });
+  const prices = await request("POST", `${orderPath}/prices`, { cookie, form: { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy" } });
   expect(prices.status).toBe(200);
   const pricePage = await prices.text();
   expect(pricePage).toContain("USPS Ground Advantage: $5.10");
@@ -676,12 +770,305 @@ test("when Pitney Bowes has no record of a lost purchase, the owner decides whet
   pbAnswer = sandbox;
   const ask = await buy();
   expect(ask.status).toBe(409);
-  expect(await ask.text()).toContain('name="buyAgain"');
+  const retryTransactionId = (await ask.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(retryTransactionId).toMatch(/^shp[a-z0-9]{22}$/);
+  expect(retryTransactionId).not.toBe(creates()[0]!.headers.get("x-pb-transactionid"));
   expect(creates()).toHaveLength(1);
-  expect((await buy({ buyAgain: "yes" })).status).toBe(303);
+  expect((await buy({ buyAgain: retryTransactionId! })).status).toBe(303);
   expect(creates()).toHaveLength(2);
   expect(creates()[1]!.headers.get("x-pb-transactionid")).not.toBe(creates()[0]!.headers.get("x-pb-transactionid"));
   expect(await labels()).toHaveLength(1);
+});
+
+test("the lost-answer form checks only, and a stale retry cannot come back from prices as a fresh purchase", async () => {
+  const { buy, cookie, orderPath, boxId } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  const lost = await buy();
+  expect(lost.status).toBe(502);
+  const page = await lost.text();
+  const intent = page.match(/name="intent" value="([a-z]+)"/)?.[1];
+  const check = () => buy(intent ? { intent } : {});
+  const prompt = await check();
+  expect(prompt.status).toBe(409);
+  const review = await prompt.text();
+  const id = review.match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(id).toBeDefined();
+  const priced = await request("POST", `${orderPath}/prices`, { cookie, form: {
+    version: "1", boxId, weightOz: "28", service: "PM", retryTransactionId: id!,
+  } });
+  expect(priced.status).toBe(409);
+  expect(await priced.text()).not.toContain('name="intent" value="buy"');
+  expect(review).not.toContain("See prices");
+  expect(page).toContain("Check last label");
+  expect(intent).toBe("lookup");
+
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 400 }) : sandbox(call);
+  expect((await buy({ retryTransactionId: id!, buyAgain: id! })).status).toBe(422);
+  pbAnswer = sandbox;
+  for (const stale of [await check(), await buy({ retryTransactionId: id! })]) {
+    expect(stale.status).toBe(409);
+    const error = await stale.text();
+    expect(error).toContain("Reopen label options");
+    expect(error).not.toContain('name="intent" value="buy"');
+  }
+  expect(creates()).toHaveLength(2);
+  expect(await labels()).toEqual([]);
+});
+
+test("connecting a different account after approval cannot check or replace the original purchase", async () => {
+  const { buy, cookie } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  const checked = await buy({ intent: "lookup" });
+  const id = (await checked.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(id).toBeDefined();
+  merchant = { ...ownMerchant(), postalReportingNumber: "SANDBOX-OTHER-SHIPPER" };
+  expect((await connect(cookie)).status).toBe(303);
+  const carrierCalls = () => pbCalls.filter(call => call.url.pathname === "/shippingservices/v1/shipments").map(call => call.method);
+  expect(carrierCalls()).toEqual(["POST", "GET"]);
+  pbAnswer = sandbox;
+  const forms: Record<string, string>[] = [{ intent: "lookup" }, { retryTransactionId: id!, buyAgain: id! }];
+  for (const form of forms) {
+    const refused = await buy(form);
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toContain("The last label used a different postage account");
+  }
+  expect(carrierCalls()).toEqual(["POST", "GET"]);
+  expect(await labels()).toEqual([]);
+  merchant = ownMerchant();
+  expect((await connect(cookie)).status).toBe(303);
+  expect((await buy({ retryTransactionId: id!, buyAgain: id! })).status).toBe(303);
+  expect(carrierCalls()).toEqual(["POST", "GET", "GET", "POST"]);
+  expect(creates()[1]!.body.shipmentOptions).toEqual([{ name: "SHIPPER_ID", value: "SANDBOX-OWNER-SHIPPER" }]);
+  expect(await labels()).toHaveLength(1);
+});
+
+test("a legacy unresolved purchase can still be found, but a miss cannot approve replacement", async () => {
+  const { buy } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  const id = (await (await buy({ intent: "lookup" })).text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(id).toBeDefined();
+  // Simulate an unresolved purchase and approval written by an older Worker.
+  await runInDurableObject(shipStore(), (_, state) => { state.storage.sql.exec("UPDATE purchases SET shipper_id = NULL, carrier_origin = NULL"); });
+  pbAnswer = sandbox;
+  const forms: Record<string, string>[] = [{ intent: "lookup" }, { retryTransactionId: id!, buyAgain: id! }];
+  for (const form of forms) {
+    const refused = await buy(form);
+    expect(refused.status).toBe(409);
+    const html = await refused.text();
+    expect(html).toContain("Ship cannot verify which postage account bought the last label");
+    expect(html).not.toContain('name="buyAgain"');
+  }
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+  pbAnswer = call => call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments" ? Response.json(pbLabel("PM")) : sandbox(call);
+  expect((await buy({ intent: "lookup" })).status).toBe(303);
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toHaveLength(1);
+});
+
+test("a failed lookup stays lookup-only, even if the original submission was a buy form", async () => {
+  const { buy, cookie, orderPath, boxId } = await liveOrder();
+  pbAnswer = call => call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: call.method === "POST" ? 504 : 503 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  const form = { version: "1", boxId, weightOz: "28", service: "PM" };
+  for (const posted of [form, { ...form, intent: "buy" }]) {
+    const retry = await request("POST", `${orderPath}/labels`, { cookie, form: posted });
+    expect(retry.status).toBe(503);
+    const checked = await retry.text();
+    expect(checked).toContain('name="intent" value="lookup"');
+    expect(checked).toContain("Check last label");
+    expect(checked).not.toContain("See prices");
+  }
+  const price = await request("POST", `${orderPath}/prices`, { cookie, form });
+  expect(price.status).toBe(409);
+  const rejected = await price.text();
+  expect(rejected).toContain("Reopen order");
+  expect(rejected).not.toContain('name="intent" value="buy"');
+  expect(pbCalls.filter(call => call.url.pathname.endsWith("/rates"))).toEqual([]);
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+
+  // Another tab checks the original and its expressly approved replacement is refused.
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 400 }) : sandbox(call);
+  const approval = await buy({ intent: "lookup" });
+  const id = (await approval.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(approval.status).toBe(409);
+  expect(id).toBeDefined();
+  expect((await buy({ retryTransactionId: id!, buyAgain: id! })).status).toBe(422);
+  pbAnswer = sandbox;
+  const stale = await request("POST", `${orderPath}/labels`, { cookie, form: { ...form, intent: "lookup" } });
+  expect(stale.status).toBe(409);
+  expect(await stale.text()).not.toContain('name="intent" value="buy"');
+  expect(creates()).toHaveLength(2);
+  expect(await labels()).toEqual([]);
+});
+
+test("Check last label recovers the original after the only box is removed", async () => {
+  const { buy, cookie, orderPath, boxId } = await liveOrder();
+  pbAnswer = call => call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: call.method === "POST" ? 504 : 503 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  expect((await request("POST", `/stores/${site}/settings/boxes/${boxId}/remove`, { cookie })).status).toBe(303);
+  const check = () => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", intent: "lookup" } });
+  const unavailable = await check();
+  expect(unavailable.status).toBe(503);
+  const page = await unavailable.text();
+  expect(page).toContain('<button>Check last label</button>');
+  expect(page).not.toContain('name="boxId"');
+  expect(page).not.toContain('name="buyAgain"');
+  pbAnswer = sandbox;
+  const missing = await check();
+  expect(missing.status).toBe(409);
+  const missed = await missing.text();
+  expect(missed).toContain('<button>Check last label</button>');
+  expect(missed).not.toContain('name="buyAgain"');
+  const opened = await request("GET", orderPath, { cookie });
+  expect(opened.status).toBe(200);
+  expect(await opened.text()).toContain('<button>Check last label</button>');
+  pbAnswer = call => call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments" ? Response.json(pbLabel("PM")) : sandbox(call);
+  expect((await check()).status).toBe(303);
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toMatchObject([{ tracking: "SANDBOX-TRACKING-A" }]);
+});
+
+test("a buy-shaped lookup that overlaps an order update cannot render a new purchase", async () => {
+  const { buy } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname.endsWith("/shipments") ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  let entered!: () => void, finish!: () => void;
+  const lookupStarted = new Promise<void>(resolve => { entered = resolve; });
+  const resumeLookup = new Promise<void>(resolve => { finish = resolve; });
+  pbAnswer = async call => {
+    if (call.method === "GET" && call.url.pathname.endsWith("/shipments")) {
+      entered();
+      await resumeLookup;
+    }
+    return sandbox(call);
+  };
+  const checking = buy({ intent: "buy" }).then(async result => ({ status: result.status, page: await result.text() }));
+  try {
+    await Promise.race([lookupStarted, checking.then(() => { throw new Error("expected carrier lookup"); })]);
+    await sendOrder({ test: false, version: 2 });
+  } finally { finish(); }
+  const { status, page } = await checking;
+  expect(status).toBe(409);
+  expect(page).toContain("The order changed in Commerce");
+  expect(page).not.toContain('name="intent" value="buy"');
+  expect(page).not.toContain('name="buyAgain"');
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+});
+
+test("a replacement approval stops if ship-from changed before the form was submitted", async () => {
+  const { buy, cookie, orderPath } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname.endsWith("/shipments") ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  const previous = await buy({ intent: "lookup" });
+  expect(previous.status).toBe(409);
+  const approval = (await previous.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(approval).toBeDefined();
+  const addr = { name: "Demo Store", line1: "8 Example Way", city: "Austin", region: "TX", postalCode: "78701" };
+  expect((await request("POST", `/stores/${site}/settings/ship-from`, { cookie, form: addr })).status).toBe(303);
+  pbAnswer = sandbox;
+  const stale = await buy({ retryTransactionId: approval!, buyAgain: approval! });
+  expect(stale.status).toBe(409);
+  const page = await stale.text();
+  expect(page).toContain("Check last label");
+  expect(page).not.toContain('name="buyAgain"');
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+
+  const checked = await request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", intent: "lookup" } });
+  expect(checked.status).toBe(409);
+  const review = await checked.text();
+  expect(review).toContain("8 Example Way");
+  expect(review).toMatch(/name="weightOz"[^>]*value="28"/);
+  expect(review).toContain('<option value="PM" selected>');
+  const next = review.match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(next).toBeDefined();
+  expect(next).not.toBe(approval);
+  expect((await buy({ retryTransactionId: next!, buyAgain: next! })).status).toBe(303);
+  expect(creates()).toHaveLength(2);
+  expect(creates()[1]!.body.fromAddress.postalCode).toBe("78701");
+});
+
+test.each(["ship-from", "box"])("an approved replacement stops if the %s changes during lookup", async change => {
+  const { buy, cookie, boxId } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  const approval = (await (await buy({ intent: "lookup" })).text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(approval).toBeDefined();
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  pbAnswer = async call => {
+    if (call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments") {
+      enter();
+      await released;
+    }
+    return sandbox(call);
+  };
+  const retry = buy({ retryTransactionId: approval!, buyAgain: approval! }).then(async response => ({ status: response.status, page: await response.text() }));
+  try {
+    await Promise.race([entered, retry.then(() => { throw new Error("expected a carrier lookup"); })]);
+    const saved = change === "box" ? await request("POST", `/stores/${site}/settings/boxes/${boxId}/remove`, { cookie })
+      : await request("POST", `/stores/${site}/settings/ship-from`, { cookie, form: { name: "Demo Store", line1: "8 Example Way", city: "Austin", region: "TX", postalCode: "78701" } });
+    expect(saved.status).toBe(303);
+  } finally { release(); }
+  const { status, page } = await retry;
+  expect(status).toBe(409);
+  expect(page).toContain("Ship-from or box settings changed");
+  expect(page).toContain('<button>Check last label</button>');
+  expect(page).not.toContain('name="buyAgain"');
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+  const purchase = await runInDurableObject(shipStore(), (_, state) => state.storage.sql.exec("SELECT state, retry_id FROM purchases").toArray());
+  expect(purchase).toEqual([{ state: "unknown", retry_id: null }]);
+  if (change === "ship-from") {
+    expect((await buy({ retryTransactionId: approval!, buyAgain: approval! })).status).toBe(409);
+    expect(creates()).toHaveLength(1);
+    const rechecked = await buy({ intent: "lookup" });
+    const fresh = (await rechecked.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+    expect(fresh).toBeDefined();
+    expect(fresh).not.toBe(approval);
+    expect((await buy({ retryTransactionId: fresh!, buyAgain: fresh! })).status).toBe(303);
+    expect(creates()).toHaveLength(2);
+    expect(creates()[1]!.body.fromAddress.postalCode).toBe("78701");
+  }
+});
+
+test("an approved replacement does not use the account that was disconnected during lookup", async () => {
+  const { buy, cookie, boxId } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  const prompt = await buy();
+  const id = (await prompt.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(id).toBeDefined();
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  pbAnswer = async call => {
+    if (call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments") {
+      enter();
+      await released;
+    }
+    return sandbox(call);
+  };
+  const retry = (async () => await shipStore().buyLabel({ orderId: "order:abc", uid: "user-1", fields: {
+    version: 1, boxId, weightOz: 28, service: "PM", retryTransactionId: id!, buyAgain: id!,
+  } }))();
+  try {
+    await Promise.race([entered, retry.then(() => { throw new Error("expected a carrier lookup"); })]);
+    const disconnected = await request("POST", `/stores/${site}/settings/postage/disconnect`, { cookie });
+    expect(disconnected.status).toBe(303);
+  } finally { release(); }
+  expect(await retry).toMatchObject({ ok: false, status: 409, code: "NO_POSTAGE_ACCOUNT" });
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+  const purchase = await runInDurableObject(shipStore(), (_store, state) =>
+    state.storage.sql.exec("SELECT state, retry_id FROM purchases").toArray());
+  expect(purchase).toEqual([{ state: "unknown", retry_id: id }]);
 });
 
 test("a label whose PDF Pitney Bowes could not hand over yet is fetched when opened", async () => {
@@ -803,7 +1190,7 @@ test("a real order gets no label until the owner connects their own Pitney Bowes
   const cookie = await signedIn();
   const boxId = await setUp(cookie);
   const orderPath = `/stores/${site}/orders/${encodeURIComponent("order:abc")}`;
-  const form = { version: "1", boxId, weightOz: "28", service: "PM" };
+  const form = { version: "1", boxId, weightOz: "28", service: "PM", intent: "buy" };
   expect(await (await request("GET", orderPath, { cookie })).text()).toContain("Connect your Pitney Bowes postage account in <a");
   for (const action of ["labels", "prices"]) {
     const refused = await request("POST", `${orderPath}/${action}`, { cookie, form });
@@ -895,7 +1282,12 @@ test("an answer Ship cannot read as a label says which part was missing, in plai
   ];
   for (const [answer, expected] of answers) {
     pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? Response.json(answer) : sandbox(call);
-    const page = await buy({ buyAgain: "yes" });
+    let page = await buy();
+    if (page.status === 409) {
+      const retry = (await page.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+      expect(retry).toBeTruthy();
+      page = await buy({ buyAgain: retry! });
+    }
     expect(page.status).toBe(502);
     const text = await page.text();
     expect(text).toContain(expected);

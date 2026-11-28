@@ -81,11 +81,11 @@ export type SettingsForm = "ship-from" | "reply-to" | "boxes" | "postage";
 export type HistoryLabel = Label & { number: number | null };
 /** Fifty labels, newest first; `next` asks for the fifty after them. */
 export interface LabelHistory { labels: HistoryLabel[]; next: string | null }
-export interface LabelRequest { version: number; boxId: string; weightOz: number; service?: ServiceCode; kind?: "practice"; buyAgain?: true; by?: string }
+export interface LabelRequest { version: number; boxId: string; weightOz: number; service?: ServiceCode; kind?: "practice" | "sandbox"; intent?: "buy"; buyAgain?: string; retryTransactionId?: string; by?: string }
 
 /** A refusal with a message the page can show as it is. */
 export class ShipError extends Error {
-  constructor(readonly code: string, message: string, readonly status = 0) {
+  constructor(readonly code: string, message: string, readonly status = 0, readonly retryTransactionId?: string) {
     super(message);
     this.name = "ShipError";
   }
@@ -259,9 +259,11 @@ export function ship(ctx: PluginContext, siteId: string, key: string, adminPage:
       pass = fresh();
       return call(method, path, body, true);
     }
-    const error = typeof answer === "object" && answer !== null ? (answer as { error?: { code?: unknown; message?: unknown } }).error : undefined;
+    const error = typeof answer === "object" && answer !== null ? (answer as { error?: { code?: unknown; message?: unknown; retryTransactionId?: unknown } }).error : undefined;
     const code = typeof error?.code === "string" ? error.code : "SHIP", message = typeof error?.message === "string" ? error.message : `Ship answered ${response.status}.`;
-    throw new ShipError(code, code === "INTERNAL" ? "Ship could not finish that. Try again." : message, response.status);
+    const retry = error?.retryTransactionId;
+    throw new ShipError(code, code === "INTERNAL" ? "Ship could not finish that. Try again." : message, response.status,
+      code === "CHECK_PITNEY_BOWES" && typeof retry === "string" && /^shp[a-z0-9]{22}$/.test(retry) ? retry : undefined);
   }
   const segment = (id: string) => encodeURIComponent(id);
   return {

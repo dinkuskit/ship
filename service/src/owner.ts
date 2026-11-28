@@ -45,13 +45,30 @@ const ROUTES: PageRoute[] = [
       if (outcome.ok) return see(`${storePath(site)}/orders/${encodeURIComponent(params[0]!)}`);
       const summary = await store.orderSummary(params[0]!);
       if (!summary) return messagePage("Order not found", outcome.message, { href: `${storePath(site)}/orders`, text: "Back to orders" }, 404);
-      return html(orderPage(site, session.email, summary, await store.getSettings(),
-        { error: outcome.message, fields, askBuyAgain: outcome.code === "CHECK_PITNEY_BOWES" }), errorStatus(outcome));
+      const retry = outcome.detail?.retryTransactionId;
+      // A pre-upgrade form without intent may enter lookup, never come back as a new buy.
+      const recovering = fields.intent !== "buy" || fields.retryTransactionId !== undefined || fields.buyAgain !== undefined ||
+        outcome.detail?.labelLookup === true || outcome.code === "PITNEY_BOWES_NO_ANSWER" || outcome.code === "CHECK_PITNEY_BOWES";
+      const changedOrder = recovering && Number(fields.version) !== summary.order.version;
+      const retryTransactionId = outcome.code === "CHECK_PITNEY_BOWES" && !changedOrder && typeof retry === "string" ? retry : undefined;
+      const lookupLabel = !changedOrder && (outcome.code === "PITNEY_BOWES_NO_ANSWER" || outcome.code === "LABEL_PACKAGE_CHANGED" ||
+        recovering && outcome.code === "PITNEY_BOWES_UNAVAILABLE");
+      const reopenLabel = recovering && !retryTransactionId && !lookupLabel ||
+        ["LABEL_FORM_EXPIRED", "LABEL_IN_PROGRESS", "LABEL_ATTEMPT_CHANGED", "TEST_ORDER", "SANDBOX_UNAVAILABLE", "POSTAGE_ACCOUNT_CHANGED", "LABEL_ACCOUNT_UNVERIFIED"].includes(outcome.code);
+      return html(orderPage(site, session.email, summary, await store.getSettings(), {
+        error: changedOrder ? "The order changed in Commerce. Check the updated details before buying a label." : outcome.message,
+        fields, retryTransactionId, reopenLabel, lookupLabel,
+      }), errorStatus(outcome));
     },
   },
   {
     method: "POST", pattern: new RegExp(`^/stores/${SEGMENT}/orders/${SEGMENT}/prices$`),
     handle: async ({ site, session, store, params, fields }) => {
+      // Older open forms offered See prices during a retry. Never turn one of those submissions into a fresh-buy form.
+      if (fields.intent !== "buy" || fields.retryTransactionId !== undefined || fields.buyAgain !== undefined) {
+        const base = `${storePath(site)}/orders/${encodeURIComponent(params[0]!)}`;
+        return messagePage("Reopen label options", "Check the last label before asking for prices or approving another purchase.", { href: base, text: "Reopen order" }, 409);
+      }
       const outcome = await outcomeOf(store.quoteLabel({ orderId: params[0]!, fields }));
       const summary = await store.orderSummary(params[0]!);
       if (!summary) return messagePage("Order not found", "Ship has not received this order.", { href: `${storePath(site)}/orders`, text: "Back to orders" }, 404);
