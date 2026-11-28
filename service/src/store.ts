@@ -345,6 +345,10 @@ export class StoreShipping extends DurableObject<Env> {
   }
 
   async getSettings(): Promise<Settings> {
+    return this.readSettings();
+  }
+
+  private readSettings(): Settings {
     this.checkIsolation();
     const shipFrom = this.meta("ship_from");
     const boxes = this.sql.exec<{ box_id: string; name: string; length_in: number; width_in: number; height_in: number; weight_oz: number }>(
@@ -618,20 +622,29 @@ export class StoreShipping extends DurableObject<Env> {
       if (retry !== undefined && (typeof retry !== "string" || !/^shp[a-z0-9]{22}$/.test(retry))) {
         refuse("INVALID_INPUT", "retryTransactionId must name the purchase Ship checked.");
       }
-      const request = await this.labelRequest(input.orderId, input.fields, true);
+      const checking = input.fields.intent === "lookup";
+      // A carrier lookup uses the saved transaction, not today's package or ship-from address.
+      const request = checking ? undefined : await this.labelRequest(input.orderId, input.fields, true);
+      const order = request?.order ?? this.readOrder(input.orderId);
+      if (!order) refuse("NOT_FOUND", "Ship has not received this order.", 404);
+      if (checking) {
+        this.requireLabelVersion(order, formNumber(input.fields, "version", "Order version", 1, Number.MAX_SAFE_INTEGER));
+        this.refuseIfLabeled(order.orderId, order.version);
+      }
       const practiceRequested = input.fields.kind === "practice";
       const sandboxRequested = input.fields.kind === "sandbox";
-      if (practiceRequested && !request.order.test) refuse("TEST_ORDER", "Practice labels are only for TEST orders.", 409);
-      if (sandboxRequested && !request.order.test) refuse("TEST_ORDER", "Sandbox labels are only for TEST orders.", 409);
-      const checking = input.fields.intent === "lookup";
-      if (request.order.test && !practiceRequested && !testUsesSandbox(this.env)) {
+      if (practiceRequested && !order.test) refuse("TEST_ORDER", "Practice labels are only for TEST orders.", 409);
+      if (sandboxRequested && !order.test) refuse("TEST_ORDER", "Sandbox labels are only for TEST orders.", 409);
+      if (order.test && !practiceRequested && !testUsesSandbox(this.env)) {
         refuse("SANDBOX_UNAVAILABLE", "Sandbox postage is no longer available. Reopen the order to see the available label options.", 409);
       }
-      const practice = request.order.test && practiceRequested;
-      if (practice && (checking || retry !== undefined || input.fields.buyAgain !== undefined)) {
-        refuse("LABEL_ATTEMPT_CHANGED", "This confirmation does not apply to a practice label. Open the order and check the label options again.", 409);
+      if (practiceRequested) {
+        if (!request || retry !== undefined || input.fields.buyAgain !== undefined) {
+          refuse("LABEL_ATTEMPT_CHANGED", "This confirmation does not apply to a practice label. Open the order and check the label options again.", 409);
+        }
+        return this.practiceLabel(request, input.uid);
       }
-      return practice ? this.practiceLabel(request, input.uid) : await this.postageLabel(request, input);
+      return await this.postageLabel(order, input, request);
     } catch (error) {
       return toOutcome(asServiceError(error));
     }
@@ -665,8 +678,7 @@ export class StoreShipping extends DurableObject<Env> {
    * Ship looks the label up before buying again, and never buys a second label
    * for that order without the owner saying so.
    */
-  private async postageLabel(request: Awaited<ReturnType<StoreShipping["labelRequest"]>>, input: { orderId: string; fields: Fields; uid: string }): Promise<Outcome> {
-    const { order } = request;
+  private async postageLabel(order: ShipOrder, input: { fields: Fields; uid: string }, request?: Awaited<ReturnType<StoreShipping["labelRequest"]>>): Promise<Outcome> {
     // Never buys postage for a TEST order outside Pitney Bowes's sandbox.
     if (order.test && !testUsesSandbox(this.env)) refuse("TEST_ORDER", "TEST orders get practice labels while Ship is not on the Pitney Bowes sandbox.", 409);
     const earlier = this.openPurchase(order.orderId);
@@ -730,6 +742,14 @@ export class StoreShipping extends DurableObject<Env> {
           this.sql.exec("UPDATE purchases SET retry_id = ?, retry_version = ? WHERE transaction_id = ?", approval, current.version, id);
           throw new ServiceError(409, "CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", { retryTransactionId: approval });
         }
+        if (!request) return changed();
+        const currentSettings = this.readSettings();
+        const currentBox = currentSettings.boxes.find(box => box.boxId === request.box.boxId);
+        if (JSON.stringify(currentSettings.shipFrom) !== JSON.stringify(request.from) ||
+            JSON.stringify(currentBox) !== JSON.stringify(request.box)) {
+          this.sql.exec("UPDATE purchases SET retry_id = NULL, retry_version = NULL WHERE transaction_id = ?", id);
+          refuse("LABEL_PACKAGE_CHANGED", "Ship-from or box settings changed while Ship checked the last label. Review the current package before approving a replacement.", 409);
+        }
         // Keep the lookup locked through the claim. The replacement is recorded below without yielding.
         const claimed = this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? RETURNING transaction_id", id);
         if (claimed.toArray().length === 0) changed();
@@ -737,6 +757,7 @@ export class StoreShipping extends DurableObject<Env> {
         this.purchaseLookups.delete(id);
       }
     }
+    if (!request) return changed();
     // Nothing above may have changed while Ship waited on Pitney Bowes.
     this.refuseIfLabeled(order.orderId, order.version);
     if (this.openPurchase(order.orderId)) refuse("LABEL_IN_PROGRESS", "Ship is buying a label for this order right now. Reload the page in a moment.", 409);

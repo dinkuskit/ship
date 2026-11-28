@@ -110,6 +110,17 @@ test("the admin routes take only a ship:admin pass, and Commerce's routes still 
   expect((await call("POST", "/v1/admin/labels/nope/print-link")).json.error.code).toBe("NOT_FOUND");
 });
 
+test("an explicit sandbox purchase on a real order never reaches the carrier", async () => {
+  await sendOrder({ test: false });
+  const boxId = await setUp();
+  const refused = await call("POST", "/v1/admin/orders/order%3Aabc/labels", { body: {
+    version: 1, boxId, weightOz: 28, service: "PM", kind: "sandbox", intent: "buy", by: "staff@example.test",
+  } });
+  expect(refused).toMatchObject({ status: 409, json: { error: { code: "TEST_ORDER" } } });
+  expect(pbCalls).toEqual([]);
+  expect((await call("GET", "/v1/labels", { scope: "ship:orders" })).json).toEqual([]);
+});
+
 test("the plugin sees the order, prices it, buys a sandbox label, prints it through a five-minute link, and cancels it", async () => {
   await sendOrder();
   const before = await call("GET", "/v1/admin/orders");

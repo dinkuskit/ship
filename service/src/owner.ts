@@ -51,7 +51,7 @@ const ROUTES: PageRoute[] = [
         outcome.detail?.labelLookup === true || outcome.code === "PITNEY_BOWES_NO_ANSWER" || outcome.code === "CHECK_PITNEY_BOWES";
       const changedOrder = recovering && Number(fields.version) !== summary.order.version;
       const retryTransactionId = outcome.code === "CHECK_PITNEY_BOWES" && !changedOrder && typeof retry === "string" ? retry : undefined;
-      const lookupLabel = !changedOrder && (outcome.code === "PITNEY_BOWES_NO_ANSWER" ||
+      const lookupLabel = !changedOrder && (outcome.code === "PITNEY_BOWES_NO_ANSWER" || outcome.code === "LABEL_PACKAGE_CHANGED" ||
         recovering && outcome.code === "PITNEY_BOWES_UNAVAILABLE");
       const reopenLabel = recovering && !retryTransactionId && !lookupLabel ||
         ["LABEL_FORM_EXPIRED", "LABEL_IN_PROGRESS", "LABEL_ATTEMPT_CHANGED", "TEST_ORDER", "SANDBOX_UNAVAILABLE", "POSTAGE_ACCOUNT_CHANGED", "LABEL_ACCOUNT_UNVERIFIED"].includes(outcome.code);

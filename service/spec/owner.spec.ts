@@ -905,6 +905,69 @@ test("a failed lookup stays lookup-only, even if the original submission was a b
   expect(await labels()).toEqual([]);
 });
 
+test("Check last label recovers the original after the only box is removed", async () => {
+  const { buy, cookie, orderPath, boxId } = await liveOrder();
+  pbAnswer = call => call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: call.method === "POST" ? 504 : 503 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  expect((await request("POST", `/stores/${site}/settings/boxes/${boxId}/remove`, { cookie })).status).toBe(303);
+  const check = () => request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", intent: "lookup" } });
+  const unavailable = await check();
+  expect(unavailable.status).toBe(503);
+  const page = await unavailable.text();
+  expect(page).toContain('<button>Check last label</button>');
+  expect(page).not.toContain('name="boxId"');
+  expect(page).not.toContain('name="buyAgain"');
+  pbAnswer = call => call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments" ? Response.json(pbLabel("PM")) : sandbox(call);
+  expect((await check()).status).toBe(303);
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toMatchObject([{ tracking: "SANDBOX-TRACKING-A" }]);
+});
+
+test.each(["ship-from", "box"])("an approved replacement stops if the %s changes during lookup", async change => {
+  const { buy, cookie, boxId } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  const approval = (await (await buy({ intent: "lookup" })).text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(approval).toBeDefined();
+  let enter!: () => void, release!: () => void;
+  const entered = new Promise<void>(resolve => { enter = resolve; });
+  const released = new Promise<void>(resolve => { release = resolve; });
+  pbAnswer = async call => {
+    if (call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments") {
+      enter();
+      await released;
+    }
+    return sandbox(call);
+  };
+  const retry = buy({ retryTransactionId: approval!, buyAgain: approval! }).then(async response => ({ status: response.status, page: await response.text() }));
+  try {
+    await Promise.race([entered, retry.then(() => { throw new Error("expected a carrier lookup"); })]);
+    const saved = change === "box" ? await request("POST", `/stores/${site}/settings/boxes/${boxId}/remove`, { cookie })
+      : await request("POST", `/stores/${site}/settings/ship-from`, { cookie, form: { name: "Demo Store", line1: "8 Example Way", city: "Austin", region: "TX", postalCode: "78701" } });
+    expect(saved.status).toBe(303);
+  } finally { release(); }
+  const { status, page } = await retry;
+  expect(status).toBe(409);
+  expect(page).toContain("Ship-from or box settings changed");
+  expect(page).toContain('<button>Check last label</button>');
+  expect(page).not.toContain('name="buyAgain"');
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+  const purchase = await runInDurableObject(shipStore(), (_, state) => state.storage.sql.exec("SELECT state, retry_id FROM purchases").toArray());
+  expect(purchase).toEqual([{ state: "unknown", retry_id: null }]);
+  if (change === "ship-from") {
+    expect((await buy({ retryTransactionId: approval!, buyAgain: approval! })).status).toBe(409);
+    expect(creates()).toHaveLength(1);
+    const rechecked = await buy({ intent: "lookup" });
+    const fresh = (await rechecked.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+    expect(fresh).toBeDefined();
+    expect(fresh).not.toBe(approval);
+    expect((await buy({ retryTransactionId: fresh!, buyAgain: fresh! })).status).toBe(303);
+    expect(creates()).toHaveLength(2);
+    expect(creates()[1]!.body.fromAddress.postalCode).toBe("78701");
+  }
+});
+
 test("an approved replacement does not use the account that was disconnected during lookup", async () => {
   const { buy, cookie, boxId } = await liveOrder();
   pbAnswer = call => call.method === "POST" && call.url.pathname === "/shippingservices/v1/shipments" ? new Response(null, { status: 504 }) : sandbox(call);

@@ -81,7 +81,7 @@ export type SettingsForm = "ship-from" | "reply-to" | "boxes" | "postage";
 export type HistoryLabel = Label & { number: number | null };
 /** Fifty labels, newest first; `next` asks for the fifty after them. */
 export interface LabelHistory { labels: HistoryLabel[]; next: string | null }
-export interface LabelRequest { version: number; boxId: string; weightOz: number; service?: ServiceCode; kind?: "practice"; intent?: "buy"; buyAgain?: string; retryTransactionId?: string; by?: string }
+export interface LabelRequest { version: number; boxId: string; weightOz: number; service?: ServiceCode; kind?: "practice" | "sandbox"; intent?: "buy"; buyAgain?: string; retryTransactionId?: string; by?: string }
 
 /** A refusal with a message the page can show as it is. */
 export class ShipError extends Error {

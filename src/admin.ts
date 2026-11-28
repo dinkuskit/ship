@@ -180,6 +180,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
           const prices = await hosted.prices(found.orderId, request);
           return await openOrder(hosted, found.orderId, { prices, typed, historyFrom });
         }
+        if (typed.kind === "sandbox") request.kind = "sandbox";
         if (found.transactionId) {
           if (input.values.buyAgain === true) request.buyAgain = found.transactionId;
           else request.retryTransactionId = found.transactionId;
@@ -187,8 +188,13 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
           request.intent = "buy";
         }
         const label = await hosted.buy(found.orderId, request);
-        const message = label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
-        return await openOrder(hosted, found.orderId, { historyFrom }, { type: "success", message });
+        return await openOrder(hosted, found.orderId, { historyFrom }, current => {
+          const revision = Math.max(found.version, current.version);
+          const message = label.version !== revision
+            ? `Label found for ${label.version < revision ? "an earlier" : "a different"} order revision. Check the label history before shipping. Tracking ${label.tracking}.`
+            : label.practice ? "Practice label made." : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
+          return { type: "success", message };
+        });
       } catch (error) {
         if (error instanceof ShipError) return await refused(hosted, found.orderId, error, typed, historyFrom, undefined, found.version);
         throw error;

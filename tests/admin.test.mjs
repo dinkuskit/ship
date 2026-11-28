@@ -558,7 +558,7 @@ test("opening an order shows the form with the items plus box weight, then price
   assert.equal(service.type, "radio", "every service and its price stay in view, as Shopify and WooCommerce Shipping list rates");
 
   const bought = await h.page({ type: "form_submit", action_id: buy.submit.action_id, values: { boxId: "box_small", weightOz: 30, service: "PM", kind: "sandbox" } });
-  assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", by: "staff@example.test", intent: "buy" });
+  assert.deepEqual(sent[1], { version: 1, boxId: "box_small", weightOz: 30, service: "PM", by: "staff@example.test", intent: "buy", kind: "sandbox" });
   assert.equal(bought.toast.message, "Label bought, $9.35 sandbox. Tracking SANDBOX-TRACKING-A.");
   // The page after buying is read from Ship again; the stand-in still has no label, so the form shows again.
   assert.ok(bought.blocks.some(block => block.type === "form"));
@@ -652,6 +652,28 @@ test("after \"tick Buy a new label\" the form stays on the buy step and the next
   assert.deepEqual(sent[2], { version: 1, boxId: "box_small", weightOz: 31, service: "PM", buyAgain: retryTransactionId, by: "staff@example.test" });
   assert.equal(h.calls.filter(call => call.url.endsWith("/prices")).length, 0);
   assert.match(bought.toast.message, /Label bought, \$9\.35\. Tracking 9400100000000000000003/);
+});
+
+test("a replacement that recovers an earlier revision does not claim a new purchase", async () => {
+  const older = label({ version: 1 });
+  let recovered = false;
+  const h = host({ ship: {
+    "GET /v1/admin/orders/order%3Aabc": () => Response.json({ order: order({ version: 2, labels: recovered ? [older] : [] }), settings }),
+    "POST /v1/admin/orders/order%3Aabc/labels": body => {
+      if (body.buyAgain === retryTransactionId) {
+        recovered = true;
+        return Response.json({ label: older }, { status: 201 });
+      }
+      return Response.json({ error: { code: "CHECK_PITNEY_BOWES", message: "Check the prior label.", retryTransactionId } }, { status: 409 });
+    },
+  } });
+  const draft = { boxId: "box_small", weightOz: 31, service: "PM", kind: "sandbox" };
+  const checked = await h.page({ type: "form_submit", action_id: "buy:2:order%3Aabc:fresh", values: draft });
+  const form = checked.blocks.find(block => block.type === "form");
+  const result = await h.page({ type: "form_submit", action_id: form.submit.action_id, values: { ...draft, buyAgain: true } });
+  assert.match(result.toast?.message, /Label found for an earlier order revision.*label history/);
+  assert.doesNotMatch(result.toast?.message, /Label bought/);
+  assert.match(text(result), /SANDBOX-TRACKING-A/);
 });
 
 test("an invalid replacement label weight returns to prices without carrying purchase approval", async () => {

@@ -159,19 +159,21 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
   const postageButton = sandbox
     ? `<button name="kind" value="sandbox"${disabled}>Make sandbox label</button>`
     : `<button${disabled}>Buy label</button>`;
-  const actions = lookupLabel
-    ? `<button${disabled}>Check last label</button>`
-    : retryTransactionId
-      ? postageButton
-      : order.test && !sandbox
-        ? `<button name="kind" value="practice"${disabled}>Make practice label</button>`
-        : `<button class="secondary" formaction="${base}/prices"${disabled}>See prices</button> ${postageButton}${sandbox
-          ? ` <button class="secondary" name="kind" value="practice"${disabled}>Make practice label instead</button>` : ""}`;
+  const actions = retryTransactionId ? postageButton
+    : order.test && !sandbox
+      ? `<button name="kind" value="practice"${disabled}>Make practice label</button>`
+      : `<button class="secondary" formaction="${base}/prices"${disabled}>See prices</button> ${postageButton}${sandbox
+        ? ` <button class="secondary" name="kind" value="practice"${disabled}>Make practice label instead</button>` : ""}`;
   const form = order.status === "completed"
     ? `<p>This order is Completed in Commerce${order.completed?.tracking ? ` with tracking ${esc(order.completed.tracking)}` : ""}.</p>${
       options.shippedEmail && EMAIL_STATES[options.shippedEmail.state] ? `<p class="muted">${esc(EMAIL_STATES[options.shippedEmail.state])}${order.test ? " TEST orders email you, never the shopper." : ""}</p>` : ""}`
     : label ? `<p>This order has a label. Commerce marks it Completed with the tracking number on its next check.</p>`
     : options.reopenLabel || recovering && order.test && !sandbox ? `<p><a class="label-options" href="${base}">Reopen label options</a></p>`
+    : lookupLabel ? `<form class="label-purchase" method="post" action="${base}/labels">
+      <input type="hidden" name="version" value="${order.version}">
+      <input type="hidden" name="intent" value="lookup">
+      <p>Check whether Pitney Bowes bought the last label. This does not buy postage.</p>
+      <button>Check last label</button> <a class="label-options" href="${base}">Back to label options</a></form>`
     : `<form class="label-purchase" method="post" action="${base}/labels">
       <input type="hidden" name="version" value="${order.version}">
       <label for="boxId">Box</label><select id="boxId" name="boxId" required>${settings.boxes.map(box =>
@@ -181,7 +183,7 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
       <p class="muted">Items ${Math.round(knownWeight * 10) / 10} oz plus the empty box. Change it if your scale says otherwise.</p>
       <label for="service">Service</label><select id="service" name="service">${Object.entries(SERVICES).map(([code, name]) =>
         `<option value="${code}"${code === chosenService ? " selected" : ""}>${esc(name)}${esc(price(code as ServiceCode))}</option>`).join("")}</select>
-      ${retryTransactionId ? `<input type="hidden" name="retryTransactionId" value="${esc(retryTransactionId)}"><label class="replacement"><input type="checkbox" name="buyAgain" value="${esc(retryTransactionId)}"> Buy a new label (Pitney Bowes has no record of the last one)</label>` : `<input type="hidden" name="intent" value="${lookupLabel ? "lookup" : "buy"}">`}
+      ${retryTransactionId ? `<input type="hidden" name="retryTransactionId" value="${esc(retryTransactionId)}"><label class="replacement"><input type="checkbox" name="buyAgain" value="${esc(retryTransactionId)}"> Buy a new label (Pitney Bowes has no record of the last one)</label>` : `<input type="hidden" name="intent" value="buy">`}
       ${!recovering && sandbox ? `<p class="muted">Sandbox prices come from Pitney Bowes's test system. Nothing is charged to any postage account.</p>`
       : !recovering && !order.test ? `<p class="muted">${quotes ? "Prices come from your Pitney Bowes postage account." : "Check prices before buying, or buy at the price Pitney Bowes charges."} Postage is paid from your Pitney Bowes postage account.</p>` : ""}
       ${actions}${recovering ? `<a class="label-options" href="${base}">Back to label options</a>` : ""}</form>`;
@@ -193,7 +195,7 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
     ${error ? `<p class="error">${esc(error)}</p>` : ""}${notices.map(text => `<div class="notice">${text.includes("<a ") ? text : esc(text)}</div>`).join("")}
     <h2>Ship to</h2><p>${addressBlock(order.shipTo)}</p>
     <h2>In the box</h2><table><thead><tr><th>Item</th><th>Qty</th><th>Weight each</th><th>Price paid each</th></tr></thead><tbody>${lines}</tbody></table>
-    ${labels}<h2>${label || order.status === "completed" ? "Shipping" : "Create shipping label"}</h2>${form}`, { site, email });
+    ${labels}<h2>${label || order.status === "completed" ? "Shipping" : lookupLabel ? "Check shipping label" : "Create shipping label"}</h2>${form}`, { site, email });
 }
 
 /** Real orders' labels are paid from the owner's own Pitney Bowes postage account (decision 2a). */
