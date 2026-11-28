@@ -76,7 +76,7 @@ function liveLabel(summary: OrderSummary): Label | undefined {
   return summary.labels.find(label => label.status === "bought" && label.version === summary.order.version);
 }
 
-function addressBlock(address: ShipOrder["shipTo"]): string {
+function addressBlock(address: Omit<ShipOrder["shipTo"], "country">): string {
   return [address.name, address.line1, address.line2, `${address.city}${address.region ? `, ${address.region}` : ""} ${address.postalCode}`]
     .filter(Boolean).map(esc).join("<br>");
 }
@@ -126,7 +126,7 @@ const EMAIL_STATES: Record<string, string> = {
 
 export function orderPage(site: string, email: string, summary: OrderSummary, settings: Settings, options: LabelForm = {}): string {
   const { order } = summary;
-  const { error, fields = {}, quotes, retryTransactionId, lookupLabel } = options;
+  const { error, fields = {}, quotes } = options;
   const label = liveLabel(summary);
   const knownWeight = order.lines.reduce((sum, line) => sum + (line.weightOz ?? 0) * line.quantity, 0);
   const missingWeight = order.lines.some(line => line.weightOz === undefined);
@@ -146,9 +146,14 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
   const blocked = order.status !== "processing" || Boolean(label) || !summary.address.ok || !settings.shipFrom || !settings.boxes.length ||
     (!order.test && (!settings.postageConnected || !settings.postageAccount));
   const base = `/stores/${encodeURIComponent(site)}/orders/${encodeURIComponent(order.orderId)}`;
-  const chosenBox = settings.boxes.find(box => box.boxId === fields.boxId) ?? settings.boxes[0];
-  const weight = fields.weightOz ?? (chosenBox ? String(Math.round((knownWeight + chosenBox.weightOz) * 10) / 10) : "");
-  const chosenService = fields.service && fields.service in SERVICES ? fields.service : "GA";
+  const retryTransactionId = blocked ? undefined : options.retryTransactionId;
+  const lookupLabel = options.lookupLabel || Boolean(summary.pendingPackage && !retryTransactionId);
+  const draft = retryTransactionId ? summary.pendingPackage : undefined;
+  const requestedBox = fields.boxId ?? draft?.boxId;
+  const chosenBox = settings.boxes.find(box => box.boxId === requestedBox) ?? (draft ? undefined : settings.boxes[0]);
+  const weight = chosenBox ? fields.weightOz ?? (draft ? String(draft.weightOz) : String(Math.round((knownWeight + chosenBox.weightOz) * 10) / 10)) : "";
+  const requestedService = fields.service ?? draft?.service;
+  const chosenService = requestedService && requestedService in SERVICES ? requestedService : "GA";
   const price = (code: ServiceCode) => {
     if (!quotes || !(code in quotes)) return "";
     const cents = quotes[code];
@@ -176,7 +181,8 @@ export function orderPage(site: string, email: string, summary: OrderSummary, se
       <button>Check last label</button> <a class="label-options" href="${base}">Back to label options</a></form>`
     : `<form class="label-purchase" method="post" action="${base}/labels">
       <input type="hidden" name="version" value="${order.version}">
-      <label for="boxId">Box</label><select id="boxId" name="boxId" required>${settings.boxes.map(box =>
+      ${retryTransactionId && settings.shipFrom ? `<p><strong>Ship from</strong><br>${settings.shipFrom.company ? `${esc(settings.shipFrom.company)}<br>` : ""}${addressBlock(settings.shipFrom)}</p>` : ""}
+      <label for="boxId">Box</label><select id="boxId" name="boxId" required>${!chosenBox ? '<option value="" selected disabled>Choose a box</option>' : ""}${settings.boxes.map(box =>
         `<option value="${esc(box.boxId)}"${box === chosenBox ? " selected" : ""}>${esc(box.name)}: ${box.lengthIn} × ${box.widthIn} × ${box.heightIn} in, ${box.weightOz} oz empty</option>`).join("")}</select>
       <label for="weightOz">Package weight (oz)</label>
       <input id="weightOz" name="weightOz" type="number" step="0.1" min="0.1" max="${MAX_WEIGHT_OZ}" required value="${esc(weight)}">

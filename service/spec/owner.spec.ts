@@ -917,10 +917,80 @@ test("Check last label recovers the original after the only box is removed", asy
   expect(page).toContain('<button>Check last label</button>');
   expect(page).not.toContain('name="boxId"');
   expect(page).not.toContain('name="buyAgain"');
+  pbAnswer = sandbox;
+  const missing = await check();
+  expect(missing.status).toBe(409);
+  const missed = await missing.text();
+  expect(missed).toContain('<button>Check last label</button>');
+  expect(missed).not.toContain('name="buyAgain"');
+  const opened = await request("GET", orderPath, { cookie });
+  expect(opened.status).toBe(200);
+  expect(await opened.text()).toContain('<button>Check last label</button>');
   pbAnswer = call => call.method === "GET" && call.url.pathname === "/shippingservices/v1/shipments" ? Response.json(pbLabel("PM")) : sandbox(call);
   expect((await check()).status).toBe(303);
   expect(creates()).toHaveLength(1);
   expect(await labels()).toMatchObject([{ tracking: "SANDBOX-TRACKING-A" }]);
+});
+
+test("a buy-shaped lookup that overlaps an order update cannot render a new purchase", async () => {
+  const { buy } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname.endsWith("/shipments") ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  let entered!: () => void, finish!: () => void;
+  const lookupStarted = new Promise<void>(resolve => { entered = resolve; });
+  const resumeLookup = new Promise<void>(resolve => { finish = resolve; });
+  pbAnswer = async call => {
+    if (call.method === "GET" && call.url.pathname.endsWith("/shipments")) {
+      entered();
+      await resumeLookup;
+    }
+    return sandbox(call);
+  };
+  const checking = buy({ intent: "buy" }).then(async result => ({ status: result.status, page: await result.text() }));
+  try {
+    await Promise.race([lookupStarted, checking.then(() => { throw new Error("expected carrier lookup"); })]);
+    await sendOrder({ test: false, version: 2 });
+  } finally { finish(); }
+  const { status, page } = await checking;
+  expect(status).toBe(409);
+  expect(page).toContain("The order changed in Commerce");
+  expect(page).not.toContain('name="intent" value="buy"');
+  expect(page).not.toContain('name="buyAgain"');
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+});
+
+test("a replacement approval stops if ship-from changed before the form was submitted", async () => {
+  const { buy, cookie, orderPath } = await liveOrder();
+  pbAnswer = call => call.method === "POST" && call.url.pathname.endsWith("/shipments") ? new Response(null, { status: 504 }) : sandbox(call);
+  expect((await buy()).status).toBe(502);
+  const previous = await buy({ intent: "lookup" });
+  expect(previous.status).toBe(409);
+  const approval = (await previous.text()).match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(approval).toBeDefined();
+  const addr = { name: "Demo Store", line1: "8 Example Way", city: "Austin", region: "TX", postalCode: "78701" };
+  expect((await request("POST", `/stores/${site}/settings/ship-from`, { cookie, form: addr })).status).toBe(303);
+  pbAnswer = sandbox;
+  const stale = await buy({ retryTransactionId: approval!, buyAgain: approval! });
+  expect(stale.status).toBe(409);
+  const page = await stale.text();
+  expect(page).toContain("Check last label");
+  expect(page).not.toContain('name="buyAgain"');
+  expect(creates()).toHaveLength(1);
+  expect(await labels()).toEqual([]);
+
+  const checked = await request("POST", `${orderPath}/labels`, { cookie, form: { version: "1", intent: "lookup" } });
+  expect(checked.status).toBe(409);
+  const review = await checked.text();
+  expect(review).toContain("8 Example Way");
+  expect(review).toMatch(/name="weightOz"[^>]*value="28"/);
+  expect(review).toContain('<option value="PM" selected>');
+  const next = review.match(/name="buyAgain" value="(shp[a-z0-9]{22})"/)?.[1];
+  expect(next).toBeDefined();
+  expect(next).not.toBe(approval);
+  expect((await buy({ retryTransactionId: next!, buyAgain: next! })).status).toBe(303);
+  expect(creates()).toHaveLength(2);
+  expect(creates()[1]!.body.fromAddress.postalCode).toBe("78701");
 });
 
 test.each(["ship-from", "box"])("an approved replacement stops if the %s changes during lookup", async change => {

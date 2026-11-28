@@ -59,7 +59,7 @@ export interface PostageAccount {
 
 /** A Pitney Bowes purchase Ship sent and has not finished recording. */
 export type PurchaseState = "pending" | "unknown";
-type Purchase = { transaction_id: string; order_id: string; version: number; test: number; service: string; box: string; weight_oz: number; state: PurchaseState; created_by: string; created_at: number; retry_id: string | null; retry_version: number | null; shipper_id: string | null; carrier_origin: string | null };
+type Purchase = { transaction_id: string; order_id: string; version: number; test: number; service: string; box: string; weight_oz: number; state: PurchaseState; created_by: string; created_at: number; retry_id: string | null; retry_version: number | null; retry_ship_from: string | null; shipper_id: string | null; carrier_origin: string | null };
 
 /** Explicit legal state transitions for labels and in-flight Pitney Bowes purchases. */
 export const LABEL_STATE_TRANSITIONS: Readonly<Record<Label["status"], readonly Label["status"][]>> = {
@@ -108,7 +108,10 @@ const EMAILS_PER_ALARM = 25;
 const TRACKING_RETRY_MS = [60_000, 5 * 60_000, 30 * 60_000, 2 * 3_600_000, 12 * 3_600_000];
 /** Waiting "open this order" handoffs kept per store, one per admin; the oldest make room. */
 const ADMIN_OPEN_MAX = 50;
-export interface OrderSummary { order: ShipOrder; labels: Label[]; address: LabelAddress }
+export interface OrderSummary {
+  order: ShipOrder; labels: Label[]; address: LabelAddress;
+  pendingPackage?: { boxId: string; weightOz: number; service: string };
+}
 
 type Fields = Record<string, unknown>;
 
@@ -157,7 +160,7 @@ function historyCursor(value: string): { createdAt: string; labelId: string } {
 const LABEL_COLUMNS = { price_cents: "INTEGER", shipment_id: "TEXT", pdf_url: "TEXT", refund: "TEXT", delivery_state: "TEXT", delivery_at: "TEXT", delivery_note: "TEXT" } as const;
 
 /** Older purchases have neither account provenance nor permission to retry on another account. */
-const PURCHASE_COLUMNS = { test: "INTEGER NOT NULL DEFAULT 0", retry_id: "TEXT", retry_version: "INTEGER", shipper_id: "TEXT", carrier_origin: "TEXT" } as const;
+const PURCHASE_COLUMNS = { test: "INTEGER NOT NULL DEFAULT 0", retry_id: "TEXT", retry_version: "INTEGER", retry_ship_from: "TEXT", shipper_id: "TEXT", carrier_origin: "TEXT" } as const;
 
 function addColumns(sql: SqlStorage, table: "labels" | "purchases", columns: Record<string, string>): void {
   const present = new Set(sql.exec<{ name: string }>(`SELECT name FROM pragma_table_info('${table}')`).toArray().map(row => row.name));
@@ -539,8 +542,13 @@ export class StoreShipping extends DurableObject<Env> {
 
   async orderSummary(orderId: string): Promise<OrderSummary | null> {
     const order = await this.getOrder(orderId);
-    if (order) this.admitStoredOrder(order);
-    return order ? { order, labels: this.labelsFor(orderId), address: labelAddress(order.shipTo) } : null;
+    if (!order) return null;
+    this.admitStoredOrder(order);
+    const pending = this.openPurchase(orderId);
+    return {
+      order, labels: this.labelsFor(orderId), address: labelAddress(order.shipTo),
+      ...(pending ? { pendingPackage: { boxId: (JSON.parse(pending.box) as Box).boxId, weightOz: pending.weight_oz, service: pending.service } } : {}),
+    };
   }
 
   /** Checks a label form against the order's latest version and the store's settings. */
@@ -717,8 +725,7 @@ export class StoreShipping extends DurableObject<Env> {
       try {
         const found = await findPurchase(config, id).catch(error => {
           if (!(error instanceof PitneyError)) throw error;
-          // A buy-shaped form can reach this lookup. Tell the caller what actually failed.
-          throw new ServiceError(503, "PITNEY_BOWES_UNAVAILABLE", error.message, { labelLookup: true });
+          throw new ServiceError(503, "PITNEY_BOWES_UNAVAILABLE", error.message);
         });
         if (found) return ok(await this.finishPurchase(earlier, found), 201);
         // An order update can land during the lookup. Keep the earlier attempt
@@ -735,24 +742,31 @@ export class StoreShipping extends DurableObject<Env> {
         if (earlier.shipper_id === null || earlier.carrier_origin === null) {
           refuse("LABEL_ACCOUNT_UNVERIFIED", "Ship cannot verify which postage account bought the last label. Check the original purchase in Pitney Bowes; Ship will not buy a replacement.", 409);
         }
+        const currentShipFrom = this.meta("ship_from");
         if (!confirmation) {
-          // The carrier's ID survives order edits. An approval is good only for
-          // this order revision and the originating account bound above.
-          const approval = earlier.retry_version === current.version && earlier.retry_id ? earlier.retry_id : newTransactionId();
-          this.sql.exec("UPDATE purchases SET retry_id = ?, retry_version = ? WHERE transaction_id = ?", approval, current.version, id);
+          if (!currentShipFrom) refuse("NO_SHIP_FROM", "Add a ship-from address in Settings before approving a replacement.", 409);
+          // Approval is for the current order and return address, not just the carrier's originating account.
+          const approval = earlier.retry_version === current.version && earlier.retry_ship_from === currentShipFrom && earlier.retry_id
+            ? earlier.retry_id : newTransactionId();
+          this.sql.exec("UPDATE purchases SET retry_id = ?, retry_version = ?, retry_ship_from = ? WHERE transaction_id = ?",
+            approval, current.version, currentShipFrom, id);
           throw new ServiceError(409, "CHECK_PITNEY_BOWES", "Pitney Bowes did not answer the last time Ship bought a label for this order, and it has no record of that label. Tick \"Buy a new label\" to buy one now.", { retryTransactionId: approval });
         }
         if (!request) return changed();
         const currentSettings = this.readSettings();
         const currentBox = currentSettings.boxes.find(box => box.boxId === request.box.boxId);
-        if (JSON.stringify(currentSettings.shipFrom) !== JSON.stringify(request.from) ||
-            JSON.stringify(currentBox) !== JSON.stringify(request.box)) {
-          this.sql.exec("UPDATE purchases SET retry_id = NULL, retry_version = NULL WHERE transaction_id = ?", id);
-          refuse("LABEL_PACKAGE_CHANGED", "Ship-from or box settings changed while Ship checked the last label. Review the current package before approving a replacement.", 409);
+        if (!earlier.retry_ship_from || earlier.retry_ship_from !== JSON.stringify(request.from) ||
+            currentShipFrom !== earlier.retry_ship_from || JSON.stringify(currentBox) !== JSON.stringify(request.box)) {
+          this.sql.exec("UPDATE purchases SET retry_id = NULL, retry_version = NULL, retry_ship_from = NULL WHERE transaction_id = ?", id);
+          refuse("LABEL_PACKAGE_CHANGED", "Ship-from or box settings changed since you reviewed the replacement. Check the last label again before approving a new one.", 409);
         }
         // Keep the lookup locked through the claim. The replacement is recorded below without yielding.
         const claimed = this.sql.exec("DELETE FROM purchases WHERE transaction_id = ? RETURNING transaction_id", id);
         if (claimed.toArray().length === 0) changed();
+      } catch (error) {
+        // A buy-shaped submit can turn into a check. Never send the owner back to a fresh buy form for its errors.
+        const outcome = toOutcome(asServiceError(error));
+        return outcome.ok ? outcome : { ...outcome, detail: { ...outcome.detail, labelLookup: true } };
       } finally {
         this.purchaseLookups.delete(id);
       }
@@ -764,7 +778,7 @@ export class StoreShipping extends DurableObject<Env> {
     const purchase: Purchase = {
       transaction_id: newTransactionId(), order_id: order.orderId, version: order.version, test: order.test ? 1 : 0, service: request.service,
       box: JSON.stringify(request.box), weight_oz: request.weightOz, state: "pending", created_by: input.uid, created_at: Date.now(),
-      retry_id: null, retry_version: null, shipper_id: config.shipperId, carrier_origin: config.origin,
+      retry_id: null, retry_version: null, retry_ship_from: null, shipper_id: config.shipperId, carrier_origin: config.origin,
     };
     this.sql.exec(`INSERT INTO purchases (transaction_id, order_id, version, test, service, box, weight_oz, state, created_by, created_at, shipper_id, carrier_origin)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, purchase.transaction_id, purchase.order_id, purchase.version, purchase.test, purchase.service,
