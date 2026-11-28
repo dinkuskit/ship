@@ -1,7 +1,7 @@
 import type { BlockResponse } from "@emdash-cms/blocks/server";
 import type { PluginContext, SandboxedRouteContext } from "emdash/plugin";
 import {
-  boxDimensions, connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, unconfirmedPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH,
+  boxDimensions, connectPage, finishPage, labelHistoryPage, listPage, pageStart, pendingPage, unconfirmedPage, MAX_WEIGHT_OZ, money, orderPage, problemPage, SERVICES, SETTINGS_PATH, weight,
   type OrderView, type Toast,
 } from "./pages.js";
 import { settingsAdmin } from "./settings.js";
@@ -111,7 +111,12 @@ async function refused(hosted: Ship, orderId: string, error: ShipError, typed: O
     const recheck = error.code === "LABEL_ACCOUNT_CHANGED" || error.code === "LABEL_ACCOUNT_UNVERIFIED" || error.code === "LABEL_ATTEMPT_CHANGED";
     const draft = error.code === "CHECK_PITNEY_BOWES" ? { ...typed, replace: true }
       : recheck && typed?.replace ? { ...typed, replace: false } : typed;
-    return await openOrder(hosted, orderId, { failure: error.message, typed: draft, labelInputError, historyFrom });
+    const current = await hosted.order(orderId);
+    if (typed?.replace && current.order.labelCheckRequired &&
+        ["NETWORK", "PITNEY_BOWES_UNAVAILABLE", "PITNEY_BOWES_REFUSED", "LABEL_IN_PROGRESS", "QUOTE_UNAVAILABLE"].includes(error.code)) {
+      return await showOrder(hosted, current, { failure: error.message, checkLabel: "available", typed: { ...typed, replace: false }, historyFrom });
+    }
+    return await showOrder(hosted, current, { failure: error.message, typed: draft, labelInputError, historyFrom });
   } catch (again) {
     return problemPage(hosted.siteId, "Ship could not be used", again instanceof ShipError ? again.message : error.message);
   }
@@ -189,7 +194,7 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
       } catch (error) {
         if (!(error instanceof ShipError) || error.code === "RECONNECT") throw error;
         const current = await hosted.order(found.orderId);
-        if (current.order.version !== found.version || error.code === "LABEL_ATTEMPT_CHANGED") {
+        if (current.order.version !== found.version || error.code === "LABEL_ATTEMPT_CHANGED" || error.code === "ALREADY_LABELED") {
           return await showOrder(hosted, current, { failure: current.order.version !== found.version ? "The order changed in Commerce. Review the current details." : error.message, historyFrom });
         }
         if (error.code === "CHECK_PITNEY_BOWES") {
@@ -291,11 +296,13 @@ export async function shippingAdmin(route: SandboxedRouteContext, ctx: PluginCon
           return orderPage({ order, settings, siteId: hosted.siteId, ...review, typed, prices, confirmLabel: true,
             failure: "Tick Buy a new label to approve the replacement." });
         }
-        const label = await hosted.buy(found.orderId, request);
+        const { label, disposition } = await hosted.buy(found.orderId, request);
         return await openOrder(hosted, found.orderId, { historyFrom }, latest => {
-          // A replacement can resolve to the original purchase, not newly bought postage.
+          // A carrier lookup can recover a different package even on the same order revision.
           const version = label.version !== latest.version ? latest.version : found.version;
-          const message = label.version !== version ? foundLabelMessage(label, version) : label.practice ? "Practice label made."
+          const message = disposition === "recovered"
+            ? `${foundLabelMessage(label, version)} No new label bought. ${SERVICES[label.service]} · ${label.box.name} · ${weight(label.weightOz)}.`
+            : label.version !== version ? foundLabelMessage(label, version) : label.practice ? "Practice label made."
             : `Label bought${label.priceCents === null ? "" : `, ${money(label.priceCents)}${label.test ? " sandbox" : ""}`}. Tracking ${label.tracking}.`;
           return { type: "success", message };
         });

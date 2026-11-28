@@ -199,7 +199,7 @@ async function quotedPackage() {
   const buy = (quoteId: string, buyAgain?: boolean, extra: Record<string, unknown> = {}) => call("POST", `${labelPath}/labels`, {
     body: { ...form, service: "PM", quoteId, buyAgain, by: "staff@example.test", ...extra },
   });
-  return { prices, buy };
+  return { prices, buy, form };
 }
 
 test("changing the ship-from address invalidates a receipt, including after reverting the address", async () => {
@@ -245,6 +245,37 @@ test("an expired receipt can recover the existing label without another shipment
   expect(await labelEvents()).toMatchObject([{ version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" }]);
 });
 
+test("reviewed postage requires a receipt and reports recovering the original package separately from a new purchase", async () => {
+  const { prices, form } = await quotedPackage();
+  const path = `${labelPath}/labels/reviewed`;
+  const buy = (extra = {}) => call("POST", path, { body: { ...form, service: "PM", by: "staff@example.test", ...extra } });
+  const { quoteId } = (await prices()).json;
+  expect(await buy()).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect(await buy({ quoteId, kind: "practice" })).toMatchObject({ status: 409, json: { error: { code: "QUOTE_CHANGED" } } });
+  expect(carrierShipments()).toEqual([]);
+  shipmentAnswer = method => method === "POST" ? new Response(null, { status: 504 }) : Response.json({
+    shipmentId: "SANDBOX-RECOVERED", parcelTrackingNumber: "SANDBOX-RECOVERED-TRACKING",
+    rates: [{ totalCarrierCharge: 9.35 }],
+    documents: [{ type: "SHIPPING_LABEL", contentType: "URL", fileFormat: "PDF", size: "DOC_8X11", contents: LABEL_URL }],
+  });
+  expect((await buy({ quoteId })).status).toBe(502);
+  const replacement = { ...form, weightOz: 42 };
+  const rates = await call("POST", `${labelPath}/prices`, { body: replacement });
+  const recovered = await buy({ ...replacement, quoteId: rates.json.quoteId, buyAgain: true });
+  expect(recovered).toMatchObject({ status: 200, json: { disposition: "recovered", label: { version: 1, weightOz: 28, service: "PM" } } });
+  expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET"]);
+  expect(await labelEvents()).toMatchObject([{ version: 1, tracking: "SANDBOX-RECOVERED-TRACKING" }]);
+  expect((await call("POST", `/v1/admin/labels/${recovered.json.label.labelId}/cancel`)).status).toBe(200);
+  shipmentAnswer = undefined;
+  const created = await buy({ ...replacement, quoteId: rates.json.quoteId });
+  expect(created).toMatchObject({ status: 201, json: { disposition: "created", label: { version: 1, weightOz: 42 } } });
+  expect(created.json.label.labelId).not.toBe(recovered.json.label.labelId);
+  const calls = carrierShipments().length;
+  expect(await call("POST", `${labelPath}/labels/check`, { body: { version: 1 } }))
+    .toMatchObject({ status: 409, json: { error: { code: "ALREADY_LABELED" } } });
+  expect(carrierShipments()).toHaveLength(calls);
+});
+
 test("check-only recovery never starts postage and can record a prior purchase without its quote or box", async () => {
   const { prices, buy } = await quotedPackage();
   const check = (scope?: string, version = 1) => call("POST", `${labelPath}/labels/check`, { body: { version }, scope });
@@ -268,7 +299,7 @@ test("check-only recovery never starts postage and can record a prior purchase w
   }) : new Response(null, { status: 500 });
   const recovered = await check();
   expect(recovered).toMatchObject({ status: 200, json: { label: { test: true, tracking: "SANDBOX-RECOVERED-TRACKING" } } });
-  expect((await check()).json.label.labelId).toBe(recovered.json.label.labelId);
+  expect(await check()).toMatchObject({ status: 409, json: { error: { code: "ALREADY_LABELED" } } });
   expect(carrierShipments().map(c => c.method)).toEqual(["POST", "GET", "GET"]);
   expect(pbCalls.filter(call => call.path.endsWith("/rates"))).toHaveLength(rates);
   expect(await labelEvents()).toHaveLength(1);

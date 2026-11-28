@@ -146,13 +146,18 @@ export async function quoteAdminLabel(store: Store, orderId: string, input: unkn
   return outcomeOf(store.quoteLabel({ orderId, review: true, fields: labelFields(body(input), ["version", "boxId", "weightOz"]) }));
 }
 
-export async function buyAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {
+export async function buyAdminLabel(store: Store, orderId: string, input: unknown, reviewed = false): Promise<Outcome> {
   const payload = body(input);
   const fields = labelFields(payload, ["version", "boxId", "weightOz", "service", "kind", "reviewedDimensions"]);
   if (Object.hasOwn(payload, "quoteId")) fields.quoteId = typeof payload.quoteId === "string" && /^[0-9a-f-]{36}$/.test(payload.quoteId) ? payload.quoteId : "";
+  if (reviewed && (!fields.quoteId || fields.kind === "practice")) {
+    throw new ServiceError(409, "QUOTE_CHANGED", "Check prices again before buying a label.");
+  }
   if (payload.buyAgain === true) fields.buyAgain = "yes";
   const outcome = await outcomeOf(store.buyLabel({ orderId, fields, uid: actor(payload) }));
-  return outcome.ok ? ok({ label: outcome.body }, 201) : outcome;
+  if (!outcome.ok) return outcome;
+  if (!reviewed) return ok({ label: outcome.body }, 201); // Existing clients get the original status and shape.
+  return ok({ label: outcome.body, disposition: outcome.status === 200 ? "recovered" : "created" }, outcome.status);
 }
 
 export async function checkAdminLabel(store: Store, orderId: string, input: unknown): Promise<Outcome> {

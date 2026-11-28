@@ -164,12 +164,14 @@ export async function tradeStoreKey(ctx: PluginContext, siteId: string, key: str
   return admitPass((body as { access_token?: unknown }).access_token, siteId);
 }
 
+interface LabelPurchase { label: Label; disposition: "created" | "recovered" }
+
 export interface Ship {
   siteId: string;
   orders(): Promise<ShipList>;
   order(orderId: string): Promise<{ order: ShipOrder; settings: ShipSettings }>;
   prices(orderId: string, request: LabelRequest): Promise<LabelQuote>;
-  buy(orderId: string, request: LabelRequest): Promise<Label>;
+  buy(orderId: string, request: LabelRequest): Promise<LabelPurchase>;
   checkLabel(orderId: string, version: number): Promise<Label>;
   cancel(labelId: string): Promise<{ labelId: string; refund: string | null }>;
   printLink(labelId: string): Promise<{ url: string; expiresAt: string }>;
@@ -276,7 +278,22 @@ export function ship(ctx: PluginContext, siteId: string, key: string, adminPage:
     },
     order: id => call("GET", `/v1/admin/orders/${segment(id)}`) as Promise<{ order: ShipOrder; settings: ShipSettings }>,
     prices: (id, request) => call("POST", `/v1/admin/orders/${segment(id)}/prices`, request) as Promise<LabelQuote>,
-    buy: async (id, request) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels`, request)) as { label: Label }).label,
+    buy: async (id, request) => {
+      const path = `/v1/admin/orders/${segment(id)}/labels`;
+      if (request.kind === "practice") {
+        const { label } = (await call("POST", path, request)) as { label: Label };
+        return { label, disposition: "created" };
+      }
+      // An older Worker ignores receipts on /labels. Never retry a reviewed buy there.
+      try {
+        return await call("POST", `${path}/reviewed`, request) as LabelPurchase;
+      } catch (error) {
+        if (error instanceof ShipError && error.status === 404) {
+          throw new ShipError("QUOTE_UNAVAILABLE", "Ship could not use this review. Open in Ship to review and buy a label.");
+        }
+        throw error;
+      }
+    },
     checkLabel: async (id, version) => ((await call("POST", `/v1/admin/orders/${segment(id)}/labels/check`, { version })) as { label: Label }).label,
     cancel: id => call("POST", `/v1/admin/labels/${segment(id)}/cancel`) as Promise<{ labelId: string; refund: string | null }>,
     printLink: id => call("POST", `/v1/admin/labels/${segment(id)}/print-link`) as Promise<{ url: string; expiresAt: string }>,

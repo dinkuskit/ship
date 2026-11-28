@@ -648,9 +648,10 @@ export class StoreShipping extends DurableObject<Env> {
       this.requireOrderVersion(order, formNumber(input.fields, "version", "Order version", 1, Number.MAX_SAFE_INTEGER));
       const earlier = this.openPurchase(order.orderId);
       if (!earlier) {
-        // Without a pending attempt, an older label in history cannot identify this check's result.
-        const kept = summary.labels.find(label => label.version === order.version && label.status === "bought");
-        if (kept) return ok(kept);
+        // A current label need not belong to the attempt this check was for.
+        if (summary.labels.some(label => label.version === order.version && label.status === "bought")) {
+          refuse("ALREADY_LABELED", "This order already has a label. No purchase is waiting to be checked.", 409);
+        }
         refuse("LABEL_ATTEMPT_CHANGED", "No label purchase is waiting to be checked. Open the order to see its current label options.", 409);
       }
       const test = order.test;
@@ -794,7 +795,7 @@ export class StoreShipping extends DurableObject<Env> {
       try {
         // Rates matter only if we might buy again, not for postage already bought.
         const found = await findPurchase(config, earlier.transaction_id);
-        if (found) return ok(await this.finishPurchase(earlier, found), 201);
+        if (found) return ok(await this.finishPurchase(earlier, found));
         const current = this.readOrder(order.orderId);
         if (!current) refuse("NOT_FOUND", "Ship has not received this order.", 404);
         this.requireLabelVersion(current, order.version);
